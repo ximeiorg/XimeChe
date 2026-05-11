@@ -1,0 +1,14 @@
+[package]
+name = "xime-wayland"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32.12", features = ["client", "unstable"] }
+wayland-backend = "0.3"
+wayland-scanner = "0.31"
+thiserror.workspace = true
+nix = { version = "0.29", features = ["fs"] }

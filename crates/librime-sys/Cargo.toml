@@ -1,0 +1,13 @@
+[package]
+name = "librime-sys"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[lib]
+name = "librime_sys"
+
+[build-dependencies]
+bindgen = "0.70"
+pkg-config = "0.3"

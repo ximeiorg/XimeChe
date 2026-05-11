@@ -1,0 +1,10 @@
+[package]
+name = "xime-xkb"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+xkbcommon = { version = "0.8", features = ["wayland"] }
+thiserror.workspace = true
