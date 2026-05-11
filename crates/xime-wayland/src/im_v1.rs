@@ -15,10 +15,8 @@ use wayland_client::{
     Connection, EventQueue,
 };
 use std::sync::{Arc, Mutex};
-use std::os::unix::io::OwnedFd;
+use std::os::unix::io::{OwnedFd, AsFd, FromRawFd};
 use std::fs::File;
-use std::os::unix::fs::OpenOptionsExt;
-use std::io::Write;
 
 pub mod __interfaces {
     use wayland_client::protocol::__interfaces::*;
@@ -109,7 +107,7 @@ impl Dispatch<ZwpInputMethodV1, InputMethodV1Data> for InputMethodV1Data {
                     *ctx = Some(id);
                 }
             }
-            ImV1Event::Deactivate { context } => {
+            ImV1Event::Deactivate { context: _ } => {
                 state.state = InputMethodV1State::Inactive;
                 if let Ok(mut ctx) = state.context.lock() {
                     *ctx = None;
@@ -118,7 +116,6 @@ impl Dispatch<ZwpInputMethodV1, InputMethodV1Data> for InputMethodV1Data {
                     *kb = None;
                 }
             }
-            _ => {}
         }
     }
 }
@@ -478,7 +475,7 @@ impl WaylandConnectionV1 {
         
         let surface = compositor.create_surface(&qh, self.state.clone());
         
-        let panel_surface = input_panel.get_input_panel_surface(&qh, self.state.clone(), &surface);
+        let panel_surface = input_panel.get_input_panel_surface(&surface, &qh, self.state.clone());
         panel_surface.set_overlay_panel();
         
         self.candidate_surface = Some(surface);
@@ -501,7 +498,7 @@ impl WaylandConnectionV1 {
         let qh = self.event_queue.handle();
         
         let pool = self.create_shm_pool(shm, width * height * 4)?;
-        let buffer = pool.create_buffer(&qh, self.state.clone(), 0, width as i32, height as i32, width as i32, wl_shm::Format::Argb8888);
+        let buffer = pool.create_buffer(width as i32, height as i32, 0, width as i32, wl_shm::Format::Argb8888, &qh, self.state.clone());
         
         surface.attach(Some(&buffer), 0, 0);
         surface.commit();
@@ -527,28 +524,19 @@ impl WaylandConnectionV1 {
         
         let fd = Self::create_anonymous_file(size)?;
         
-        let pool = shm.create_pool(&qh, self.state.clone(), fd, size as i32);
+        let pool = shm.create_pool(fd.as_fd(), size as i32, &qh, self.state.clone());
         Ok(pool)
     }
     
     fn create_anonymous_file(size: u32) -> Result<OwnedFd> {
-        let path = std::env::temp_dir().join("xime-shm-XXXXXX");
+        let fd = nix::fcntl::open(
+            &std::env::temp_dir(),
+            nix::fcntl::OFlag::O_TMPFILE | nix::fcntl::OFlag::O_RDWR | nix::fcntl::OFlag::O_CLOEXEC,
+            nix::sys::stat::Mode::empty(),
+        ).map_err(|e| Error::Io(std::io::Error::from_raw_os_error(e as i32)))?;
         
-        let file = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create_new(true)
-            .custom_flags(nix::fcntl::OFlag::O_TMPFILE.bits() | nix::fcntl::OFlag::O_CLOEXEC.bits())
-            .open(std::env::temp_dir())
-            .map_err(|e| {
-                std::fs::File::create(&path)
-                    .and_then(|f| {
-                        std::fs::remove_file(&path)?;
-                        Ok(f)
-                    })
-                    .map_err(|_| Error::Io(e))
-            })?;
-        
+        let owned_fd = unsafe { OwnedFd::from_raw_fd(fd) };
+        let file = std::fs::File::from(owned_fd);
         file.set_len(size as u64)?;
         
         Ok(file.into())

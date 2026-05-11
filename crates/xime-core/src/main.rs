@@ -1,14 +1,13 @@
 use librime::{traits::Traits, session::Session};
 use xime_wayland::{
     WaylandConnection, WaylandConnectionV1, 
-    InputMethodState, InputMethodV1State, KeyEvent,
+    InputMethodState, InputMethodV1State,
     ErrorV2, ErrorV1,
 };
 use xime_xkb::XkbContext;
 use xime_ui::CandidateList;
 use std::env;
 use std::path::PathBuf;
-use std::os::unix::io::OwnedFd;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -190,6 +189,7 @@ impl Xime {
                 let mut xkb = XkbContext::new()?;
                 let mut active = false;
                 let mut keymap_set = false;
+                let mut candidate_window_visible = false;
                 
                 loop {
                     conn.dispatch_events()?;
@@ -244,6 +244,8 @@ impl Xime {
                     } else if state.state == InputMethodV1State::Inactive && active {
                         active = false;
                         self.candidates.clear();
+                        conn.hide_candidate_window();
+                        candidate_window_visible = false;
                         eprintln!("DEBUG: Input method deactivated (v1)");
                     }
                     
@@ -261,6 +263,16 @@ impl Xime {
                             self.candidates.set_candidates(c, menu.select_keys.as_deref());
                             eprintln!("DEBUG: Candidates: {:?}", menu.candidates.iter().map(|x| x.text).collect::<Vec<_>>());
                             
+                            // Show candidate window when candidates appear
+                            if !candidate_window_visible {
+                                if let Err(e) = conn.show_candidate_window(300, 100) {
+                                    eprintln!("DEBUG: Failed to show candidate window: {}", e);
+                                } else {
+                                    candidate_window_visible = true;
+                                    eprintln!("DEBUG: Candidate window shown");
+                                }
+                            }
+                            
                             if let Some(p) = ctx.composition().preedit {
                                 conn.set_preedit(p, p.len() as i32);
                                 eprintln!("DEBUG: Preedit: {}", p);
@@ -268,6 +280,11 @@ impl Xime {
                         } else {
                             self.candidates.clear();
                             conn.clear_preedit();
+                            if candidate_window_visible {
+                                conn.hide_candidate_window();
+                                candidate_window_visible = false;
+                                eprintln!("DEBUG: Candidate window hidden");
+                            }
                         }
                     }
                 }
