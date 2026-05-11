@@ -1,0 +1,557 @@
+use wayland_client;
+use wayland_client::protocol::*;
+use wayland_client::{Dispatch, Proxy, QueueHandle};
+use wayland_client::globals::GlobalListContents;
+use wayland_client::protocol::wl_registry::WlRegistry;
+use wayland_client::protocol::wl_seat::WlSeat;
+use wayland_client::protocol::wl_keyboard::WlKeyboard;
+use wayland_client::protocol::wl_compositor::WlCompositor;
+use wayland_client::protocol::wl_shm::WlShm;
+use wayland_client::protocol::wl_surface::WlSurface;
+use wayland_client::protocol::wl_buffer::WlBuffer;
+use wayland_client::protocol::wl_shm_pool::WlShmPool;
+use wayland_client::{
+    globals::registry_queue_init,
+    Connection, EventQueue,
+};
+use std::sync::{Arc, Mutex};
+use std::os::unix::io::OwnedFd;
+use std::fs::File;
+use std::os::unix::fs::OpenOptionsExt;
+use std::io::Write;
+
+pub mod __interfaces {
+    use wayland_client::protocol::__interfaces::*;
+    wayland_scanner::generate_interfaces!("protocols/input-method-unstable-v1.xml");
+}
+
+use self::__interfaces::*;
+
+wayland_scanner::generate_client_code!("protocols/input-method-unstable-v1.xml");
+
+pub use zwp_input_method_v1::ZwpInputMethodV1;
+pub use zwp_input_method_v1::Event as ImV1Event;
+pub use zwp_input_method_context_v1::ZwpInputMethodContextV1;
+pub use zwp_input_method_context_v1::Event as ContextEvent;
+pub use zwp_input_panel_v1::ZwpInputPanelV1;
+pub use zwp_input_panel_surface_v1::ZwpInputPanelSurfaceV1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InputMethodV1State {
+    #[default]
+    Inactive,
+    Active,
+}
+
+#[derive(Debug, Clone)]
+pub struct KeyEvent {
+    pub serial: u32,
+    pub time: u32,
+    pub key: u32,
+    pub pressed: bool,
+}
+
+#[derive(Clone, Default)]
+pub struct InputMethodV1Data {
+    pub serial: u32,
+    pub state: InputMethodV1State,
+    pub surrounding_text: Option<String>,
+    pub surrounding_cursor: u32,
+    pub surrounding_anchor: u32,
+    pub content_hint: u32,
+    pub content_purpose: u32,
+    pub context: Arc<Mutex<Option<ZwpInputMethodContextV1>>>,
+    pub keyboard: Arc<Mutex<Option<WlKeyboard>>>,
+    pub key_events: Arc<Mutex<Vec<KeyEvent>>>,
+    pub modifiers: Arc<Mutex<(u32, u32, u32, u32)>>,
+    pub keymap_pending: Arc<Mutex<Option<(OwnedFd, usize)>>>,
+}
+
+impl Dispatch<WlRegistry, GlobalListContents> for InputMethodV1Data {
+    fn event(
+        _state: &mut InputMethodV1Data,
+        _proxy: &WlRegistry,
+        _event: <WlRegistry as Proxy>::Event,
+        _data: &GlobalListContents,
+        _conn: &wayland_client::Connection,
+        _qhandle: &QueueHandle<InputMethodV1Data>,
+    ) {}
+}
+
+impl Dispatch<WlSeat, InputMethodV1Data> for InputMethodV1Data {
+    fn event(
+        _state: &mut InputMethodV1Data,
+        _proxy: &WlSeat,
+        _event: <WlSeat as Proxy>::Event,
+        _data: &InputMethodV1Data,
+        _conn: &wayland_client::Connection,
+        _qhandle: &QueueHandle<InputMethodV1Data>,
+    ) {}
+}
+
+impl Dispatch<ZwpInputMethodV1, InputMethodV1Data> for InputMethodV1Data {
+    fn event(
+        state: &mut InputMethodV1Data,
+        _proxy: &ZwpInputMethodV1,
+        event: <ZwpInputMethodV1 as Proxy>::Event,
+        _data: &InputMethodV1Data,
+        _conn: &wayland_client::Connection,
+        qhandle: &QueueHandle<InputMethodV1Data>,
+    ) {
+        match event {
+            ImV1Event::Activate { id } => {
+                state.state = InputMethodV1State::Active;
+                let keyboard = id.grab_keyboard(qhandle, state.clone());
+                if let Ok(mut kb) = state.keyboard.lock() {
+                    *kb = Some(keyboard);
+                }
+                if let Ok(mut ctx) = state.context.lock() {
+                    *ctx = Some(id);
+                }
+            }
+            ImV1Event::Deactivate { context } => {
+                state.state = InputMethodV1State::Inactive;
+                if let Ok(mut ctx) = state.context.lock() {
+                    *ctx = None;
+                }
+                if let Ok(mut kb) = state.keyboard.lock() {
+                    *kb = None;
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<ZwpInputMethodContextV1, InputMethodV1Data> for InputMethodV1Data {
+    fn event(
+        state: &mut InputMethodV1Data,
+        _proxy: &ZwpInputMethodContextV1,
+        event: <ZwpInputMethodContextV1 as Proxy>::Event,
+        _data: &InputMethodV1Data,
+        _conn: &wayland_client::Connection,
+        _qhandle: &QueueHandle<InputMethodV1Data>,
+    ) {
+        match event {
+            ContextEvent::SurroundingText { text, cursor, anchor } => {
+                state.surrounding_text = Some(text);
+                state.surrounding_cursor = cursor;
+                state.surrounding_anchor = anchor;
+            }
+            ContextEvent::ContentType { hint, purpose } => {
+                state.content_hint = hint;
+                state.content_purpose = purpose;
+            }
+            ContextEvent::CommitState { serial } => {
+                state.serial = serial;
+            }
+            ContextEvent::Reset => {
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<ZwpInputPanelV1, InputMethodV1Data> for InputMethodV1Data {
+    fn event(
+        _state: &mut InputMethodV1Data,
+        _proxy: &ZwpInputPanelV1,
+        _event: <ZwpInputPanelV1 as Proxy>::Event,
+        _data: &InputMethodV1Data,
+        _conn: &wayland_client::Connection,
+        _qhandle: &QueueHandle<InputMethodV1Data>,
+    ) {}
+}
+
+impl Dispatch<WlKeyboard, InputMethodV1Data> for InputMethodV1Data {
+    fn event(
+        state: &mut InputMethodV1Data,
+        _proxy: &WlKeyboard,
+        event: <WlKeyboard as Proxy>::Event,
+        _data: &InputMethodV1Data,
+        _conn: &wayland_client::Connection,
+        _qhandle: &QueueHandle<InputMethodV1Data>,
+    ) {
+        match event {
+            wl_keyboard::Event::Keymap { format: _, fd, size } => {
+                // Store keymap fd for xkb processing
+                if let Ok(mut keymap) = state.keymap_pending.lock() {
+                    *keymap = Some((fd, size as usize));
+                }
+            }
+            wl_keyboard::Event::Key { serial, time, key, state: _key_state } => {
+                // Key events come as pressed or released
+                if let Ok(mut events) = state.key_events.lock() {
+                    events.push(KeyEvent {
+                        serial,
+                        time,
+                        key,
+                        pressed: true,
+                    });
+                }
+            }
+            wl_keyboard::Event::Modifiers { serial: _, mods_depressed, mods_latched, mods_locked, group } => {
+                if let Ok(mut mods) = state.modifiers.lock() {
+                    *mods = (mods_depressed, mods_latched, mods_locked, group);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<WlCompositor, InputMethodV1Data> for InputMethodV1Data {
+    fn event(
+        _state: &mut InputMethodV1Data,
+        _proxy: &WlCompositor,
+        _event: <WlCompositor as Proxy>::Event,
+        _data: &InputMethodV1Data,
+        _conn: &wayland_client::Connection,
+        _qhandle: &QueueHandle<InputMethodV1Data>,
+    ) {}
+}
+
+impl Dispatch<WlShm, InputMethodV1Data> for InputMethodV1Data {
+    fn event(
+        _state: &mut InputMethodV1Data,
+        _proxy: &WlShm,
+        _event: <WlShm as Proxy>::Event,
+        _data: &InputMethodV1Data,
+        _conn: &wayland_client::Connection,
+        _qhandle: &QueueHandle<InputMethodV1Data>,
+    ) {}
+}
+
+impl Dispatch<WlSurface, InputMethodV1Data> for InputMethodV1Data {
+    fn event(
+        state: &mut InputMethodV1Data,
+        _proxy: &WlSurface,
+        event: <WlSurface as Proxy>::Event,
+        _data: &InputMethodV1Data,
+        _conn: &wayland_client::Connection,
+        _qhandle: &QueueHandle<InputMethodV1Data>,
+    ) {
+        match event {
+            wl_surface::Event::Enter { output } => {
+                eprintln!("DEBUG: Surface enter output");
+            }
+            wl_surface::Event::Leave { output } => {
+                eprintln!("DEBUG: Surface leave output");
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<WlBuffer, InputMethodV1Data> for InputMethodV1Data {
+    fn event(
+        _state: &mut InputMethodV1Data,
+        _proxy: &WlBuffer,
+        _event: <WlBuffer as Proxy>::Event,
+        _data: &InputMethodV1Data,
+        _conn: &wayland_client::Connection,
+        _qhandle: &QueueHandle<InputMethodV1Data>,
+    ) {}
+}
+
+impl Dispatch<WlShmPool, InputMethodV1Data> for InputMethodV1Data {
+    fn event(
+        _state: &mut InputMethodV1Data,
+        _proxy: &WlShmPool,
+        _event: <WlShmPool as Proxy>::Event,
+        _data: &InputMethodV1Data,
+        _conn: &wayland_client::Connection,
+        _qhandle: &QueueHandle<InputMethodV1Data>,
+    ) {}
+}
+
+impl Dispatch<ZwpInputPanelSurfaceV1, InputMethodV1Data> for InputMethodV1Data {
+    fn event(
+        _state: &mut InputMethodV1Data,
+        _proxy: &ZwpInputPanelSurfaceV1,
+        _event: <ZwpInputPanelSurfaceV1 as Proxy>::Event,
+        _data: &InputMethodV1Data,
+        _conn: &wayland_client::Connection,
+        _qhandle: &QueueHandle<InputMethodV1Data>,
+    ) {}
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("Failed to connect to Wayland display: {0}")]
+    ConnectFailed(String),
+
+    #[error("Failed to get global: {0}")]
+    GlobalNotFound(String),
+
+    #[error("Failed to bind interface: {0}")]
+    BindFailed(String),
+
+    #[error("No input method available")]
+    NoInputMethod,
+
+    #[error("No input panel available")]
+    NoInputPanel,
+
+    #[error("No compositor available")]
+    NoCompositor,
+
+    #[error("No SHM available")]
+    NoShm,
+
+    #[error("No seat available")]
+    NoSeat,
+
+    #[error("No active context")]
+    NoContext,
+
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
+
+pub struct WaylandConnectionV1 {
+    connection: Connection,
+    event_queue: EventQueue<InputMethodV1Data>,
+    state: InputMethodV1Data,
+    seat: Option<WlSeat>,
+    input_method: Option<ZwpInputMethodV1>,
+    input_panel: Option<ZwpInputPanelV1>,
+    compositor: Option<WlCompositor>,
+    shm: Option<WlShm>,
+    has_v1_global: bool,
+    panel_surface: Option<ZwpInputPanelSurfaceV1>,
+    candidate_surface: Option<WlSurface>,
+}
+
+impl WaylandConnectionV1 {
+    pub fn connect() -> Result<Self> {
+        let connection = Connection::connect_to_env()
+            .map_err(|e| Error::ConnectFailed(e.to_string()))?;
+
+        Self::init_with_connection(connection)
+    }
+    
+    pub fn init_with_connection(connection: Connection) -> Result<Self> {
+        let (globals, event_queue) = registry_queue_init(&connection)
+            .map_err(|e| Error::ConnectFailed(e.to_string()))?;
+
+        let qh = event_queue.handle();
+        let state = InputMethodV1Data::default();
+
+        let seat: Option<WlSeat> = globals
+            .bind(&qh, 1..=8, state.clone())
+            .ok();
+
+        let compositor: Option<WlCompositor> = globals
+            .bind(&qh, 1..=4, state.clone())
+            .ok();
+
+        let shm: Option<WlShm> = globals
+            .bind(&qh, 1..=1, state.clone())
+            .ok();
+
+        let input_method: Option<ZwpInputMethodV1> = globals
+            .bind(&qh, 1..=1, state.clone())
+            .ok();
+
+        let input_panel: Option<ZwpInputPanelV1> = globals
+            .bind(&qh, 1..=1, state.clone())
+            .ok();
+
+        // Check if v1 global exists by checking bind result
+        let has_v1_global = input_method.is_some() || input_panel.is_some();
+
+        Ok(Self {
+            connection,
+            event_queue,
+            state,
+            seat,
+            input_method,
+            input_panel,
+            compositor,
+            shm,
+            has_v1_global,
+            panel_surface: None,
+            candidate_surface: None,
+        })
+    }
+
+    pub fn has_zwp_input_method_v1_global(&self) -> bool {
+        self.has_v1_global
+    }
+
+    pub fn get_seat(&self) -> Result<&WlSeat> {
+        self.seat.as_ref().ok_or(Error::NoSeat)
+    }
+
+    pub fn get_input_method(&self) -> Result<&ZwpInputMethodV1> {
+        self.input_method.as_ref().ok_or(Error::NoInputMethod)
+    }
+
+    pub fn dispatch_events(&mut self) -> Result<()> {
+        // Blocking dispatch - wait for at least one event
+        self.event_queue.roundtrip(&mut self.state)
+            .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+        Ok(())
+    }
+    
+    pub fn dispatch_pending(&mut self) -> Result<()> {
+        self.event_queue.dispatch_pending(&mut self.state)
+            .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+        Ok(())
+    }
+
+    pub fn sync_roundtrip(&mut self) -> Result<()> {
+        self.event_queue.roundtrip(&mut self.state)
+            .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+        Ok(())
+    }
+
+    pub fn get_state(&self) -> &InputMethodV1Data {
+        &self.state
+    }
+
+    pub fn pop_key_events(&self) -> Vec<KeyEvent> {
+        if let Ok(mut events) = self.state.key_events.lock() {
+            let result = events.clone();
+            events.clear();
+            result
+        } else {
+            Vec::new()
+        }
+    }
+
+    pub fn get_modifiers(&self) -> (u32, u32, u32, u32) {
+        if let Ok(mods) = self.state.modifiers.lock() {
+            *mods
+        } else {
+            (0, 0, 0, 0)
+        }
+    }
+
+    pub fn get_keymap_pending(&self) -> Option<(OwnedFd, usize)> {
+        if let Ok(mut keymap) = self.state.keymap_pending.lock() {
+            keymap.take()
+        } else {
+            None
+        }
+    }
+
+    pub fn connection(&self) -> &Connection {
+        &self.connection
+    }
+
+    pub fn event_queue(&mut self) -> &mut EventQueue<InputMethodV1Data> {
+        &mut self.event_queue
+    }
+    
+    pub fn get_context(&self) -> Option<ZwpInputMethodContextV1> {
+        self.state.context.lock().ok().and_then(|ctx| ctx.clone())
+    }
+    
+    pub fn commit_string(&self, text: &str) {
+        if let Some(ctx) = self.get_context() {
+            ctx.commit_string(self.state.serial, text.to_string());
+        }
+    }
+    
+    pub fn set_preedit(&self, text: &str, cursor: i32) {
+        if let Some(ctx) = self.get_context() {
+            ctx.preedit_cursor(cursor);
+            ctx.preedit_string(self.state.serial, text.to_string(), "".to_string());
+        }
+    }
+    
+    pub fn clear_preedit(&self) {
+        if let Some(ctx) = self.get_context() {
+            ctx.preedit_string(self.state.serial, "".to_string(), "".to_string());
+        }
+    }
+    
+    pub fn create_candidate_surface(&mut self) -> Result<()> {
+        let compositor = self.compositor.as_ref().ok_or(Error::NoCompositor)?;
+        let input_panel = self.input_panel.as_ref().ok_or(Error::NoInputPanel)?;
+        
+        let qh = self.event_queue.handle();
+        
+        let surface = compositor.create_surface(&qh, self.state.clone());
+        
+        let panel_surface = input_panel.get_input_panel_surface(&qh, self.state.clone(), &surface);
+        panel_surface.set_overlay_panel();
+        
+        self.candidate_surface = Some(surface);
+        self.panel_surface = Some(panel_surface);
+        
+        self.sync_roundtrip()?;
+        
+        eprintln!("DEBUG: Created candidate panel surface with overlay_panel");
+        Ok(())
+    }
+    
+    pub fn show_candidate_window(&mut self, width: u32, height: u32) -> Result<()> {
+        if self.candidate_surface.is_none() {
+            self.create_candidate_surface()?;
+        }
+        
+        let shm = self.shm.as_ref().ok_or(Error::NoShm)?;
+        let surface = self.candidate_surface.as_ref().unwrap();
+        
+        let qh = self.event_queue.handle();
+        
+        let pool = self.create_shm_pool(shm, width * height * 4)?;
+        let buffer = pool.create_buffer(&qh, self.state.clone(), 0, width as i32, height as i32, width as i32, wl_shm::Format::Argb8888);
+        
+        surface.attach(Some(&buffer), 0, 0);
+        surface.commit();
+        
+        self.sync_roundtrip()?;
+        
+        eprintln!("DEBUG: Showed candidate window {}x{}", width, height);
+        Ok(())
+    }
+    
+    pub fn hide_candidate_window(&mut self) {
+        if let Some(surface) = &self.candidate_surface {
+            surface.attach(None::<&WlBuffer>, 0, 0);
+            surface.commit();
+            if let Ok(_) = self.sync_roundtrip() {
+                eprintln!("DEBUG: Hidden candidate window");
+            }
+        }
+    }
+    
+    fn create_shm_pool(&self, shm: &WlShm, size: u32) -> Result<WlShmPool> {
+        let qh = self.event_queue.handle();
+        
+        let fd = Self::create_anonymous_file(size)?;
+        
+        let pool = shm.create_pool(&qh, self.state.clone(), fd, size as i32);
+        Ok(pool)
+    }
+    
+    fn create_anonymous_file(size: u32) -> Result<OwnedFd> {
+        let path = std::env::temp_dir().join("xime-shm-XXXXXX");
+        
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .custom_flags(nix::fcntl::OFlag::O_TMPFILE.bits() | nix::fcntl::OFlag::O_CLOEXEC.bits())
+            .open(std::env::temp_dir())
+            .map_err(|e| {
+                std::fs::File::create(&path)
+                    .and_then(|f| {
+                        std::fs::remove_file(&path)?;
+                        Ok(f)
+                    })
+                    .map_err(|_| Error::Io(e))
+            })?;
+        
+        file.set_len(size as u64)?;
+        
+        Ok(file.into())
+    }
+}
+

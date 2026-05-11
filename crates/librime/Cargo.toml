@@ -1,0 +1,11 @@
+[package]
+name = "librime"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+librime-sys.workspace = true
+thiserror.workspace = true
+once_cell.workspace = true

@@ -1,0 +1,10 @@
+[package]
+name = "xime-ui"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+slint = "1.5"
+thiserror.workspace = true

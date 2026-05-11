@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="input_method_unstable_v2">
+  <copyright>
+    Copyright © 2008-2011 Kristian Høgsberg
+    Copyright © 2010-2011 Intel Corporation
+    Copyright © 2012-2013 Collabora, Ltd.
+    Copyright © 2019 Daiki Ueno
+
+    Permission is hereby granted, free of charge, to any person obtaining a
+    copy of this software and associated documentation files (the "Software"),
+    to deal in the Software without restriction, including without limitation
+    the rights to use, copy, modify, merge, publish, distribute, sublicense,
+    and/or sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice (including the next
+    paragraph) shall be included in all copies or substantial portions of the
+    Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+    THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+    DEALINGS IN THE SOFTWARE.
+  </copyright>
+
+  <interface name="zwp_input_method_v2" version="1">
+    <description summary="input method">
+      An input method object allows for text input. Text is
+      converted to a serial of events that represent the input method
+      context.
+    </description>
+
+    <request name="commit_string">
+      <description summary="commit string">
+        Send the commit string.
+      </description>
+      <arg name="text" type="string"/>
+    </request>
+
+    <request name="set_preedit_string">
+      <description summary="pre-edit string">
+        Send the pre-edit string.
+      </description>
+      <arg name="text" type="string" allow-null="true"/>
+      <arg name="cursor_begin" type="int"/>
+      <arg name="cursor_end" type="int"/>
+    </request>
+
+    <request name="delete_surrounding_text">
+      <description summary="delete text">
+        Delete the surrounding text.
+      </description>
+      <arg name="before_length" type="uint"/>
+      <arg name="after_length" type="uint"/>
+    </request>
+
+    <request name="commit">
+      <description summary="commit state">
+        Apply all changes.
+      </description>
+      <arg name="serial" type="uint"/>
+    </request>
+
+    <event name="activate">
+      <description summary="activate event">
+        The input method has been activated.
+      </description>
+    </event>
+
+    <event name="deactivate">
+      <description summary="deactivate event">
+        The input method has been deactivated.
+      </description>
+    </event>
+
+    <event name="surrounding_text">
+      <description summary="surrounding text">
+        The surrounding text.
+      </description>
+      <arg name="text" type="string"/>
+      <arg name="cursor" type="uint"/>
+      <arg name="anchor" type="uint"/>
+    </event>
+
+    <event name="text_change_cause">
+      <description summary="text change cause">
+        The cause of text change.
+      </description>
+      <arg name="cause" type="uint"/>
+    </event>
+
+    <event name="content_type">
+      <description summary="content type">
+        The content type hint.
+      </description>
+      <arg name="hint" type="uint"/>
+      <arg name="purpose" type="uint"/>
+    </event>
+
+    <event name="done">
+      <description summary="done event">
+        All events have been sent.
+      </description>
+      <arg name="serial" type="uint"/>
+    </event>
+  </interface>
+
+  <interface name="zwp_input_method_keyboard_grab_v2" version="1">
+    <description summary="keyboard grab">
+      A keyboard grab.
+    </description>
+
+    <event name="keymap">
+      <description summary="keyboard mapping">
+        The keymap.
+      </description>
+      <arg name="format" type="uint"/>
+      <arg name="fd" type="fd"/>
+      <arg name="size" type="uint"/>
+    </event>
+
+    <event name="key">
+      <description summary="key event">
+        A key event.
+      </description>
+      <arg name="serial" type="uint"/>
+      <arg name="time" type="uint"/>
+      <arg name="key" type="uint"/>
+      <arg name="state" type="uint"/>
+    </event>
+
+    <event name="modifiers">
+      <description summary="modifier event">
+        A modifier event.
+      </description>
+      <arg name="serial" type="uint"/>
+      <arg name="mods_depressed" type="uint"/>
+      <arg name="mods_latched" type="uint"/>
+      <arg name="mods_locked" type="uint"/>
+      <arg name="group" type="uint"/>
+    </event>
+
+    <event name="repeat_info">
+      <description summary="repeat info">
+        Repeat rate and delay.
+      </description>
+      <arg name="rate" type="int"/>
+      <arg name="delay" type="int"/>
+    </event>
+
+    <request name="release">
+      <description summary="release the grab">
+        Release the keyboard grab.
+      </description>
+    </request>
+  </interface>
+
+  <interface name="zwp_input_method_manager_v2" version="1">
+    <description summary="input method manager">
+      A manager for input methods.
+    </description>
+
+    <request name="get_input_method">
+      <description summary="get input method">
+        Get an input method.
+      </description>
+      <arg name="seat" type="object" interface="wl_seat"/>
+      <arg name="input_method" type="new_id" interface="zwp_input_method_v2"/>
+    </request>
+
+    <request name="destroy" type="destructor">
+      <description summary="destroy the manager">
+        Destroy the input method manager.
+      </description>
+    </request>
+  </interface>
+</protocol>

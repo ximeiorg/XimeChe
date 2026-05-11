@@ -1,0 +1,26 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/librime-sys",
+    "crates/librime",
+    "crates/xime-wayland",
+    "crates/xime-xkb",
+    "crates/xime-ui",
+    "crates/xime-core",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["xime-wayland team"]
+license = "GPL-3.0-or-later"
+repository = "https://github.com/xime-wayland/xime"
+
+[workspace.dependencies]
+librime-sys = { path = "crates/librime-sys" }
+librime = { path = "crates/librime" }
+xime-wayland = { path = "crates/xime-wayland" }
+xime-xkb = { path = "crates/xime-xkb" }
+xime-ui = { path = "crates/xime-ui" }
+thiserror = "1.0"
+once_cell = "1.17"
