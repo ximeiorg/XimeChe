@@ -29,27 +29,31 @@ impl XkbContext {
     }
 
     pub fn set_keymap_from_owned_fd(&mut self, owned_fd: OwnedFd, size: usize) -> Result<()> {
-        let file = File::from(owned_fd);
-        let mut buffer = Vec::with_capacity(size);
-        file.take(size as u64).read_to_end(&mut buffer)
-            .map_err(|_| Error::KeymapCreationFailed)?;
+        // 使用 new_from_file 避免 CString::new 的 NUL 字符 panic
+        let mut file = File::from(owned_fd);
         
-        let keymap_str = String::from_utf8(buffer)
-            .map_err(|_| Error::InvalidKeymapFormat)?;
+        eprintln!("DEBUG: Loading keymap from file (size: {} bytes)", size);
         
-        let keymap = Keymap::new_from_string(
+        let keymap = Keymap::new_from_file(
             &self.context,
-            keymap_str,
+            &mut file,
             xkbcommon::xkb::KEYMAP_FORMAT_TEXT_V1,
             xkbcommon::xkb::KEYMAP_COMPILE_NO_FLAGS,
-        ).ok_or(Error::KeymapCreationFailed)?;
-
-        let state = State::new(&keymap);
+        );
         
-        self.keymap = Some(keymap);
-        self.state = Some(state);
-        
-        Ok(())
+        match keymap {
+            Some(km) => {
+                let state = State::new(&km);
+                self.keymap = Some(km);
+                self.state = Some(state);
+                eprintln!("DEBUG: Keymap loaded successfully");
+                Ok(())
+            }
+            None => {
+                eprintln!("DEBUG: Keymap creation failed");
+                Err(Error::KeymapCreationFailed)
+            }
+        }
     }
 
     pub fn key_from_keycode(&self, keycode: u32) -> Option<Keysym> {

@@ -6,5 +6,5 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
-xkbcommon = { version = "0.8", features = ["wayland"] }
+xkbcommon = { version = "0.9", features = ["wayland"] }
 thiserror.workspace = true
