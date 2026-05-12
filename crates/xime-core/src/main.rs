@@ -261,16 +261,15 @@ impl Xime {
                         if menu.num_candidates > 0 {
                             let c: Vec<(&str, Option<&str>)> = menu.candidates.iter().map(|x| (x.text, x.comment)).collect();
                             self.candidates.set_candidates(c, menu.select_keys.as_deref());
-                            eprintln!("DEBUG: Candidates: {:?}", menu.candidates.iter().map(|x| x.text).collect::<Vec<_>>());
                             
-                            // Show candidate window when candidates appear
-                            if !candidate_window_visible {
-                                if let Err(e) = conn.show_candidate_window(300, 100) {
-                                    eprintln!("DEBUG: Failed to show candidate window: {}", e);
-                                } else {
-                                    candidate_window_visible = true;
-                                    eprintln!("DEBUG: Candidate window shown");
-                                }
+                            let candidate_texts: Vec<String> = menu.candidates.iter().map(|x| x.text.to_string()).collect();
+                            eprintln!("DEBUG: Candidates: {:?}", candidate_texts);
+                            
+                            let height = candidate_texts.len() as u32 * 25 + 10;
+                            if let Err(e) = conn.show_candidate_window(300, height, &candidate_texts) {
+                                eprintln!("DEBUG: Failed to show candidate window: {}", e);
+                            } else {
+                                candidate_window_visible = true;
                             }
                             
                             if let Some(p) = ctx.composition().preedit {
@@ -283,7 +282,6 @@ impl Xime {
                             if candidate_window_visible {
                                 conn.hide_candidate_window();
                                 candidate_window_visible = false;
-                                eprintln!("DEBUG: Candidate window hidden");
                             }
                         }
                     }

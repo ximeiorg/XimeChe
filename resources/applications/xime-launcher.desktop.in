@@ -1,0 +1,16 @@
+[Desktop Entry]
+Name=Xime Wayland Launcher
+Name[zh_CN]=Xime Wayland 启动器
+Comment=Launcher for Xime Wayland input method
+Comment[zh_CN]=Xime Wayland 输入法启动器
+Exec=@BINDIR@/xime-launcher --reopen
+Icon=input-method
+Type=Application
+Categories=System;Utility;
+Terminal=false
+StartupNotify=false
+NoDisplay=true
+OnlyShowIn=KDE
+X-KDE-StartupNotify=false
+X-KDE-Wayland-VirtualKeyboard=true
+X-KDE-Wayland-Interfaces=org_kde_plasma_window_management

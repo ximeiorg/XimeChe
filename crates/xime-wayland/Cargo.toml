@@ -11,4 +11,4 @@ wayland-protocols = { version = "0.32.12", features = ["client", "unstable"] }
 wayland-backend = "0.3"
 wayland-scanner = "0.31"
 thiserror.workspace = true
-nix = { version = "0.29", features = ["fs"] }
+nix = { version = "0.29", features = ["fs", "mman"] }

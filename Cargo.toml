@@ -7,6 +7,8 @@ members = [
     "crates/xime-xkb",
     "crates/xime-ui",
     "crates/xime-core",
+    "crates/xime-daemon",
+    "crates/xime-launcher",
 ]
 
 [workspace.package]
@@ -24,3 +26,4 @@ xime-xkb = { path = "crates/xime-xkb" }
 xime-ui = { path = "crates/xime-ui" }
 thiserror = "1.0"
 once_cell = "1.17"
+anyhow = "1.0"
