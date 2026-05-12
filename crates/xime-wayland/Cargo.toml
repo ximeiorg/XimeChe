@@ -12,3 +12,4 @@ wayland-backend = "0.3"
 wayland-scanner = "0.31"
 thiserror.workspace = true
 nix = { version = "0.29", features = ["fs", "mman"] }
+ab_glyph = "0.2"

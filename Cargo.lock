@@ -1714,7 +1714,7 @@ dependencies = [
  "memmap2",
  "nix 0.30.1",
  "raw-window-handle",
- "xkbcommon 0.9.0",
+ "xkbcommon",
 ]
 
 [[package]]
@@ -5614,6 +5614,7 @@ dependencies = [
 name = "xime-wayland"
 version = "0.1.0"
 dependencies = [
+ "ab_glyph",
  "nix 0.29.0",
  "thiserror 1.0.69",
  "wayland-backend",
@@ -5627,18 +5628,7 @@ name = "xime-xkb"
 version = "0.1.0"
 dependencies = [
  "thiserror 1.0.69",
- "xkbcommon 0.8.0",
-]
-
-[[package]]
-name = "xkbcommon"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d66ca9352cbd4eecbbc40871d8a11b4ac8107cfc528a6e14d7c19c69d0e1ac9"
-dependencies = [
- "libc",
- "memmap2",
- "xkeysym",
+ "xkbcommon",
 ]
 
 [[package]]

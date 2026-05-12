@@ -20,6 +20,7 @@ use std::sync::{Arc, Mutex};
 use std::os::unix::io::{OwnedFd, AsFd, FromRawFd};
 use std::os::unix::net::UnixStream;
 use std::slice;
+use ab_glyph::{FontArc, PxScale, Font, ScaleFont};
 
 pub mod __interfaces {
     use wayland_client::protocol::__interfaces::*;
@@ -101,16 +102,20 @@ impl Dispatch<ZwpInputMethodV1, InputMethodV1Data> for InputMethodV1Data {
     ) {
         match event {
             ImV1Event::Activate { id } => {
+                eprintln!("DEBUG: zwp_input_method_v1 ACTIVATE event received");
                 state.state = InputMethodV1State::Active;
                 let keyboard = id.grab_keyboard(qhandle, state.clone());
                 if let Ok(mut kb) = state.keyboard.lock() {
                     *kb = Some(keyboard);
+                    eprintln!("DEBUG: Grabbed keyboard successfully");
                 }
                 if let Ok(mut ctx) = state.context.lock() {
                     *ctx = Some(id);
+                    eprintln!("DEBUG: Stored context successfully");
                 }
             }
             ImV1Event::Deactivate { context: _ } => {
+                eprintln!("DEBUG: zwp_input_method_v1 DEACTIVATE event received");
                 state.state = InputMethodV1State::Inactive;
                 if let Ok(mut ctx) = state.context.lock() {
                     *ctx = None;
@@ -178,19 +183,20 @@ impl Dispatch<WlKeyboard, InputMethodV1Data> for InputMethodV1Data {
     ) {
         match event {
             wl_keyboard::Event::Keymap { format: _, fd, size } => {
-                // Store keymap fd for xkb processing
+                eprintln!("DEBUG: Keymap event received, size={}", size);
                 if let Ok(mut keymap) = state.keymap_pending.lock() {
                     *keymap = Some((fd, size as usize));
                 }
             }
-            wl_keyboard::Event::Key { serial, time, key, state: _key_state } => {
-                // Key events come as pressed or released
+            wl_keyboard::Event::Key { serial, time, key, state: key_state } => {
+                let pressed = matches!(key_state, wayland_client::WEnum::Value(wl_keyboard::KeyState::Pressed));
+                eprintln!("DEBUG: Key event: serial={}, key={}, pressed={}", serial, key, pressed);
                 if let Ok(mut events) = state.key_events.lock() {
                     events.push(KeyEvent {
                         serial,
                         time,
                         key,
-                        pressed: true,
+                        pressed,
                     });
                 }
             }
@@ -327,6 +333,8 @@ pub struct WaylandConnectionV1 {
     has_v1_global: bool,
     panel_surface: Option<ZwpInputPanelSurfaceV1>,
     candidate_surface: Option<WlSurface>,
+    current_buffer: Option<WlBuffer>,
+    current_pool: Option<WlShmPool>,
 }
 
 impl WaylandConnectionV1 {
@@ -388,6 +396,8 @@ impl WaylandConnectionV1 {
             has_v1_global,
             panel_surface: None,
             candidate_surface: None,
+            current_buffer: None,
+            current_pool: None,
         })
     }
 
@@ -483,6 +493,14 @@ impl WaylandConnectionV1 {
         }
     }
     
+    pub fn forward_key(&self, serial: u32, time: u32, key: u32, pressed: bool) {
+        if let Some(ctx) = self.get_context() {
+            let key_state: u32 = if pressed { 1 } else { 0 };
+            ctx.key(serial, time, key, key_state);
+            eprintln!("DEBUG: Forwarded key: serial={}, key={}, pressed={}", serial, key, pressed);
+        }
+    }
+    
     pub fn create_candidate_surface(&mut self) -> Result<()> {
         let compositor = self.compositor.as_ref().ok_or(Error::NoCompositor)?;
         let input_panel = self.input_panel.as_ref().ok_or(Error::NoInputPanel)?;
@@ -504,8 +522,18 @@ impl WaylandConnectionV1 {
     }
     
     pub fn show_candidate_window(&mut self, width: u32, height: u32, candidates: &[String]) -> Result<()> {
+        eprintln!("DEBUG: show_candidate_window called with width={}, height={}, candidates={}", width, height, candidates.len());
+        
         if self.candidate_surface.is_none() {
             self.create_candidate_surface()?;
+        }
+        
+        // Destroy old buffer and pool
+        if let Some(buffer) = self.current_buffer.take() {
+            buffer.destroy();
+        }
+        if let Some(pool) = self.current_pool.take() {
+            pool.destroy();
         }
         
         let shm = self.shm.as_ref().ok_or(Error::NoShm)?;
@@ -515,14 +543,20 @@ impl WaylandConnectionV1 {
         
         let stride = width * 4;
         let size = stride * height;
+        eprintln!("DEBUG: stride={}, size={}", stride, size);
         
         let (pool, fd) = self.create_shm_pool_with_fd(shm, size)?;
+        self.current_pool = Some(pool.clone());
         
         self.draw_candidates(&fd, width, height, candidates)?;
         
-        let buffer = pool.create_buffer(width as i32, height as i32, 0, width as i32, wl_shm::Format::Argb8888, &qh, self.state.clone());
+        eprintln!("DEBUG: About to create_buffer: offset=0, width={}, height={}, stride={}", width, height, stride);
+        let buffer = pool.create_buffer(0, width as i32, height as i32, stride as i32, wl_shm::Format::Argb8888, &qh, self.state.clone());
+        self.current_buffer = Some(buffer.clone());
+        eprintln!("DEBUG: Buffer created successfully");
         
         surface.attach(Some(&buffer), 0, 0);
+        surface.damage_buffer(0, 0, width as i32, height as i32);
         surface.commit();
         
         self.sync_roundtrip()?;
@@ -531,7 +565,7 @@ impl WaylandConnectionV1 {
         Ok(())
     }
     
-    fn draw_candidates(&self, fd: &OwnedFd, width: u32, height: u32, candidates: &[String]) -> Result<()> {
+fn draw_candidates(&self, fd: &OwnedFd, width: u32, height: u32, candidates: &[String]) -> Result<()> {
         let size = (width * height * 4) as usize;
         let size_nonzero = std::num::NonZero::new(size).expect("size should be non-zero");
         
@@ -546,50 +580,200 @@ impl WaylandConnectionV1 {
             ).map_err(|e| Error::Io(std::io::Error::from_raw_os_error(e as i32)))?
         };
         
-        let pixels: &mut [u8] = unsafe { slice::from_raw_parts_mut(ptr.as_ptr() as *mut u8, size) };
+let pixels: &mut [u8] = unsafe { slice::from_raw_parts_mut(ptr.as_ptr() as *mut u8, size) };
         
-        const ROW_HEIGHT: u32 = 25;
-        const MARGIN: u32 = 5;
+        // Draw rounded rectangle background
+        const CORNER_RADIUS: u32 = 8;
+        const BORDER_WIDTH: u32 = 2;
+        let bg_color: [u8; 4] = [0xFA, 0xFA, 0xFA, 0xFF];
+        let border_color: [u8; 4] = [0xE0, 0xE0, 0xE0, 0xFF];
         
         for y in 0..height {
             for x in 0..width {
-                let offset = (y * width * 4 + x * 4) as usize;
-                let row = ((y - MARGIN) / ROW_HEIGHT) as usize;
+                let pixel_offset = (y * width * 4 + x * 4) as usize;
                 
-                if y < MARGIN || y >= height - MARGIN {
-                    pixels[offset] = 0xE0;
-                    pixels[offset + 1] = 0xE0;
-                    pixels[offset + 2] = 0xE0;
-                    pixels[offset + 3] = 0xFF;
-                } else if row < candidates.len() {
-                    if row == 0 {
-                        pixels[offset] = 0x00;
-                        pixels[offset + 1] = 0x80;
-                        pixels[offset + 2] = 0xFF;
-                        pixels[offset + 3] = 0xFF;
-                    } else if row == 1 {
-                        pixels[offset] = 0xFF;
-                        pixels[offset + 1] = 0x80;
-                        pixels[offset + 2] = 0x00;
-                        pixels[offset + 3] = 0xFF;
-                    } else if row == 2 {
-                        pixels[offset] = 0x80;
-                        pixels[offset + 1] = 0xFF;
-                        pixels[offset + 2] = 0x00;
-                        pixels[offset + 3] = 0xFF;
-                    } else {
-                        pixels[offset] = 0xFF;
-                        pixels[offset + 1] = 0x00;
-                        pixels[offset + 2] = 0xFF;
-                        pixels[offset + 3] = 0xFF;
-                    }
+                // Check if in corner (outside rounded area)
+                let in_corner_area = 
+                    (x < CORNER_RADIUS && y < CORNER_RADIUS && 
+                     ((CORNER_RADIUS - x) as f32).powi(2) + ((CORNER_RADIUS - y) as f32).powi(2) > (CORNER_RADIUS as f32).powi(2)) ||
+                    (x >= width - CORNER_RADIUS && y < CORNER_RADIUS &&
+                     ((x - (width - CORNER_RADIUS)) as f32).powi(2) + ((CORNER_RADIUS - y) as f32).powi(2) > (CORNER_RADIUS as f32).powi(2)) ||
+                    (x < CORNER_RADIUS && y >= height - CORNER_RADIUS &&
+                     ((CORNER_RADIUS - x) as f32).powi(2) + ((y - (height - CORNER_RADIUS)) as f32).powi(2) > (CORNER_RADIUS as f32).powi(2)) ||
+                    (x >= width - CORNER_RADIUS && y >= height - CORNER_RADIUS &&
+                     ((x - (width - CORNER_RADIUS)) as f32).powi(2) + ((y - (height - CORNER_RADIUS)) as f32).powi(2) > (CORNER_RADIUS as f32).powi(2));
+                
+                if in_corner_area {
+                    // Transparent
+                    pixels[pixel_offset] = 0x00;
+                    pixels[pixel_offset + 1] = 0x00;
+                    pixels[pixel_offset + 2] = 0x00;
+                    pixels[pixel_offset + 3] = 0x00;
+                } else if x < BORDER_WIDTH || x >= width - BORDER_WIDTH || 
+                          y < BORDER_WIDTH || y >= height - BORDER_WIDTH {
+                    // Border
+                    pixels[pixel_offset] = border_color[0];
+                    pixels[pixel_offset + 1] = border_color[1];
+                    pixels[pixel_offset + 2] = border_color[2];
+                    pixels[pixel_offset + 3] = border_color[3];
                 } else {
-                    pixels[offset] = 0xE0;
-                    pixels[offset + 1] = 0xE0;
-                    pixels[offset + 2] = 0xE0;
-                    pixels[offset + 3] = 0xFF;
+                    // Background
+                    pixels[pixel_offset] = bg_color[0];
+                    pixels[pixel_offset + 1] = bg_color[1];
+                    pixels[pixel_offset + 2] = bg_color[2];
+                    pixels[pixel_offset + 3] = bg_color[3];
                 }
             }
+        }
+        
+        // Load built-in font
+        let font_data = include_bytes!("../resources/vivoSans-Regular.ttf");
+        let font = FontArc::try_from_slice(font_data)
+            .expect("Built-in font should always load");
+        
+        let scale = PxScale::from(18.0);
+        let scaled_font = font.as_scaled(scale);
+        
+        // Get font metrics for vertical centering
+        let ascent = scaled_font.ascent();
+        let descent = scaled_font.descent();
+        let y_center = height as f32 / 2.0;
+        let y_baseline = y_center + (ascent - descent) / 2.0 - 1.0;
+        
+        let text_color: [u8; 4] = [0x33, 0x33, 0x33, 0xFF];
+        let highlight_bg: [u8; 4] = [0xE2, 0x73, 0x8F, 0xFF];
+        let highlight_text: [u8; 4] = [0xFF, 0xFF, 0xFF, 0xFF];
+        const HIGHLIGHT_RADIUS: u32 = 4;
+        
+        // Draw highlight background for first candidate
+        let mut x_pos: f32 = 15.0;
+        
+        if !candidates.is_empty() {
+            let first_candidate = &candidates[0];
+            let num_str = format!("{}. ", 1);
+            
+            // Calculate width of first candidate
+            let mut first_width: f32 = 0.0;
+            for c in num_str.chars() {
+                first_width += scaled_font.h_advance(scaled_font.glyph_id(c));
+            }
+            for c in first_candidate.chars() {
+                first_width += scaled_font.h_advance(scaled_font.glyph_id(c));
+            }
+            
+            // Draw rounded rectangle background for first candidate
+            let hl_x_start = 8;
+            let hl_x_end = (15.0 + first_width + 8.0) as u32;
+            let hl_y_start = BORDER_WIDTH + 4;
+            let hl_y_end = height - BORDER_WIDTH - 4;
+            let r = HIGHLIGHT_RADIUS;
+            
+            for y in hl_y_start..hl_y_end {
+                for x in hl_x_start..hl_x_end {
+                    let px = x;
+                    let py = y;
+                    
+                    // Unified corner check
+                    let skip = 
+                        // Top-left corner
+                        (x - hl_x_start < r && y - hl_y_start < r &&
+                         (r - 1 - (x - hl_x_start)) * (r - 1 - (x - hl_x_start)) + (r - 1 - (y - hl_y_start)) * (r - 1 - (y - hl_y_start)) >= r * r) ||
+                        // Top-right corner
+                        (hl_x_end - 1 - x < r && y - hl_y_start < r &&
+                         (r - 1 - (hl_x_end - 1 - x)) * (r - 1 - (hl_x_end - 1 - x)) + (r - 1 - (y - hl_y_start)) * (r - 1 - (y - hl_y_start)) >= r * r) ||
+                        // Bottom-left corner
+                        (x - hl_x_start < r && hl_y_end - 1 - y < r &&
+                         (r - 1 - (x - hl_x_start)) * (r - 1 - (x - hl_x_start)) + (r - 1 - (hl_y_end - 1 - y)) * (r - 1 - (hl_y_end - 1 - y)) >= r * r) ||
+                        // Bottom-right corner
+                        (hl_x_end - 1 - x < r && hl_y_end - 1 - y < r &&
+                         (r - 1 - (hl_x_end - 1 - x)) * (r - 1 - (hl_x_end - 1 - x)) + (r - 1 - (hl_y_end - 1 - y)) * (r - 1 - (hl_y_end - 1 - y)) >= r * r);
+                    
+                    if !skip && px < width && py < height {
+                        let draw_offset = (py * width * 4 + px * 4) as usize;
+                        pixels[draw_offset] = highlight_bg[0];
+                        pixels[draw_offset + 1] = highlight_bg[1];
+                        pixels[draw_offset + 2] = highlight_bg[2];
+                        pixels[draw_offset + 3] = highlight_bg[3];
+                    }
+                }
+            }
+        }
+        
+        // Load built-in font
+        let font_data = include_bytes!("../resources/vivoSans-Regular.ttf");
+        let font = FontArc::try_from_slice(font_data)
+            .expect("Built-in font should always load");
+        
+        let scale = PxScale::from(18.0);
+        let scaled_font = font.as_scaled(scale);
+        
+        // Get font metrics for vertical centering
+        let ascent = scaled_font.ascent();
+        let descent = scaled_font.descent();
+        let y_center = height as f32 / 2.0;
+        let y_baseline = y_center + (ascent - descent) / 2.0 - 1.0;
+        
+        // Draw all candidates with anti-aliasing
+        let mut x_pos: f32 = 15.0;
+        
+        for (idx, candidate) in candidates.iter().enumerate() {
+            let is_first = idx == 0;
+            let current_text_color = if is_first { highlight_text } else { text_color };
+            let current_bg = if is_first { highlight_bg } else { bg_color };
+            
+            // Draw number prefix with anti-aliasing
+            let num_str = format!("{}. ", idx + 1);
+            for c in num_str.chars() {
+                let glyph_id = scaled_font.glyph_id(c);
+                let glyph = glyph_id.with_scale_and_position(scale, ab_glyph::point(x_pos, y_baseline));
+                
+                if let Some(outlined) = scaled_font.outline_glyph(glyph) {
+                    let bounds = outlined.px_bounds();
+                    outlined.draw(|ox, oy, v| {
+                        let px = (bounds.min.x + ox as f32) as u32;
+                        let py = (bounds.min.y + oy as f32) as u32;
+                        if px < width && py < height && px >= BORDER_WIDTH && py >= BORDER_WIDTH && 
+                           px < width - BORDER_WIDTH && py < height - BORDER_WIDTH {
+                            let draw_offset = (py * width * 4 + px * 4) as usize;
+                            // Anti-aliasing: blend with background
+                            let alpha = v;
+                            pixels[draw_offset] = (current_bg[0] as f32 * (1.0 - alpha) + current_text_color[0] as f32 * alpha) as u8;
+                            pixels[draw_offset + 1] = (current_bg[1] as f32 * (1.0 - alpha) + current_text_color[1] as f32 * alpha) as u8;
+                            pixels[draw_offset + 2] = (current_bg[2] as f32 * (1.0 - alpha) + current_text_color[2] as f32 * alpha) as u8;
+                            pixels[draw_offset + 3] = 0xFF;
+                        }
+                    });
+                }
+                x_pos += scaled_font.h_advance(glyph_id);
+            }
+            
+            // Draw candidate text with anti-aliasing
+            for c in candidate.chars() {
+                let glyph_id = scaled_font.glyph_id(c);
+                let glyph = glyph_id.with_scale_and_position(scale, ab_glyph::point(x_pos, y_baseline));
+                
+                if let Some(outlined) = scaled_font.outline_glyph(glyph) {
+                    let bounds = outlined.px_bounds();
+                    outlined.draw(|ox, oy, v| {
+                        let px = (bounds.min.x + ox as f32) as u32;
+                        let py = (bounds.min.y + oy as f32) as u32;
+                        if px < width && py < height && px >= BORDER_WIDTH && py >= BORDER_WIDTH &&
+                           px < width - BORDER_WIDTH && py < height - BORDER_WIDTH {
+                            let draw_offset = (py * width * 4 + px * 4) as usize;
+                            // Anti-aliasing: blend with background
+                            let alpha = v;
+                            pixels[draw_offset] = (current_bg[0] as f32 * (1.0 - alpha) + current_text_color[0] as f32 * alpha) as u8;
+                            pixels[draw_offset + 1] = (current_bg[1] as f32 * (1.0 - alpha) + current_text_color[1] as f32 * alpha) as u8;
+                            pixels[draw_offset + 2] = (current_bg[2] as f32 * (1.0 - alpha) + current_text_color[2] as f32 * alpha) as u8;
+                            pixels[draw_offset + 3] = 0xFF;
+                        }
+                    });
+                }
+                x_pos += scaled_font.h_advance(glyph_id);
+            }
+            
+            // Add spacing between candidates
+            x_pos += 20.0;
         }
         
         unsafe {
@@ -601,6 +785,7 @@ impl WaylandConnectionV1 {
     }
     
     fn create_shm_pool_with_fd(&self, shm: &WlShm, size: u32) -> Result<(WlShmPool, OwnedFd)> {
+        eprintln!("DEBUG: create_shm_pool_with_fd size={}", size);
         let qh = self.event_queue.handle();
         
         let fd = Self::create_anonymous_file(size)?;
