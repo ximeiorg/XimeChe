@@ -184,7 +184,7 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>) {
                                             
                                             // Window size
                                             let width = 400;
-                                            let height = 44;
+                                            let height = 36;
                                             if let Err(e) = c.show_candidate_window(width, height, &candidate_texts) {
                                                 eprintln!("DEBUG: Candidate window error: {}", e);
                                             }

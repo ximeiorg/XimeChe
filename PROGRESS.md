@@ -1,23 +1,50 @@
 # XIME-Wayland 开发进度
 
 ## 当前状态
-**修复了 zwp_input_method_v1 panic，等待重新登录测试。**
+**候选栏渲染已完成重构，使用 cosmic-text + tiny-skia 替代 ab_glyph。**
 
-## 发现并修复的关键问题
-1. **wayland-client panic** - daemon 在收到 activate 事件时崩溃
-   - 错误：`Missing event_created_child specialization for event opcode 0 of zwp_input_method_v1`
-   - 原因：activate 事件创建 `ZwpInputMethodContextV1` 子对象，但 Dispatch 没有正确处理
-   - 修复：使用 `event_created_child!` 宏声明子对象类型
+## 已完成功能
+1. **候选栏绘制**
+   - 圆角边框（8px 圆角，2px 边框）- tiny-skia 实现
+   - 第一个候选词紫色背景高亮（0x8F73E2，圆角）
+   - 候选词横向单行显示
+   - 抗锯齿文本渲染（cosmic-text）
+   - 阴影效果（偏移阴影）
+   - 文本垂直居中
+   
+2. **按键处理**
+   - Rime 按键处理正确
+   - 非输入按键（退格等）正确转发给应用
+   
+3. **Wayland 集成**
+   - zwp_input_method_v1 协议正确实现
+   - 候选窗口刷新（damage_buffer）
+   - 键盘 grab 和 keymap 加载
+   
+4. **修复的问题**
+   - wayland-client panic（event_created_child 宏）
+   - xkbcommon panic（升级到 0.9.0）
+   - 按键转发问题
+   - 候选词刷新问题
 
-## 下一步测试
-1. 重新登录 KDE Plasma
-2. 打开 Kate，点击输入框
-3. 检查是否有候选窗口和按键响应
+5. **渲染重构**
+   - 移除 slint UI 依赖
+   - 使用 cosmic-text 进行文本渲染
+   - 使用 tiny-skia 进行背景绘制（圆角、边框）
+
+## 待解决问题
+1. **阴影效果优化** - 当前使用简单偏移阴影，可考虑添加模糊效果
 
 ## 待完成功能
 1. **系统托盘图标** - 用户需求，需要实现 StatusNotifierItem 协议
-2. **候选窗口渲染** - 当前只有彩色块，需要文本渲染
-3. **完整按键处理** - 验证 Rime 输入流程
+2. **完整测试流程** - 验证输入、提交、候选选择
+
+## 技术栈
+- `wayland-client` + `wayland-protocols` - Wayland IM 协议
+- `xkbcommon 0.9` - 键码转换
+- `librime` - 输入法引擎
+- `cosmic-text` - 文本渲染
+- `tiny-skia` - 背景/形状绘制
 
 ## 历史完成
 1. **架构重构** - daemon + launcher 分离

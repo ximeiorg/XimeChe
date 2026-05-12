@@ -6,5 +6,6 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
-slint = "1.5"
 thiserror.workspace = true
+cosmic-text.workspace = true
+tiny-skia.workspace = true
