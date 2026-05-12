@@ -1,5 +1,6 @@
 use std::env;
-use std::os::unix::io::{OwnedFd, AsRawFd, FromRawFd, AsFd};
+use std::os::unix::io::{OwnedFd, AsRawFd, FromRawFd};
+use nix::unistd::dup;
 use zbus::Connection;
 use zbus::zvariant::Fd;
 
@@ -36,7 +37,24 @@ async fn connect_to_daemon(fd: OwnedFd) -> Result<(), Error> {
     let display = env::var("WAYLAND_DISPLAY")
         .unwrap_or_else(|_| "wayland-0".to_string());
     
+    eprintln!("DEBUG: Duplicating fd {} for DBus transfer", fd.as_raw_fd());
+    
+    // Duplicate fd because we need to keep the original alive until DBus call completes
+    let dup_fd = dup(fd.as_raw_fd())
+        .map_err(|e| Error::Io(std::io::Error::from_raw_os_error(e as i32)))?;
+    let owned_dup = unsafe { OwnedFd::from_raw_fd(dup_fd) };
+    
     let connection = Connection::session().await?;
+    
+    // Activate daemon first
+    eprintln!("DEBUG: Activating daemon via DBus");
+    let _ = connection.call_method(
+        Some("org.freedesktop.DBus"),
+        "/org/freedesktop/DBus",
+        Some("org.freedesktop.DBus"),
+        "StartServiceByName",
+        &(XIME_DBUS_NAME, 0u32),
+    ).await?;
     
     let proxy = zbus::Proxy::new(
         &connection,
@@ -47,7 +65,7 @@ async fn connect_to_daemon(fd: OwnedFd) -> Result<(), Error> {
     
     eprintln!("DEBUG: Launcher calling OpenWaylandSocket with fd and display={}", display);
     
-    let fd_for_dbus = Fd::from(&fd);
+    let fd_for_dbus = Fd::from(&owned_dup);
     proxy.call_method("OpenWaylandSocket", &(fd_for_dbus, &display)).await?;
     
     eprintln!("DEBUG: OpenWaylandSocket succeeded");
