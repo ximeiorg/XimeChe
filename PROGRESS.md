@@ -1,19 +1,23 @@
 # XIME-Wayland 开发进度
 
 ## 当前状态
-**修复 DBus fd 传递问题，等待重新登录测试完整流程。**
+**修复了 zwp_input_method_v1 panic，等待重新登录测试。**
 
-## 发现问题
-1. **DBus 服务未自动激活** - xime-daemon 没有随 launcher 调用自动启动
-2. **fd 传递错误** - launcher 中报错 `Bad file descriptor (os error 9)`
-   - 原因：WAYLAND_SOCKET fd 在当前测试环境无效（非 KWin 启动）
-   - 修复：launcher 中也使用 `dup()` 复制 fd，并添加服务预激活
+## 发现并修复的关键问题
+1. **wayland-client panic** - daemon 在收到 activate 事件时崩溃
+   - 错误：`Missing event_created_child specialization for event opcode 0 of zwp_input_method_v1`
+   - 原因：activate 事件创建 `ZwpInputMethodContextV1` 子对象，但 Dispatch 没有正确处理
+   - 修复：使用 `event_created_child!` 宏声明子对象类型
 
-## 今日完成
-1. **修复 launcher fd 处理** - 添加 `nix::unistd::dup()` 复制 fd
-   - 文件：`crates/xime-launcher/src/main.rs`
-   - 添加 DBus 服务预激活 (`StartServiceByName`)
-2. **构建测试通过** - daemon 可手动启动并注册 DBus 服务
+## 下一步测试
+1. 重新登录 KDE Plasma
+2. 打开 Kate，点击输入框
+3. 检查是否有候选窗口和按键响应
+
+## 待完成功能
+1. **系统托盘图标** - 用户需求，需要实现 StatusNotifierItem 协议
+2. **候选窗口渲染** - 当前只有彩色块，需要文本渲染
+3. **完整按键处理** - 验证 Rime 输入流程
 
 ## 历史完成
 1. **架构重构** - daemon + launcher 分离
