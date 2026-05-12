@@ -1,13 +1,17 @@
 # XIME-Wayland 开发进度
 
 ## 当前状态
-**已修复 DBus fd 传递问题，Wayland 连接待完整测试。**
+**Wayland 连接成功！输入法核心流程已打通，待验证按键处理。**
 
 ## 今日完成
 1. **修复 DBus fd 传递 Bug** - daemon 中 `zbus::Fd` 在方法返回后会关闭 fd
    - 问题：`unsafe { OwnedFd::from_raw_fd(fd.as_raw_fd()) }` 导致 "Bad file descriptor"
    - 修复：使用 `nix::unistd::dup()` 复制 fd 后再创建 `OwnedFd`
    - 文件：`crates/xime-daemon/src/main.rs`
+2. **Wayland 连接成功** - `zwp_input_method_v1` 协议可用
+   - 日志：`DEBUG: zwp_input_method_v1 available`
+   - daemon 和 launcher 都在运行
+   - 等待测试按键输入
 
 ## 历史完成
 1. **架构重构** - daemon + launcher 分离
@@ -52,7 +56,15 @@ xime-wayland/
 - Desktop: `~/.local/share/applications/xime-launcher.desktop`
 - Config: `~/.config/kwinrc` (VirtualKeyboard=xime-launcher.desktop)
 
+## 测试步骤
+```bash
+# 快速卸载重装测试
+./uninstall.sh  # 选择重置 KWin 配置
+./dev-install.sh
+# 重新登录 KDE Plasma，打开 Kate 测试
+```
+
 ## 下一步
-1. 重新登录 KDE Plasma
-2. 打开 Kate 输入拼音测试完整流程
-3. 调试 Wayland 连接和按键处理
+1. 测试按键输入是否能正确处理
+2. 验证候选窗口显示
+3. 验证文本提交
