@@ -10,36 +10,60 @@
 
 ## 架构概要
 
-程序由四个核心模块组成，由 Rust 主循环统一调度：
+程序采用 **daemon + launcher** 分离架构，符合 KDE VirtualKeyboard 规范：
 
-- **Wayland 协议层**：通过 `zwp_input_method_v2` 从混成器接收按键事件、焦点事件，并提交文本。
-- **键码转换层**：通过 `xkbcommon` 将原始键码转换为通用键值。
-- **Rime 引擎层**：通过 C FFI 调用 librime，进行五笔转换、候选词获取和词典管理。
-- **UI 渲染层**：自绘候选词窗口，负责光标跟随、选词和高亮。
+- **xime-daemon**：持续运行的守护进程
+  - DBus 服务：`org.xime.Xime.Controller`
+  - Rime 引擎：拼音/五笔转换
+  - Wayland 事件循环：处理按键
+  - 候选窗口：自绘 SHM buffer
 
-数据流方向:
-`Wayland 按键事件 → xkbcommon 转码 → Rime 处理 → 获取候选词/提交文本 → Wayland 提交 + UI 渲染`
+- **xime-launcher**：轻量启动器
+  - 接收 KWin 传递的 `WAYLAND_SOCKET` fd
+  - 通过 DBus 将 fd 传递给 daemon
+  - 保持运行（KWin 要求）
+
+数据流:
+```
+KWin → WAYLAND_SOCKET fd → launcher → DBus → daemon →
+Wayland 连接 → 按键事件 → Rime → 候选词 → 提交文本
+```
 
 ## 模块要点
-- **Wayland 协议层**：使用 `wayland-client` + `wayland-protocols` 实现 `zwp_input_method_v2`，负责接收按键事件、管理焦点、提交文本和预编辑字符串。
-- **键码转换**：通过 `xkbcommon` crate 将 Wayland 原始键码转换为 keysym 和 Rime 所需格式。
-- **Rime 集成**：直接调用 librime 的 C API（`rime_get_api` → `setup` → `initialize` → `create_session` → `process_key` → `get_context`），配置目录指向五笔方案。
-- **状态管理**：轻量 `struct` 维护当前激活状态、预编辑文本、候选词列表、提交文本。
-- **UI 层**：用 `slint` 绘制无焦点弹出候选窗，实现光标跟随和选词交互。
-- **主循环**：Rust `async` 或简单轮询，将 Wayland 事件分发给各模块处理。
+- **Wayland 协议层**：使用 `wayland-client` 实现 `zwp_input_method_v1`（KWin 支持），通过 `connect_from_fd()` 从 WAYLAND_SOCKET 连接。
+- **键码转换**：通过 `xkbcommon` 将 Wayland 原始键码转换为 keysym。
+- **Rime 集成**：直接调用 librime C API，配置目录 `~/.config/xime/rime/`。
+- **UI 层**：SHM buffer 自绘候选窗口，`zwp_input_panel_surface_v1.set_overlay_panel()` 定位。
+- **DBus 服务**：`org.xime.Xime.Controller` 提供 `OpenWaylandSocket(fd, display)` 方法。
+
+## 安装与测试
+```bash
+# 开发安装（安装到 ~/.local）
+./dev-install.sh
+
+# 系统安装（安装到 /usr）
+sudo ./install.sh
+
+# 测试流程
+# 1. 重新登录 KDE Plasma
+# 2. 打开 Kate，输入拼音
+# 3. KWin 应启动 launcher → daemon
+```
 
 ## 开发路线
-1. 搭 Wayland 键盘通道：接收 `activate`/`deactivate`/`key` 事件，打印键码。
-2. 集成 librime：初始化引擎，模拟按键获取候选词，打印到终端。
-3. 串联数据流：按键 → 转码 → Rime 处理 → `commit_string` 上屏（无 UI）。
-4. 实现候选窗 UI：显示候选词，支持选词和翻页。
-5. 光标跟随、样式打磨、打包发布。
+1. ✅ 搭 Wayland 键盘通道：接收 `activate`/`deactivate`/`key` 事件
+2. ✅ 集成 librime：初始化引擎，模拟按键获取候选词
+3. ✅ 实现架构分离：daemon + launcher + DBus 服务
+4. ✅ 候选窗口基础：SHM buffer 绘制，overlay_panel 定位
+5. 🔄 测试完整流程：KWin → launcher → daemon → 按键处理
+6. 待完成：文本渲染、光标跟随、样式打磨
 
 ## 关键依赖
-- `wayland-client`、`wayland-protocols`(https://smithay.github.io/wayland-rs/)
-- `xkbcommon` ([Rust crate](https://docs.rs/xkbcommon/0.9.0/xkbcommon/))
+- `wayland-client`、`wayland-protocols`、`wayland-backend`
+- `xkbcommon`
 - `librime`
-- UI：`slint`
+- `zbus` (DBus)
+- `nix` (mmap, fd handling)
 
 ## 注意事项
 - 仅支持 Wayland，完全不兼容 X11。

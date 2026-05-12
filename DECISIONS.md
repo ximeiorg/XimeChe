@@ -1,97 +1,46 @@
-# XIME-Wayland 架构决策
+# XIME-Wayland 重要决策
 
-## 决策 1: 多 crate 架构
-**日期**: 2026-05-11
+## 2025-05-12: 架构分离决策
 
-**背景**: 需要决定如何组织代码结构。
+**问题**：单进程架构无法满足 KDE VirtualKeyboard 要求
+- KWin 通过 `WAYLAND_SOCKET` fd 启动输入法
+- `zwp_input_method` 协议不暴露在普通 `wayland-0` socket 上
+- 需要按需启动机制
 
-**决策**: 采用多 crate 架构，按功能模块划分。
+**决策**：采用 daemon + launcher 分离架构
+- launcher：接收 `WAYLAND_SOCKET`，通过 DBus 传递 fd
+- daemon：DBus 服务，按需激活，处理 Wayland 事件
 
-**理由**:
-- 清晰的模块边界
-- 便于独立测试
-- 支持渐进开发
-- 可复用性强
+**理由**：
+1. fcitx5 使用相同架构（fcitx5-wayland-launcher）
+2. DBus 按需激活符合 KDE VirtualKeyboard 规范
+3. 分离后 launcher 轻量，daemon 可持续运行
 
-**模块划分**:
-- `librime-sys`: FFI 绑定
-- `librime`: Rime 引擎封装
-- `xime-wayland`: Wayland 协议
-- `xime-xkb`: 键码转换
-- `xime-ui`: UI 渲染
-- `xime-core`: 主程序
+## 2025-05-12: DBus Service 配置
 
-## 决策 2: 使用 Slint 作为 UI 框架
-**日期**: 2026-05-11
+**问题**：launcher 调用 `org.xime.Xime.OpenWaylandSocket` 时找不到服务
 
-**背景**: 需要自绘候选词窗口。
+**决策**：创建 DBus service 文件
+- 位置：`resources/dbus/org.xime.Xime.service.in`
+- 安装：`~/.local/share/dbus-1/services/` 或 `/usr/share/dbus-1/services/`
+- DBus 会按需激活 daemon
 
-**决策**: 使用 Slint 框架。
+**理由**：DBus 激活机制要求 service 文件定义服务名称和可执行路径
 
-**理由**:
-- 纯 Rust 实现
-- 支持无焦点窗口
-- 声明式 UI
-- 性能良好
+## 2025-05-12: zwp_input_method_v1 vs v2
 
-## 决策 3: 仅支持 Wayland
-**日期**: 2026-05-11
+**决策**：优先支持 v1 协议（KWin）
 
-**背景**: 是否同时支持 X11 和 Wayland。
+**理由**：
+1. KWin 5.27 使用 `zwp_input_method_v1`
+2. `WAYLAND_SOCKET` fd 是单次使用，必须先尝试 v1
+3. v2 用于 Sway/Hyprland，作为备选
 
-**决策**: 仅支持 Wayland。
+## 2025-05-12: 候选窗口定位
 
-**理由**:
-- 简化实现
-- X11 已是遗留技术
-- 目标用户使用现代桌面环境
+**决策**：使用 `zwp_input_panel_surface_v1.set_overlay_panel()`
 
-## 决策 4: 使用 zwp_input_method_v2 协议
-**日期**: 2026-05-11
-
-**背景**: Wayland 有多个输入法协议版本。
-
-**决策**: 使用 zwp_input_method_v2 (unstable)。
-
-**理由**:
-- v2 是当前主流
-- 得到主流混成器支持 (KWin, Mutter, wlroots)
-- 提供 activate/deactivate/keypress 事件
-- 支持 preedit/commit
-
-## 决策 5: 配置目录
-**日期**: 2026-05-11
-
-**背景**: Rime 方案文件存放位置。
-
-**决策**: 使用 `~/.config/xime/rime/`。
-
-**理由**:
-- 符合 XDG 规范
-- 与其他输入法隔离
-- 方便用户管理
-
-## 决策 6: 键码转换使用 xkbcommon
-**日期**: 2026-05-11
-
-**背景**: Wayland 提供的是原始键码，需要转换为 keysym。
-
-**决策**: 使用 xkbcommon crate。
-
-**理由**:
-- 标准做法
-- wayland-client 推荐使用
-- Rime 接受 XKB keysym
-
-## 决策 7: 主循环使用同步模型
-**日期**: 2026-05-11
-
-**背景**: 选择事件循环模型。
-
-**决策**: 使用同步阻塞模型，后续可考虑 async。
-
-**理由**:
-- 初始实现简单
-- Rime API 是同步的
-- Wayland 事件循环本就是同步的
-- 后续可按需优化
+**理由**：
+1. compositor 自动定位在光标附近
+2. 不需要手动计算坐标
+3. fcitx5 使用相同方法

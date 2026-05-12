@@ -14,9 +14,11 @@ use wayland_client::{
     globals::registry_queue_init,
     Connection, EventQueue,
 };
+use wayland_backend::client::Backend;
 use std::sync::{Arc, Mutex};
 use std::os::unix::io::{OwnedFd, AsFd, FromRawFd};
-use std::fs::File;
+use std::os::unix::net::UnixStream;
+use std::slice;
 
 pub mod __interfaces {
     use wayland_client::protocol::__interfaces::*;
@@ -330,6 +332,15 @@ impl WaylandConnectionV1 {
         Self::init_with_connection(connection)
     }
     
+    pub fn connect_from_fd(fd: OwnedFd) -> Result<Self> {
+        let stream = UnixStream::from(fd);
+        let backend = Backend::connect(stream)
+            .map_err(|e| Error::ConnectFailed(e.to_string()))?;
+        let connection = Connection::from_backend(backend);
+        
+        Self::init_with_connection(connection)
+    }
+    
     pub fn init_with_connection(connection: Connection) -> Result<Self> {
         let (globals, event_queue) = registry_queue_init(&connection)
             .map_err(|e| Error::ConnectFailed(e.to_string()))?;
@@ -487,7 +498,7 @@ impl WaylandConnectionV1 {
         Ok(())
     }
     
-    pub fn show_candidate_window(&mut self, width: u32, height: u32) -> Result<()> {
+    pub fn show_candidate_window(&mut self, width: u32, height: u32, candidates: &[String]) -> Result<()> {
         if self.candidate_surface.is_none() {
             self.create_candidate_surface()?;
         }
@@ -497,7 +508,13 @@ impl WaylandConnectionV1 {
         
         let qh = self.event_queue.handle();
         
-        let pool = self.create_shm_pool(shm, width * height * 4)?;
+        let stride = width * 4;
+        let size = stride * height;
+        
+        let (pool, fd) = self.create_shm_pool_with_fd(shm, size)?;
+        
+        self.draw_candidates(&fd, width, height, candidates)?;
+        
         let buffer = pool.create_buffer(width as i32, height as i32, 0, width as i32, wl_shm::Format::Argb8888, &qh, self.state.clone());
         
         surface.attach(Some(&buffer), 0, 0);
@@ -505,8 +522,86 @@ impl WaylandConnectionV1 {
         
         self.sync_roundtrip()?;
         
-        eprintln!("DEBUG: Showed candidate window {}x{}", width, height);
+        eprintln!("DEBUG: Showed candidate window {}x{} with {} candidates", width, height, candidates.len());
         Ok(())
+    }
+    
+    fn draw_candidates(&self, fd: &OwnedFd, width: u32, height: u32, candidates: &[String]) -> Result<()> {
+        let size = (width * height * 4) as usize;
+        let size_nonzero = std::num::NonZero::new(size).expect("size should be non-zero");
+        
+        let ptr = unsafe {
+            nix::sys::mman::mmap(
+                None,
+                size_nonzero,
+                nix::sys::mman::ProtFlags::PROT_READ | nix::sys::mman::ProtFlags::PROT_WRITE,
+                nix::sys::mman::MapFlags::MAP_SHARED,
+                fd,
+                0,
+            ).map_err(|e| Error::Io(std::io::Error::from_raw_os_error(e as i32)))?
+        };
+        
+        let pixels: &mut [u8] = unsafe { slice::from_raw_parts_mut(ptr.as_ptr() as *mut u8, size) };
+        
+        const ROW_HEIGHT: u32 = 25;
+        const MARGIN: u32 = 5;
+        
+        for y in 0..height {
+            for x in 0..width {
+                let offset = (y * width * 4 + x * 4) as usize;
+                let row = ((y - MARGIN) / ROW_HEIGHT) as usize;
+                
+                if y < MARGIN || y >= height - MARGIN {
+                    pixels[offset] = 0xE0;
+                    pixels[offset + 1] = 0xE0;
+                    pixels[offset + 2] = 0xE0;
+                    pixels[offset + 3] = 0xFF;
+                } else if row < candidates.len() {
+                    if row == 0 {
+                        pixels[offset] = 0x00;
+                        pixels[offset + 1] = 0x80;
+                        pixels[offset + 2] = 0xFF;
+                        pixels[offset + 3] = 0xFF;
+                    } else if row == 1 {
+                        pixels[offset] = 0xFF;
+                        pixels[offset + 1] = 0x80;
+                        pixels[offset + 2] = 0x00;
+                        pixels[offset + 3] = 0xFF;
+                    } else if row == 2 {
+                        pixels[offset] = 0x80;
+                        pixels[offset + 1] = 0xFF;
+                        pixels[offset + 2] = 0x00;
+                        pixels[offset + 3] = 0xFF;
+                    } else {
+                        pixels[offset] = 0xFF;
+                        pixels[offset + 1] = 0x00;
+                        pixels[offset + 2] = 0xFF;
+                        pixels[offset + 3] = 0xFF;
+                    }
+                } else {
+                    pixels[offset] = 0xE0;
+                    pixels[offset + 1] = 0xE0;
+                    pixels[offset + 2] = 0xE0;
+                    pixels[offset + 3] = 0xFF;
+                }
+            }
+        }
+        
+        unsafe {
+            nix::sys::mman::munmap(ptr, size)
+                .map_err(|e| Error::Io(std::io::Error::from_raw_os_error(e as i32)))?;
+        }
+        
+        Ok(())
+    }
+    
+    fn create_shm_pool_with_fd(&self, shm: &WlShm, size: u32) -> Result<(WlShmPool, OwnedFd)> {
+        let qh = self.event_queue.handle();
+        
+        let fd = Self::create_anonymous_file(size)?;
+        
+        let pool = shm.create_pool(fd.as_fd(), size as i32, &qh, self.state.clone());
+        Ok((pool, fd))
     }
     
     pub fn hide_candidate_window(&mut self) {
@@ -517,15 +612,6 @@ impl WaylandConnectionV1 {
                 eprintln!("DEBUG: Hidden candidate window");
             }
         }
-    }
-    
-    fn create_shm_pool(&self, shm: &WlShm, size: u32) -> Result<WlShmPool> {
-        let qh = self.event_queue.handle();
-        
-        let fd = Self::create_anonymous_file(size)?;
-        
-        let pool = shm.create_pool(fd.as_fd(), size as i32, &qh, self.state.clone());
-        Ok(pool)
     }
     
     fn create_anonymous_file(size: u32) -> Result<OwnedFd> {
