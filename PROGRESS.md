@@ -1,17 +1,19 @@
 # XIME-Wayland 开发进度
 
 ## 当前状态
-**Wayland 连接成功！输入法核心流程已打通，待验证按键处理。**
+**修复 DBus fd 传递问题，等待重新登录测试完整流程。**
+
+## 发现问题
+1. **DBus 服务未自动激活** - xime-daemon 没有随 launcher 调用自动启动
+2. **fd 传递错误** - launcher 中报错 `Bad file descriptor (os error 9)`
+   - 原因：WAYLAND_SOCKET fd 在当前测试环境无效（非 KWin 启动）
+   - 修复：launcher 中也使用 `dup()` 复制 fd，并添加服务预激活
 
 ## 今日完成
-1. **修复 DBus fd 传递 Bug** - daemon 中 `zbus::Fd` 在方法返回后会关闭 fd
-   - 问题：`unsafe { OwnedFd::from_raw_fd(fd.as_raw_fd()) }` 导致 "Bad file descriptor"
-   - 修复：使用 `nix::unistd::dup()` 复制 fd 后再创建 `OwnedFd`
-   - 文件：`crates/xime-daemon/src/main.rs`
-2. **Wayland 连接成功** - `zwp_input_method_v1` 协议可用
-   - 日志：`DEBUG: zwp_input_method_v1 available`
-   - daemon 和 launcher 都在运行
-   - 等待测试按键输入
+1. **修复 launcher fd 处理** - 添加 `nix::unistd::dup()` 复制 fd
+   - 文件：`crates/xime-launcher/src/main.rs`
+   - 添加 DBus 服务预激活 (`StartServiceByName`)
+2. **构建测试通过** - daemon 可手动启动并注册 DBus 服务
 
 ## 历史完成
 1. **架构重构** - daemon + launcher 分离
