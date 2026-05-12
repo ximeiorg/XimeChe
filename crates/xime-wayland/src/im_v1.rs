@@ -13,6 +13,7 @@ use wayland_client::protocol::wl_shm_pool::WlShmPool;
 use wayland_client::{
     globals::registry_queue_init,
     Connection, EventQueue,
+    event_created_child,
 };
 use wayland_backend::client::Backend;
 use std::sync::{Arc, Mutex};
@@ -120,6 +121,10 @@ impl Dispatch<ZwpInputMethodV1, InputMethodV1Data> for InputMethodV1Data {
             }
         }
     }
+    
+    event_created_child!(InputMethodV1Data, ZwpInputMethodV1, [
+        zwp_input_method_v1::EVT_ACTIVATE_OPCODE => (ZwpInputMethodContextV1, InputMethodV1Data::default()),
+    ]);
 }
 
 impl Dispatch<ZwpInputMethodContextV1, InputMethodV1Data> for InputMethodV1Data {
