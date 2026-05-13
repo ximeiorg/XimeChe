@@ -16,6 +16,21 @@ impl CandidateRenderer {
         Self { font_system, swash_cache }
     }
 
+    pub fn calculate_width(&mut self, candidates: &[String]) -> u32 {
+        if candidates.is_empty() {
+            return 100;
+        }
+
+        let mut total_width: f32 = 15.0;
+        for (idx, candidate) in candidates.iter().enumerate() {
+            let text = format!("{}. {}", idx + 1, candidate);
+            total_width += self.measure_text_width(&text) + 20.0;
+        }
+        total_width += 15.0;
+
+        (total_width.ceil() as u32).max(100)
+    }
+
     pub fn draw_candidates(&mut self, pixels: &mut [u8], width: u32, height: u32, candidates: &[String]) {
         if candidates.is_empty() {
             return;
@@ -235,4 +250,9 @@ impl Default for CandidateRenderer {
 pub fn draw_candidates_to_buffer(pixels: &mut [u8], width: u32, height: u32, candidates: &[String]) {
     let mut renderer = CandidateRenderer::new();
     renderer.draw_candidates(pixels, width, height, candidates);
+}
+
+pub fn calculate_candidate_width(candidates: &[String]) -> u32 {
+    let mut renderer = CandidateRenderer::new();
+    renderer.calculate_width(candidates)
 }
