@@ -138,7 +138,7 @@ impl CandidateRenderer {
         );
     }
 
-    fn draw_text(&mut self, pixmap: &mut Pixmap, width: u32, height: u32, candidates: &[String]) {
+    fn draw_text(&mut self, pixmap: &mut Pixmap, _width: u32, height: u32, candidates: &[String]) {
         let font_size = 16.0f32;
         let line_height = 20.0f32;
         let metrics = Metrics::new(font_size, line_height);

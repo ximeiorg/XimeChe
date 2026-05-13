@@ -234,7 +234,7 @@ impl Dispatch<WlShm, InputMethodV1Data> for InputMethodV1Data {
 
 impl Dispatch<WlSurface, InputMethodV1Data> for InputMethodV1Data {
     fn event(
-        state: &mut InputMethodV1Data,
+        _state: &mut InputMethodV1Data,
         _proxy: &WlSurface,
         event: <WlSurface as Proxy>::Event,
         _data: &InputMethodV1Data,
@@ -242,10 +242,10 @@ impl Dispatch<WlSurface, InputMethodV1Data> for InputMethodV1Data {
         _qhandle: &QueueHandle<InputMethodV1Data>,
     ) {
         match event {
-            wl_surface::Event::Enter { output } => {
+            wl_surface::Event::Enter { output: _ } => {
                 eprintln!("DEBUG: Surface enter output");
             }
-            wl_surface::Event::Leave { output } => {
+            wl_surface::Event::Leave { output: _ } => {
                 eprintln!("DEBUG: Surface leave output");
             }
             _ => {}

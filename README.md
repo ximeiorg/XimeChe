@@ -97,6 +97,10 @@ cargo run
 - 候选词 UI 组件
 - 主程序框架
 
+## FAQ
+1. 为什么 vscode 无法输入中文？
+答：vscode 没有以 wayland 模式启动。官方网站下载的vscode 理论上是可以的，但是 snapstore 下载的vscode无法使用。
+
 ## 许可证
 
 GPL-3.0-or-later
