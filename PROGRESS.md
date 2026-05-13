@@ -10,12 +10,12 @@
    - 候选词横向单行显示
    - 抗锯齿文本渲染（cosmic-text）
    - 阴影效果（偏移阴影）
-   - 文本垂直居中
    - 候选栏宽度动态计算（根据候选词内容）
-   
+
 2. **按键处理**
    - Rime 按键处理正确
    - 非输入按键（退格等）正确转发给应用
+   - Shift 键切换中英模式（Shift_L inline_ascii，Shift_R commit_text）
    
 3. **Wayland 集成**
    - zwp_input_method_v1 协议正确实现
