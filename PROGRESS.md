@@ -1,7 +1,7 @@
 # XIME-Wayland 开发进度
 
 ## 当前状态
-**修复了 Shift 键卡死问题：移除嵌套 sync_roundtrip、hide_candidate_window 后 flush、减少 sleep 间隔。**
+**托盘图标显示 ZH/EN 文字，点击切换中英文（发送 Shift_L 按下+释放）。**
 
 ## 已完成功能
 1. **候选栏绘制**
@@ -29,18 +29,26 @@
     - 候选词刷新问题
     - 输入编码延迟问题（preedit/commit 请求没有立即 flush）
     - Shift 键卡死问题（移除嵌套 sync_roundtrip、hide_candidate_window 后 flush、减少 sleep 间隔）
+    - 颜色显示问题（tiny-skia 使用 RGBA 格式，需要转换成 BGRA/ARGB）
 
 5. **渲染重构**
    - 移除 slint UI 依赖
    - 使用 cosmic-text 进行文本渲染
    - 使用 tiny-skia 进行背景绘制（圆角、边框）
 
+6. **系统托盘**
+   - 实现 StatusNotifierItem 协议（xime-tray crate）
+   - 左键点击切换中英文模式（发送 Shift_L 按下+释放）
+   - 图标显示 "ZH"（紫色背景）或 "EN"（灰色背景）文字
+   - tooltip 显示当前模式（中文输入/英文输入）
+   - 模式随 Rime ascii_mode 状态同步变化
+   - 托盘图标仅在输入法激活时显示（通过 NewStatus 信号控制 Active/Passive）
+
 ## 待解决问题
 1. **阴影效果优化** - 当前使用简单偏移阴影，可考虑添加模糊效果
 
 ## 待完成功能
-1. **系统托盘图标** - 用户需求，需要实现 StatusNotifierItem 协议
-2. **完整测试流程** - 验证输入、提交、候选选择
+1. **完整测试流程** - 验证输入、提交、候选选择、托盘切换
 
 ## 技术栈
 - `wayland-client` + `wayland-protocols` - Wayland IM 协议
@@ -48,6 +56,7 @@
 - `librime` - 输入法引擎
 - `cosmic-text` - 文本渲染
 - `tiny-skia` - 背景/形状绘制
+- `zbus` - DBus 通信（系统托盘）
 
 ## 历史完成
 1. **架构重构** - daemon + launcher 分离

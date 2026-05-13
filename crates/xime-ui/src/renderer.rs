@@ -43,7 +43,14 @@ impl CandidateRenderer {
         self.draw_highlight(&mut pixmap, width, height, candidates);
         self.draw_text(&mut pixmap, width, height, candidates);
 
-        pixels.copy_from_slice(pixmap.data());
+        // Convert RGBA to BGRA (Wayland ARGB8888 format on little-endian)
+        let data = pixmap.data();
+        for i in (0..data.len()).step_by(4) {
+            pixels[i] = data[i + 2];     // B from R
+            pixels[i + 1] = data[i + 1]; // G stays
+            pixels[i + 2] = data[i];     // R from B
+            pixels[i + 3] = data[i + 3]; // A stays
+        }
     }
 
     fn draw_shadow(&self, pixmap: &mut Pixmap, width: u32, height: u32) {
@@ -203,21 +210,22 @@ fn blend_glyph(pixmap_data: &mut [u8], x: i32, y: i32, w: i32, h: i32, color: Co
             }
             let alpha = color.a() as f32 / 255.0;
             if alpha > 0.01 {
-                let bg_b = pixmap_data[offset] as f32;
+                // tiny-skia uses RGBA format (R at offset, G at offset+1, B at offset+2, A at offset+3)
+                let bg_r = pixmap_data[offset] as f32;
                 let bg_g = pixmap_data[offset + 1] as f32;
-                let bg_r = pixmap_data[offset + 2] as f32;
+                let bg_b = pixmap_data[offset + 2] as f32;
 
                 let fg_r = color.r() as f32;
                 let fg_g = color.g() as f32;
                 let fg_b = color.b() as f32;
 
-                let blend_b = (bg_b * (1.0 - alpha) + fg_b * alpha).min(255.0) as u8;
-                let blend_g = (bg_g * (1.0 - alpha) + fg_g * alpha).min(255.0) as u8;
                 let blend_r = (bg_r * (1.0 - alpha) + fg_r * alpha).min(255.0) as u8;
+                let blend_g = (bg_g * (1.0 - alpha) + fg_g * alpha).min(255.0) as u8;
+                let blend_b = (bg_b * (1.0 - alpha) + fg_b * alpha).min(255.0) as u8;
 
-                pixmap_data[offset] = blend_b;
+                pixmap_data[offset] = blend_r;
                 pixmap_data[offset + 1] = blend_g;
-                pixmap_data[offset + 2] = blend_r;
+                pixmap_data[offset + 2] = blend_b;
                 pixmap_data[offset + 3] = 0xFF;
             }
         }

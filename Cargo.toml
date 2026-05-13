@@ -9,6 +9,7 @@ members = [
     "crates/xime-core",
     "crates/xime-daemon",
     "crates/xime-launcher",
+    "crates/xime-tray",
 ]
 
 [workspace.package]
@@ -24,6 +25,7 @@ librime = { path = "crates/librime" }
 xime-wayland = { path = "crates/xime-wayland" }
 xime-xkb = { path = "crates/xime-xkb" }
 xime-ui = { path = "crates/xime-ui" }
+xime-tray = { path = "crates/xime-tray" }
 thiserror = "1.0"
 once_cell = "1.17"
 anyhow = "1.0"
