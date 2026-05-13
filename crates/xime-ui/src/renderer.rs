@@ -161,7 +161,7 @@ impl CandidateRenderer {
 
             let text = format!("{}. {}", idx + 1, candidate);
             let mut buffer = Buffer::new(&mut self.font_system, metrics);
-            buffer.set_text(&mut self.font_system, &text, attrs.clone(), Shaping::Advanced);
+            buffer.set_text(&text, &attrs, Shaping::Advanced, None);
 
             let x_start = x_offset as i32;
 
@@ -184,7 +184,7 @@ impl CandidateRenderer {
         let metrics = Metrics::new(18.0, 22.0);
         let attrs = Attrs::new().family(Family::SansSerif);
         let mut buffer = Buffer::new(&mut self.font_system, metrics);
-        buffer.set_text(&mut self.font_system, text, attrs, Shaping::Advanced);
+        buffer.set_text(text, &attrs, Shaping::Advanced, None);
 
         let mut max_x = 0.0f32;
         for run in buffer.layout_runs() {

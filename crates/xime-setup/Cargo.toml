@@ -1,0 +1,17 @@
+[package]
+name = "xime-setup"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license = "GPL-3.0"
+repository.workspace = true
+
+[dependencies]
+gpui = { version = "0.2", default-features = false, features = ["wayland", "font-kit"] }
+librime = { path = "../librime" }
+librime-sys = { path = "../librime-sys" }
+anyhow = "1.0"
+rust-embed = { version = "8", features = ["interpolate-folder-path"] }
+serde_yaml = "0.9"
+serde = { version = "1.0", features = ["derive"] }
+zbus = "5"

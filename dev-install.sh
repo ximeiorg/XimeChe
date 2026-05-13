@@ -11,11 +11,12 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 echo "Installing xime-wayland for development to ${HOME}/.local"
 
 # Build release
-cargo build --release -p xime-daemon -p xime-launcher
+cargo build --release -p xime-daemon -p xime-launcher -p xime-setup
 
 # Install binaries
 install -Dm755 "${PROJECT_ROOT}/target/release/xime-daemon" "${BINDIR}/xime-daemon"
 install -Dm755 "${PROJECT_ROOT}/target/release/xime-launcher" "${BINDIR}/xime-launcher"
+install -Dm755 "${PROJECT_ROOT}/target/release/xime-setup" "${BINDIR}/xime-setup"
 
 # Generate and install DBus service file
 install -Dm644 "${PROJECT_ROOT}/resources/dbus/org.xime.Xime.service.in" \

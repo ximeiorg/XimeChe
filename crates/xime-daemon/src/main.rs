@@ -353,6 +353,14 @@ fn main() -> anyhow::Result<()> {
                         MenuAction::ToggleMode => {
                             command_tx.send(DaemonCommand::ToggleMode).ok();
                         }
+                        MenuAction::Settings => {
+                            let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+                            let setup_path = format!("{}/.local/bin/xime-setup", home);
+                            std::process::Command::new(&setup_path)
+                                .spawn()
+                                .map_err(|e| eprintln!("ERROR: Failed to launch xime-setup: {}", e))
+                                .ok();
+                        }
                         MenuAction::Deploy => {
                             command_tx.send(DaemonCommand::Deploy).ok();
                         }
