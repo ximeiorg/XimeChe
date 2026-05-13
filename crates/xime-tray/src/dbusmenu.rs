@@ -6,6 +6,7 @@ use tokio::sync::mpsc::Sender;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuAction {
     ToggleMode,
+    Settings,
     Deploy,
     Exit,
 }
@@ -42,8 +43,9 @@ impl DBusMenu {
             if let Some(tx) = &self.action_tx {
                 let action = match id {
                     1 => MenuAction::ToggleMode,
-                    3 => MenuAction::Deploy,
-                    4 => MenuAction::Exit,
+                    3 => MenuAction::Settings,
+                    4 => MenuAction::Deploy,
+                    5 => MenuAction::Exit,
                     _ => return,
                 };
                 let _ = tx.send(action).await;
@@ -72,10 +74,14 @@ impl DBusMenu {
                     ("type".to_string(), Value::new("separator")),
                 ]), Vec::<Value<'static>>::new())),
                 Value::new((3, HashMap::from([
+                    ("label".to_string(), Value::new("设置...")),
+                    ("icon-name".to_string(), Value::new("preferences-system")),
+                ]), Vec::<Value<'static>>::new())),
+                Value::new((4, HashMap::from([
                     ("label".to_string(), Value::new("重新部署")),
                     ("icon-name".to_string(), Value::new("view-refresh")),
                 ]), Vec::<Value<'static>>::new())),
-                Value::new((4, HashMap::from([
+                Value::new((5, HashMap::from([
                     ("label".to_string(), Value::new("退出")),
                     ("icon-name".to_string(), Value::new("application-exit")),
                 ]), Vec::<Value<'static>>::new())),
