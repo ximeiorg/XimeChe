@@ -1,6 +1,7 @@
 pub mod candidate;
 pub mod renderer;
 
+pub use candidate::CandidateItem;
 pub use candidate::CandidateList;
 pub use candidate::MoveDirection;
 pub use candidate::PageInfo;

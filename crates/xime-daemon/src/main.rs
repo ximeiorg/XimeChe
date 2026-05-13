@@ -273,13 +273,19 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
                                     
                                     let menu = ctx.menu();
                                     if menu.num_candidates > 0 {
-                                        let candidate_texts: Vec<String> = 
-                                            menu.candidates.iter().map(|x| x.text.to_string()).collect();
-                                        eprintln!("DEBUG: Candidates: {:?}", candidate_texts);
+                                        let candidate_items: Vec<xime_ui::CandidateItem> = 
+                                            menu.candidates.iter().enumerate().map(|(i, x)| {
+                                                xime_ui::CandidateItem {
+                                                    text: x.text.to_string(),
+                                                    comment: x.comment.map(|c| c.to_string()).unwrap_or_default(),
+                                                    index: i,
+                                                }
+                                            }).collect();
+                                        eprintln!("DEBUG: Candidates: {:?}", candidate_items);
                                         
-                                        let width = xime_ui::calculate_candidate_width(&candidate_texts);
+                                        let width = xime_ui::calculate_candidate_width(&candidate_items);
                                         let height = 36;
-                                        if let Err(e) = c.show_candidate_window(width, height, &candidate_texts) {
+                                        if let Err(e) = c.show_candidate_window(width, height, &candidate_items) {
                                             eprintln!("DEBUG: Candidate window error: {}", e);
                                         }
                                         candidate_window_visible = true;
