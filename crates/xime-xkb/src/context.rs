@@ -1,6 +1,5 @@
 use xkbcommon::xkb::{Context, Keymap, State, Keysym, Keycode, ModIndex};
 use std::os::unix::io::{RawFd, FromRawFd, OwnedFd};
-use std::io::Read;
 use std::fs::File;
 
 use crate::Error;

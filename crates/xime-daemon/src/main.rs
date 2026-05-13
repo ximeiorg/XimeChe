@@ -10,7 +10,7 @@ use xime_xkb::XkbContext;
 use xime_tray::{TrayManager, InputMode, MenuAction};
 use librime::traits::Traits;
 
-enum DaemonCommand {
+pub(crate) enum DaemonCommand {
     OpenWaylandSocket(OwnedFd, String),
     ToggleMode,
     Deploy,
@@ -30,7 +30,7 @@ impl Clone for XimeDaemon {
 }
 
 impl XimeDaemon {
-    pub fn new_with_channel(command_tx: Sender<DaemonCommand>) -> Self {
+    fn new_with_channel(command_tx: Sender<DaemonCommand>) -> Self {
         Self { command_tx }
     }
 }
@@ -120,10 +120,10 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
             Ok(DaemonCommand::ToggleMode) => {
                 eprintln!("DEBUG: ToggleMode command received");
                 if let Some(session) = rime_session.as_ref() {
-                    let result = session.process_key(librime::XK_Shift_L as i32, 0);
+                    let result = session.process_key(librime::XK_SHIFT_L as i32, 0);
                     eprintln!("DEBUG: Rime toggle press result: {}", result);
                     
-                    let result2 = session.process_key(librime::XK_Shift_L as i32, librime::K_RELEASE_MASK as i32);
+                    let result2 = session.process_key(librime::XK_SHIFT_L as i32, librime::K_RELEASE_MASK as i32);
                     eprintln!("DEBUG: Rime toggle release result: {}", result2);
                     
                     if let Ok(status) = session.status() {

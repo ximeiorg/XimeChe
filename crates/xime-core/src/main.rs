@@ -43,6 +43,7 @@ enum Backend {
 pub struct Xime {
     backend: Backend,
     rime_session: Session,
+    #[allow(dead_code)]
     xkb: XkbContext,
     candidates: CandidateList,
 }

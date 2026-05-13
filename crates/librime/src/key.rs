@@ -1,50 +1,50 @@
 pub type KeyCode = u32;
 pub type Modifier = u32;
 
-pub const XK_BackSpace: KeyCode = librime_sys::RimeKeyCode_XK_BackSpace;
-pub const XK_Tab: KeyCode = librime_sys::RimeKeyCode_XK_Tab;
-pub const XK_Return: KeyCode = librime_sys::RimeKeyCode_XK_Return;
-pub const XK_Escape: KeyCode = librime_sys::RimeKeyCode_XK_Escape;
-pub const XK_Delete: KeyCode = librime_sys::RimeKeyCode_XK_Delete;
-pub const XK_space: KeyCode = librime_sys::RimeKeyCode_XK_space;
-pub const XK_Left: KeyCode = librime_sys::RimeKeyCode_XK_Left;
-pub const XK_Up: KeyCode = librime_sys::RimeKeyCode_XK_Up;
-pub const XK_Right: KeyCode = librime_sys::RimeKeyCode_XK_Right;
-pub const XK_Down: KeyCode = librime_sys::RimeKeyCode_XK_Down;
-pub const XK_Prior: KeyCode = librime_sys::RimeKeyCode_XK_Prior;
-pub const XK_Next: KeyCode = librime_sys::RimeKeyCode_XK_Next;
-pub const XK_Home: KeyCode = librime_sys::RimeKeyCode_XK_Home;
-pub const XK_End: KeyCode = librime_sys::RimeKeyCode_XK_End;
+pub const XK_BACK_SPACE: KeyCode = librime_sys::RimeKeyCode_XK_BackSpace;
+pub const XK_TAB: KeyCode = librime_sys::RimeKeyCode_XK_Tab;
+pub const XK_RETURN: KeyCode = librime_sys::RimeKeyCode_XK_Return;
+pub const XK_ESCAPE: KeyCode = librime_sys::RimeKeyCode_XK_Escape;
+pub const XK_DELETE: KeyCode = librime_sys::RimeKeyCode_XK_Delete;
+pub const XK_SPACE: KeyCode = librime_sys::RimeKeyCode_XK_space;
+pub const XK_LEFT: KeyCode = librime_sys::RimeKeyCode_XK_Left;
+pub const XK_UP: KeyCode = librime_sys::RimeKeyCode_XK_Up;
+pub const XK_RIGHT: KeyCode = librime_sys::RimeKeyCode_XK_Right;
+pub const XK_DOWN: KeyCode = librime_sys::RimeKeyCode_XK_Down;
+pub const XK_PRIOR: KeyCode = librime_sys::RimeKeyCode_XK_Prior;
+pub const XK_NEXT: KeyCode = librime_sys::RimeKeyCode_XK_Next;
+pub const XK_HOME: KeyCode = librime_sys::RimeKeyCode_XK_Home;
+pub const XK_END: KeyCode = librime_sys::RimeKeyCode_XK_End;
 
-pub const XK_Shift_L: KeyCode = librime_sys::RimeKeyCode_XK_Shift_L;
-pub const XK_Shift_R: KeyCode = librime_sys::RimeKeyCode_XK_Shift_R;
+pub const XK_SHIFT_L: KeyCode = librime_sys::RimeKeyCode_XK_Shift_L;
+pub const XK_SHIFT_R: KeyCode = librime_sys::RimeKeyCode_XK_Shift_R;
 
-pub const XK_a: KeyCode = librime_sys::RimeKeyCode_XK_a;
-pub const XK_b: KeyCode = librime_sys::RimeKeyCode_XK_b;
-pub const XK_c: KeyCode = librime_sys::RimeKeyCode_XK_c;
-pub const XK_d: KeyCode = librime_sys::RimeKeyCode_XK_d;
-pub const XK_e: KeyCode = librime_sys::RimeKeyCode_XK_e;
-pub const XK_f: KeyCode = librime_sys::RimeKeyCode_XK_f;
-pub const XK_g: KeyCode = librime_sys::RimeKeyCode_XK_g;
-pub const XK_h: KeyCode = librime_sys::RimeKeyCode_XK_h;
-pub const XK_i: KeyCode = librime_sys::RimeKeyCode_XK_i;
-pub const XK_j: KeyCode = librime_sys::RimeKeyCode_XK_j;
-pub const XK_k: KeyCode = librime_sys::RimeKeyCode_XK_k;
-pub const XK_l: KeyCode = librime_sys::RimeKeyCode_XK_l;
-pub const XK_m: KeyCode = librime_sys::RimeKeyCode_XK_m;
-pub const XK_n: KeyCode = librime_sys::RimeKeyCode_XK_n;
-pub const XK_o: KeyCode = librime_sys::RimeKeyCode_XK_o;
-pub const XK_p: KeyCode = librime_sys::RimeKeyCode_XK_p;
-pub const XK_q: KeyCode = librime_sys::RimeKeyCode_XK_q;
-pub const XK_r: KeyCode = librime_sys::RimeKeyCode_XK_r;
-pub const XK_s: KeyCode = librime_sys::RimeKeyCode_XK_s;
-pub const XK_t: KeyCode = librime_sys::RimeKeyCode_XK_t;
-pub const XK_u: KeyCode = librime_sys::RimeKeyCode_XK_u;
-pub const XK_v: KeyCode = librime_sys::RimeKeyCode_XK_v;
-pub const XK_w: KeyCode = librime_sys::RimeKeyCode_XK_w;
-pub const XK_x: KeyCode = librime_sys::RimeKeyCode_XK_x;
-pub const XK_y: KeyCode = librime_sys::RimeKeyCode_XK_y;
-pub const XK_z: KeyCode = librime_sys::RimeKeyCode_XK_z;
+pub const XK_A: KeyCode = librime_sys::RimeKeyCode_XK_a;
+pub const XK_B: KeyCode = librime_sys::RimeKeyCode_XK_b;
+pub const XK_C: KeyCode = librime_sys::RimeKeyCode_XK_c;
+pub const XK_D: KeyCode = librime_sys::RimeKeyCode_XK_d;
+pub const XK_E: KeyCode = librime_sys::RimeKeyCode_XK_e;
+pub const XK_F: KeyCode = librime_sys::RimeKeyCode_XK_f;
+pub const XK_G: KeyCode = librime_sys::RimeKeyCode_XK_g;
+pub const XK_H: KeyCode = librime_sys::RimeKeyCode_XK_h;
+pub const XK_I: KeyCode = librime_sys::RimeKeyCode_XK_i;
+pub const XK_J: KeyCode = librime_sys::RimeKeyCode_XK_j;
+pub const XK_K: KeyCode = librime_sys::RimeKeyCode_XK_k;
+pub const XK_L: KeyCode = librime_sys::RimeKeyCode_XK_l;
+pub const XK_M: KeyCode = librime_sys::RimeKeyCode_XK_m;
+pub const XK_N: KeyCode = librime_sys::RimeKeyCode_XK_n;
+pub const XK_O: KeyCode = librime_sys::RimeKeyCode_XK_o;
+pub const XK_P: KeyCode = librime_sys::RimeKeyCode_XK_p;
+pub const XK_Q: KeyCode = librime_sys::RimeKeyCode_XK_q;
+pub const XK_R: KeyCode = librime_sys::RimeKeyCode_XK_r;
+pub const XK_S: KeyCode = librime_sys::RimeKeyCode_XK_s;
+pub const XK_T: KeyCode = librime_sys::RimeKeyCode_XK_t;
+pub const XK_U: KeyCode = librime_sys::RimeKeyCode_XK_u;
+pub const XK_V: KeyCode = librime_sys::RimeKeyCode_XK_v;
+pub const XK_W: KeyCode = librime_sys::RimeKeyCode_XK_w;
+pub const XK_X: KeyCode = librime_sys::RimeKeyCode_XK_x;
+pub const XK_Y: KeyCode = librime_sys::RimeKeyCode_XK_y;
+pub const XK_Z: KeyCode = librime_sys::RimeKeyCode_XK_z;
 
 pub const XK_0: KeyCode = librime_sys::RimeKeyCode_XK_0;
 pub const XK_1: KeyCode = librime_sys::RimeKeyCode_XK_1;
@@ -75,10 +75,10 @@ impl KeyEvent {
 
     pub fn from_char(c: char) -> Self {
         let key_code = match c {
-            'a'..='z' => XK_a + (c as KeyCode - 'a' as KeyCode),
-            'A'..='Z' => XK_a + (c as KeyCode - 'A' as KeyCode),
+            'a'..='z' => XK_A + (c as KeyCode - 'a' as KeyCode),
+            'A'..='Z' => XK_A + (c as KeyCode - 'A' as KeyCode),
             '0'..='9' => XK_0 + (c as KeyCode - '0' as KeyCode),
-            ' ' => XK_space,
+            ' ' => XK_SPACE,
             _ => c as KeyCode,
         };
         Self { key_code, modifiers: 0 }
