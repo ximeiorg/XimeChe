@@ -171,36 +171,40 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>) {
                                     c.forward_key(event.serial, event.time, event.key, event.pressed);
                                 }
                                 
-                                if let Some(commit) = session.commit() {
-                                    c.commit_string(commit.text());
-                                    eprintln!("DEBUG: Committed: {}", commit.text());
-                                }
+if let Some(commit) = session.commit() {
+                                        c.commit_string(commit.text());
+                                        let _ = c.flush();
+                                        eprintln!("DEBUG: Committed: {}", commit.text());
+                                    }
                                 
-                                if let Some(ctx) = session.context() {
-                                    let menu = ctx.menu();
-                                    if menu.num_candidates > 0 {
-                                        let candidate_texts: Vec<String> = 
-                                            menu.candidates.iter().map(|x| x.text.to_string()).collect();
-                                        eprintln!("DEBUG: Candidates: {:?}", candidate_texts);
-                                        
-                                        let width = xime_ui::calculate_candidate_width(&candidate_texts);
-                                        let height = 36;
-                                        if let Err(e) = c.show_candidate_window(width, height, &candidate_texts) {
-                                            eprintln!("DEBUG: Candidate window error: {}", e);
-                                        }
-                                        candidate_window_visible = true;
-                                        
+if let Some(ctx) = session.context() {
+                                        // Handle preedit FIRST (input encoding), regardless of candidates
                                         if let Some(p) = ctx.composition().preedit {
                                             c.set_preedit(p, p.len() as i32);
+                                        } else {
+                                            c.clear_preedit();
                                         }
-                                    } else {
-                                        c.clear_preedit();
-                                        if candidate_window_visible {
+                                        let _ = c.flush();
+                                        
+                                        // Then handle candidate window
+                                        let menu = ctx.menu();
+                                        if menu.num_candidates > 0 {
+                                            let candidate_texts: Vec<String> = 
+                                                menu.candidates.iter().map(|x| x.text.to_string()).collect();
+                                            eprintln!("DEBUG: Candidates: {:?}", candidate_texts);
+                                            
+                                            let width = xime_ui::calculate_candidate_width(&candidate_texts);
+                                            let height = 36;
+                                            if let Err(e) = c.show_candidate_window(width, height, &candidate_texts) {
+                                                eprintln!("DEBUG: Candidate window error: {}", e);
+                                            }
+                                            candidate_window_visible = true;
+                                        } else if candidate_window_visible {
                                             c.hide_candidate_window();
+                                            let _ = c.flush();
                                             candidate_window_visible = false;
                                         }
                                     }
-                                }
                             }
                         }
                     }
@@ -208,7 +212,7 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>) {
             }
         }
         
-        thread::sleep(std::time::Duration::from_millis(10));
+        thread::sleep(std::time::Duration::from_millis(1));
     }
     
     librime::finalize();

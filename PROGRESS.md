@@ -1,7 +1,7 @@
 # XIME-Wayland 开发进度
 
 ## 当前状态
-**候选栏渲染已完成重构，使用 cosmic-text + tiny-skia 替代 ab_glyph。**
+**修复了 Shift 键卡死问题：移除嵌套 sync_roundtrip、hide_candidate_window 后 flush、减少 sleep 间隔。**
 
 ## 已完成功能
 1. **候选栏绘制**
@@ -23,10 +23,12 @@
    - 键盘 grab 和 keymap 加载
    
 4. **修复的问题**
-   - wayland-client panic（event_created_child 宏）
-   - xkbcommon panic（升级到 0.9.0）
-   - 按键转发问题
-   - 候选词刷新问题
+    - wayland-client panic（event_created_child 宏）
+    - xkbcommon panic（升级到 0.9.0）
+    - 按键转发问题
+    - 候选词刷新问题
+    - 输入编码延迟问题（preedit/commit 请求没有立即 flush）
+    - Shift 键卡死问题（移除嵌套 sync_roundtrip、hide_candidate_window 后 flush、减少 sleep 间隔）
 
 5. **渲染重构**
    - 移除 slint UI 依赖

@@ -493,6 +493,12 @@ impl WaylandConnectionV1 {
         }
     }
     
+    pub fn flush(&self) -> Result<()> {
+        self.connection.flush()
+            .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+        Ok(())
+    }
+    
     pub fn forward_key(&self, serial: u32, time: u32, key: u32, pressed: bool) {
         if let Some(ctx) = self.get_context() {
             let key_state: u32 = if pressed { 1 } else { 0 };
@@ -515,7 +521,8 @@ impl WaylandConnectionV1 {
         self.candidate_surface = Some(surface);
         self.panel_surface = Some(panel_surface);
         
-        self.sync_roundtrip()?;
+        self.connection.flush()
+            .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
         
         eprintln!("DEBUG: Created candidate panel surface with overlay_panel");
         Ok(())
@@ -558,8 +565,6 @@ impl WaylandConnectionV1 {
         surface.attach(Some(&buffer), 0, 0);
         surface.damage_buffer(0, 0, width as i32, height as i32);
         surface.commit();
-        
-        self.sync_roundtrip()?;
         
         eprintln!("DEBUG: Showed candidate window {}x{} with {} candidates", width, height, candidates.len());
         Ok(())
@@ -606,9 +611,7 @@ fn draw_candidates(&self, fd: &OwnedFd, width: u32, height: u32, candidates: &[S
         if let Some(surface) = &self.candidate_surface {
             surface.attach(None::<&WlBuffer>, 0, 0);
             surface.commit();
-            if let Ok(_) = self.sync_roundtrip() {
-                eprintln!("DEBUG: Hidden candidate window");
-            }
+            eprintln!("DEBUG: Hidden candidate window");
         }
     }
     
