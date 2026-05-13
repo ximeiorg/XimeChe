@@ -182,8 +182,7 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>) {
                                                 menu.candidates.iter().map(|x| x.text.to_string()).collect();
                                             eprintln!("DEBUG: Candidates: {:?}", candidate_texts);
                                             
-                                            // Window size
-                                            let width = 400;
+                                            let width = xime_ui::calculate_candidate_width(&candidate_texts);
                                             let height = 36;
                                             if let Err(e) = c.show_candidate_window(width, height, &candidate_texts) {
                                                 eprintln!("DEBUG: Candidate window error: {}", e);

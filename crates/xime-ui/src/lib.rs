@@ -6,6 +6,7 @@ pub use candidate::MoveDirection;
 pub use candidate::PageInfo;
 pub use renderer::CandidateRenderer;
 pub use renderer::draw_candidates_to_buffer;
+pub use renderer::calculate_candidate_width;
 
 pub type Result<T> = std::result::Result<T, Error>;
 
