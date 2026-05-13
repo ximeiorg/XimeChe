@@ -1,5 +1,6 @@
 use cosmic_text::{FontSystem, SwashCache, Buffer, Metrics, Attrs, Color, Shaping, Family};
 use tiny_skia::{Pixmap, Paint, PathBuilder, FillRule};
+use crate::candidate::CandidateItem;
 
 const SHADOW_OFFSET_X: f32 = 2.0;
 const SHADOW_OFFSET_Y: f32 = 4.0;
@@ -16,22 +17,26 @@ impl CandidateRenderer {
         Self { font_system, swash_cache }
     }
 
-    pub fn calculate_width(&mut self, candidates: &[String]) -> u32 {
+    pub fn calculate_width(&mut self, candidates: &[CandidateItem]) -> u32 {
         if candidates.is_empty() {
             return 100;
         }
 
         let mut total_width: f32 = 15.0;
         for (idx, candidate) in candidates.iter().enumerate() {
-            let text = format!("{}. {}", idx + 1, candidate);
-            total_width += self.measure_text_width(&text) + 20.0;
+            let main_text = format!("{}. {}", idx + 1, candidate.text);
+            total_width += self.measure_text_width(&main_text, 16.0);
+            if !candidate.comment.is_empty() {
+                total_width += self.measure_text_width(&candidate.comment, 12.0) + 5.0;
+            }
+            total_width += 20.0;
         }
         total_width += 15.0;
 
         (total_width.ceil() as u32).max(100)
     }
 
-    pub fn draw_candidates(&mut self, pixels: &mut [u8], width: u32, height: u32, candidates: &[String]) {
+    pub fn draw_candidates(&mut self, pixels: &mut [u8], width: u32, height: u32, candidates: &[CandidateItem]) {
         if candidates.is_empty() {
             return;
         }
@@ -43,13 +48,12 @@ impl CandidateRenderer {
         self.draw_highlight(&mut pixmap, width, height, candidates);
         self.draw_text(&mut pixmap, width, height, candidates);
 
-        // Convert RGBA to BGRA (Wayland ARGB8888 format on little-endian)
         let data = pixmap.data();
         for i in (0..data.len()).step_by(4) {
-            pixels[i] = data[i + 2];     // B from R
-            pixels[i + 1] = data[i + 1]; // G stays
-            pixels[i + 2] = data[i];     // R from B
-            pixels[i + 3] = data[i + 3]; // A stays
+            pixels[i] = data[i + 2];
+            pixels[i + 1] = data[i + 1];
+            pixels[i + 2] = data[i];
+            pixels[i + 3] = data[i + 3];
         }
     }
 
@@ -109,16 +113,139 @@ impl CandidateRenderer {
         );
     }
 
-    fn draw_highlight(&mut self, pixmap: &mut Pixmap, _width: u32, height: u32, candidates: &[String]) {
+fn draw_highlight(&mut self, pixmap: &mut Pixmap, _width: u32, height: u32, candidates: &[CandidateItem]) {
         if candidates.is_empty() {
             return;
         }
 
-        let first_text = format!("1. {}", candidates[0]);
-        let text_width = self.measure_text_width(&first_text);
+        let candidate = &candidates[0];
+        let main_text = format!("1. {}", candidate.text);
+        let text_width = self.measure_text_width(&main_text, 16.0);
+        let comment_width = if !candidate.comment.is_empty() {
+            self.measure_text_width(&candidate.comment, 12.0) + 5.0
+        } else {
+            0.0
+        };
 
         let hl_x = 8.0f32;
-        let hl_width = text_width + 16.0f32;
+        let hl_width = text_width + comment_width + 14.0f32;
+        let hl_height = height as f32 - 8.0f32;
+        let hl_y = 4.0f32;
+        let hl_radius = 4.0f32;
+
+        let rounded_rect = build_rounded_rect(hl_x, hl_y, hl_width, hl_height, hl_radius);
+
+        let mut paint = Paint::default();
+        paint.set_color_rgba8(0x8F, 0x73, 0xE2, 0xFF);
+        paint.anti_alias = true;
+
+        pixmap.fill_path(
+            &rounded_rect,
+            &paint,
+            FillRule::Winding,
+            tiny_skia::Transform::identity(),
+            None,
+        );
+    }
+
+    fn draw_text(&mut self, pixmap: &mut Pixmap, _width: u32, height: u32, candidates: &[CandidateItem]) {
+        let line_height = 20.0f32;
+        let y_offset = ((height as f32 - line_height) / 2.0).max(0.0) as i32;
+
+        let pixmap_width = pixmap.width() as usize;
+        let pixmap_height = pixmap.height() as usize;
+
+        let mut x_offset: f32 = 15.0;
+
+        for (idx, candidate) in candidates.iter().enumerate() {
+            let is_first = idx == 0;
+            
+            let main_color = if is_first {
+                Color::rgba(0xFF, 0xFF, 0xFF, 0xFF)
+            } else {
+                Color::rgba(0x33, 0x33, 0x33, 0xFF)
+            };
+            let comment_color = if is_first {
+                Color::rgba(0xCC, 0xCC, 0xCC, 0xFF)
+            } else {
+                Color::rgba(0x99, 0x99, 0x99, 0xFF)
+            };
+
+            let main_text = format!("{}. {}", idx + 1, candidate.text);
+            let main_width = self.draw_text_item(
+                &main_text, 16.0, main_color, x_offset as i32, y_offset,
+                pixmap.data_mut(), pixmap_width, pixmap_height
+            );
+
+            let mut comment_width = 0.0;
+            if !candidate.comment.is_empty() {
+                comment_width = self.draw_text_item(
+                    &candidate.comment, 12.0, comment_color,
+                    (x_offset + main_width + 3.0) as i32, y_offset + 4,
+                    pixmap.data_mut(), pixmap_width, pixmap_height
+                );
+            }
+
+            x_offset += main_width + comment_width + 23.0;
+        }
+    }
+
+    fn draw_text_item(
+        &mut self,
+        text: &str,
+        font_size: f32,
+        color: Color,
+        x_start: i32,
+        y_offset: i32,
+        pixmap_data: &mut [u8],
+        pixmap_width: usize,
+        pixmap_height: usize,
+    ) -> f32 {
+        let metrics = Metrics::new(font_size, font_size + 4.0);
+        let attrs = Attrs::new().family(Family::SansSerif);
+        let mut buffer = Buffer::new(&mut self.font_system, metrics);
+        buffer.set_text(text, &attrs, Shaping::Advanced, None);
+        buffer.shape_until_scroll(&mut self.font_system, false);
+
+        let text_width = buffer.layout_runs().fold(0.0f32, |max_w, run| max_w.max(run.line_w));
+
+        buffer.draw(
+            &mut self.font_system,
+            &mut self.swash_cache,
+            color,
+            |x, y, w, h, color| {
+                blend_glyph(pixmap_data, x as i32 + x_start, y + y_offset, w as i32, h as i32, color, pixmap_width, pixmap_height);
+            },
+        );
+
+        text_width
+    }
+
+    fn measure_text_width(&mut self, text: &str, font_size: f32) -> f32 {
+        let metrics = Metrics::new(font_size, font_size + 4.0);
+        let attrs = Attrs::new().family(Family::SansSerif);
+        let mut buffer = Buffer::new(&mut self.font_system, metrics);
+        buffer.set_text(text, &attrs, Shaping::Advanced, None);
+        buffer.shape_until_scroll(&mut self.font_system, false);
+
+        buffer.layout_runs().fold(0.0f32, |max_w, run| max_w.max(run.line_w))
+    }
+
+        let font_size = 16.0f32;
+        let line_height = 20.0f32;
+        let metrics = Metrics::new(font_size, line_height);
+        let attrs = Attrs::new().family(Family::SansSerif);
+        
+        let mut buffer = Buffer::new(&mut self.font_system, metrics);
+        buffer.set_text(&candidates[0], &attrs, Shaping::Advanced, None);
+        buffer.shape_until_scroll(&mut self.font_system, false);
+        
+        let text_width = buffer.layout_runs().fold(0.0f32, |max_x, run| {
+            run.glyphs.iter().fold(max_x, |mx, glyph| mx.max(glyph.x + glyph.w))
+        });
+
+        let hl_x = 8.0f32;
+        let hl_width = text_width + 14.0f32;
         let hl_height = height as f32 - 8.0f32;
         let hl_y = 4.0f32;
         let hl_radius = 4.0f32;
@@ -159,9 +286,11 @@ impl CandidateRenderer {
             let is_first = idx == 0;
             let text_color = if is_first { highlight_color } else { normal_color };
 
-            let text = format!("{}. {}", idx + 1, candidate);
             let mut buffer = Buffer::new(&mut self.font_system, metrics);
-            buffer.set_text(&text, &attrs, Shaping::Advanced, None);
+            buffer.set_text(candidate, &attrs, Shaping::Advanced, None);
+            buffer.shape_until_scroll(&mut self.font_system, false);
+
+            let text_width = buffer.layout_runs().fold(0.0f32, |max_w, run| max_w.max(run.line_w));
 
             let x_start = x_offset as i32;
 
@@ -176,23 +305,22 @@ impl CandidateRenderer {
                 },
             );
 
-            x_offset += self.measure_text_width(&text) + 20.0;
+            x_offset += text_width + 20.0;
         }
     }
 
     fn measure_text_width(&mut self, text: &str) -> f32 {
-        let metrics = Metrics::new(18.0, 22.0);
+        let metrics = Metrics::new(16.0, 20.0);
         let attrs = Attrs::new().family(Family::SansSerif);
         let mut buffer = Buffer::new(&mut self.font_system, metrics);
         buffer.set_text(text, &attrs, Shaping::Advanced, None);
+        buffer.shape_until_scroll(&mut self.font_system, false);
 
-        let mut max_x = 0.0f32;
+        let mut max_width = 0.0f32;
         for run in buffer.layout_runs() {
-            for glyph in run.glyphs {
-                max_x = max_x.max(glyph.x + glyph.w);
-            }
+            max_width = max_width.max(run.line_w);
         }
-        max_x
+        max_width
     }
 }
 
@@ -249,18 +377,48 @@ fn build_rounded_rect(x: f32, y: f32, w: f32, h: f32, r: f32) -> tiny_skia::Path
     pb.finish().unwrap()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_calculate_width_with_comment() {
+        let mut renderer = CandidateRenderer::new();
+        
+        let candidates: Vec<CandidateItem> = vec![
+            CandidateItem { text: "式".to_string(), comment: "aa".to_string(), index: 0 },
+            CandidateItem { text: "是".to_string(), comment: "bb".to_string(), index: 1 },
+            CandidateItem { text: "时".to_string(), comment: "cc".to_string(), index: 2 },
+        ];
+        let width = renderer.calculate_width(&candidates);
+        eprintln!("Width with comments: {}", width);
+        assert!(width > 100, "Width should include comment space");
+    }
+    
+    #[test]
+    fn test_measure_text_width() {
+        let mut renderer = CandidateRenderer::new();
+        
+        let w16 = renderer.measure_text_width("式", 16.0);
+        let w12 = renderer.measure_text_width("aa", 12.0);
+        eprintln!("16px: {}, 12px: {}", w16, w12);
+        assert!(w16 > 0.0);
+        assert!(w12 > 0.0);
+    }
+}
+
 impl Default for CandidateRenderer {
     fn default() -> Self {
         Self::new()
     }
 }
 
-pub fn draw_candidates_to_buffer(pixels: &mut [u8], width: u32, height: u32, candidates: &[String]) {
+pub fn draw_candidates_to_buffer(pixels: &mut [u8], width: u32, height: u32, candidates: &[CandidateItem]) {
     let mut renderer = CandidateRenderer::new();
     renderer.draw_candidates(pixels, width, height, candidates);
 }
 
-pub fn calculate_candidate_width(candidates: &[String]) -> u32 {
+pub fn calculate_candidate_width(candidates: &[CandidateItem]) -> u32 {
     let mut renderer = CandidateRenderer::new();
     renderer.calculate_width(candidates)
 }

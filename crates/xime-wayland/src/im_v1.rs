@@ -21,6 +21,7 @@ use std::os::unix::io::{OwnedFd, AsFd, FromRawFd};
 use std::os::unix::net::UnixStream;
 use std::slice;
 use xime_ui::draw_candidates_to_buffer;
+use xime_ui::CandidateItem;
 
 pub mod __interfaces {
     use wayland_client::protocol::__interfaces::*;
@@ -528,14 +529,13 @@ impl WaylandConnectionV1 {
         Ok(())
     }
     
-    pub fn show_candidate_window(&mut self, width: u32, height: u32, candidates: &[String]) -> Result<()> {
+    pub fn show_candidate_window(&mut self, width: u32, height: u32, candidates: &[CandidateItem]) -> Result<()> {
         eprintln!("DEBUG: show_candidate_window called with width={}, height={}, candidates={}", width, height, candidates.len());
         
         if self.candidate_surface.is_none() {
             self.create_candidate_surface()?;
         }
         
-        // Destroy old buffer and pool
         if let Some(buffer) = self.current_buffer.take() {
             buffer.destroy();
         }
@@ -570,7 +570,7 @@ impl WaylandConnectionV1 {
         Ok(())
     }
     
-fn draw_candidates(&self, fd: &OwnedFd, width: u32, height: u32, candidates: &[String]) -> Result<()> {
+fn draw_candidates(&self, fd: &OwnedFd, width: u32, height: u32, candidates: &[CandidateItem]) -> Result<()> {
         let size = (width * height * 4) as usize;
         let size_nonzero = std::num::NonZero::new(size).expect("size should be non-zero");
         

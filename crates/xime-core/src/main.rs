@@ -263,11 +263,18 @@ impl Xime {
                             let c: Vec<(&str, Option<&str>)> = menu.candidates.iter().map(|x| (x.text, x.comment)).collect();
                             self.candidates.set_candidates(c, menu.select_keys.as_deref());
                             
-                            let candidate_texts: Vec<String> = menu.candidates.iter().map(|x| x.text.to_string()).collect();
-                            eprintln!("DEBUG: Candidates: {:?}", candidate_texts);
+                            let candidate_items: Vec<xime_ui::CandidateItem> = menu.candidates.iter().enumerate().map(|(i, x)| {
+                                xime_ui::CandidateItem {
+                                    text: x.text.to_string(),
+                                    comment: x.comment.map(|c| c.to_string()).unwrap_or_default(),
+                                    index: i,
+                                }
+                            }).collect();
+                            eprintln!("DEBUG: Candidates: {:?}", candidate_items);
                             
-                            let height = candidate_texts.len() as u32 * 25 + 10;
-                            if let Err(e) = conn.show_candidate_window(300, height, &candidate_texts) {
+                            let width = xime_ui::calculate_candidate_width(&candidate_items);
+                            let height = 36;
+                            if let Err(e) = conn.show_candidate_window(width, height, &candidate_items) {
                                 eprintln!("DEBUG: Failed to show candidate window: {}", e);
                             } else {
                                 candidate_window_visible = true;
