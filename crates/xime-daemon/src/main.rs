@@ -6,7 +6,7 @@ use zbus::{Connection, interface};
 use zbus::zvariant::Fd;
 use xime_wayland::{WaylandConnectionV1, InputMethodV1State};
 use xime_xkb::XkbContext;
-use librime::{traits::Traits, session::Session};
+use librime::{traits::Traits, session::Session, K_RELEASE_MASK};
 
 enum DaemonCommand {
     OpenWaylandSocket(OwnedFd, String),
@@ -147,57 +147,56 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>) {
                 
                 let events = c.pop_key_events();
                 for event in events {
-                    if event.pressed {
-                        eprintln!("DEBUG: Key pressed: keycode={}", event.key);
-                        
-                        if let Some(ref mut x) = xkb {
-                            let keysym = x.key_from_keycode(event.key + 8);
-                            if let Some(sym) = keysym {
-                                eprintln!("DEBUG: keysym={}", sym.raw());
+                    eprintln!("DEBUG: Key event: keycode={}, pressed={}", event.key, event.pressed);
+                    
+                    if let Some(ref mut x) = xkb {
+                        let keysym = x.key_from_keycode(event.key + 8);
+                        if let Some(sym) = keysym {
+                            eprintln!("DEBUG: keysym={}", sym.raw());
+                            
+                            if let Some(session) = rime_session.as_ref() {
+                                let modifiers = x.get_modifiers();
+                                let release_mask = if !event.pressed { librime::K_RELEASE_MASK } else { 0 };
+                                let result = session.process_key(
+                                    sym.raw() as i32,
+                                    modifiers.effective as i32 | release_mask as i32,
+                                );
+                                eprintln!("DEBUG: Rime result: {:?}", result);
                                 
-                                if let Some(session) = rime_session.as_ref() {
-                                    let modifiers = x.get_modifiers();
-                                    let result = session.process_key(
-                                        sym.raw() as i32,
-                                        modifiers.effective as i32,
-                                    );
-                                    eprintln!("DEBUG: Rime result: {:?}", result);
-                                    
-                                    if !result {
-                                        // Rime doesn't handle this key, forward to app
-                                        eprintln!("DEBUG: Forwarding key to app: keysym={}", sym.raw());
-                                        c.forward_key(event.serial, event.time, event.key, true);
-                                        c.forward_key(event.serial + 1, event.time, event.key, false);
-                                    }
-                                    
-                                    if let Some(commit) = session.commit() {
-                                        c.commit_string(commit.text());
-                                        eprintln!("DEBUG: Committed: {}", commit.text());
-                                    }
-                                    
-                                    if let Some(ctx) = session.context() {
-                                        let menu = ctx.menu();
-                                        if menu.num_candidates > 0 {
-                                            let candidate_texts: Vec<String> = 
-                                                menu.candidates.iter().map(|x| x.text.to_string()).collect();
-                                            eprintln!("DEBUG: Candidates: {:?}", candidate_texts);
-                                            
-                                            let width = xime_ui::calculate_candidate_width(&candidate_texts);
-                                            let height = 36;
-                                            if let Err(e) = c.show_candidate_window(width, height, &candidate_texts) {
-                                                eprintln!("DEBUG: Candidate window error: {}", e);
-                                            }
-                                            candidate_window_visible = true;
-                                            
-                                            if let Some(p) = ctx.composition().preedit {
-                                                c.set_preedit(p, p.len() as i32);
-                                            }
-                                        } else {
-                                            c.clear_preedit();
-                                            if candidate_window_visible {
-                                                c.hide_candidate_window();
-                                                candidate_window_visible = false;
-                                            }
+                                if !result {
+                                    // Rime doesn't handle this key, forward to app
+                                    eprintln!("DEBUG: Forwarding key to app: keysym={}", sym.raw());
+                                    c.forward_key(event.serial, event.time, event.key, event.pressed);
+                                    c.forward_key(event.serial, event.time, event.key, !event.pressed);
+                                }
+                                
+                                if let Some(commit) = session.commit() {
+                                    c.commit_string(commit.text());
+                                    eprintln!("DEBUG: Committed: {}", commit.text());
+                                }
+                                
+                                if let Some(ctx) = session.context() {
+                                    let menu = ctx.menu();
+                                    if menu.num_candidates > 0 {
+                                        let candidate_texts: Vec<String> = 
+                                            menu.candidates.iter().map(|x| x.text.to_string()).collect();
+                                        eprintln!("DEBUG: Candidates: {:?}", candidate_texts);
+                                        
+                                        let width = xime_ui::calculate_candidate_width(&candidate_texts);
+                                        let height = 36;
+                                        if let Err(e) = c.show_candidate_window(width, height, &candidate_texts) {
+                                            eprintln!("DEBUG: Candidate window error: {}", e);
+                                        }
+                                        candidate_window_visible = true;
+                                        
+                                        if let Some(p) = ctx.composition().preedit {
+                                            c.set_preedit(p, p.len() as i32);
+                                        }
+                                    } else {
+                                        c.clear_preedit();
+                                        if candidate_window_visible {
+                                            c.hide_candidate_window();
+                                            candidate_window_visible = false;
                                         }
                                     }
                                 }

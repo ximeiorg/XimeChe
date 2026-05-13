@@ -16,6 +16,9 @@ pub const XK_Next: KeyCode = librime_sys::RimeKeyCode_XK_Next;
 pub const XK_Home: KeyCode = librime_sys::RimeKeyCode_XK_Home;
 pub const XK_End: KeyCode = librime_sys::RimeKeyCode_XK_End;
 
+pub const XK_Shift_L: KeyCode = librime_sys::RimeKeyCode_XK_Shift_L;
+pub const XK_Shift_R: KeyCode = librime_sys::RimeKeyCode_XK_Shift_R;
+
 pub const XK_a: KeyCode = librime_sys::RimeKeyCode_XK_a;
 pub const XK_b: KeyCode = librime_sys::RimeKeyCode_XK_b;
 pub const XK_c: KeyCode = librime_sys::RimeKeyCode_XK_c;
