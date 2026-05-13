@@ -7,12 +7,13 @@ use zbus::{Connection, interface};
 use zbus::zvariant::Fd;
 use xime_wayland::{WaylandConnectionV1, InputMethodV1State};
 use xime_xkb::XkbContext;
-use xime_tray::{TrayManager, InputMode};
+use xime_tray::{TrayManager, InputMode, MenuAction};
 use librime::traits::Traits;
 
 enum DaemonCommand {
     OpenWaylandSocket(OwnedFd, String),
     ToggleMode,
+    Deploy,
     Shutdown,
 }
 
@@ -63,6 +64,11 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
     let mut xkb: Option<XkbContext> = None;
     
     let config_dir = get_config_dir();
+    if !config_dir.exists() {
+        std::fs::create_dir_all(&config_dir)
+            .expect("Failed to create config directory");
+        eprintln!("DEBUG: Created config directory: {}", config_dir.display());
+    }
     let config_dir_str = config_dir.to_string_lossy().to_string();
     
     let mut traits = Traits::new();
@@ -85,7 +91,7 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
         librime::join_maintenance_thread();
     }
     
-    let rime_session = librime::create_session().ok();
+    let mut rime_session = librime::create_session().ok();
     let mut candidate_window_visible = false;
     let mut last_ascii_mode = false;
     let mut last_state = InputMethodV1State::Inactive;
@@ -133,6 +139,32 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
                         });
                         eprintln!("DEBUG: Tray updated after toggle: ascii_mode={}", is_ascii);
                     }
+                }
+            }
+            Ok(DaemonCommand::Deploy) => {
+                eprintln!("DEBUG: Deploy command received, starting Rime deployment...");
+                librime::finalize();
+                
+                let mut traits = Traits::new();
+                traits.set_shared_data_dir("/usr/share/rime-data");
+                traits.set_user_data_dir(&config_dir_str);
+                traits.set_log_dir(&config_dir_str);
+                
+                librime::setup(&mut traits);
+                if let Err(e) = librime::initialize(&mut traits) {
+                    eprintln!("ERROR: Failed to reinitialize Rime: {}", e);
+                } else {
+                    match librime::full_deploy_and_wait() {
+                        librime::DeployResult::Success => eprintln!("DEBUG: Rime redeployed successfully"),
+                        librime::DeployResult::Failure => eprintln!("WARNING: Rime deploy failed"),
+                    }
+                    
+                    if librime::is_maintenance_mode() {
+                        librime::join_maintenance_thread();
+                    }
+                    
+                    rime_session = librime::create_session().ok();
+                    eprintln!("DEBUG: New Rime session created after deployment");
                 }
             }
             Ok(DaemonCommand::Shutdown) => {
@@ -284,7 +316,7 @@ fn main() -> anyhow::Result<()> {
     rt.block_on(async {
         let connection = Connection::session().await?;
         
-        let (tray, mut toggle_rx) = TrayManager::register(&connection).await?;
+        let (tray, mut toggle_rx, mut action_rx) = TrayManager::register(&connection).await?;
         let tray = Arc::new(tray);
         
         let (command_tx, command_rx) = mpsc::channel();
@@ -309,9 +341,28 @@ fn main() -> anyhow::Result<()> {
         eprintln!("DEBUG: Tray icon registered");
         eprintln!("DEBUG: Waiting for Wayland connection from launcher...");
         
-        while toggle_rx.recv().await.is_some() {
-            eprintln!("DEBUG: Toggle request received from tray");
-            command_tx.send(DaemonCommand::ToggleMode).ok();
+        loop {
+            tokio::select! {
+                Some(_) = toggle_rx.recv() => {
+                    eprintln!("DEBUG: Toggle request received from tray");
+                    command_tx.send(DaemonCommand::ToggleMode).ok();
+                }
+                Some(action) = action_rx.recv() => {
+                    eprintln!("DEBUG: Menu action received: {:?}", action);
+                    match action {
+                        MenuAction::ToggleMode => {
+                            command_tx.send(DaemonCommand::ToggleMode).ok();
+                        }
+                        MenuAction::Deploy => {
+                            command_tx.send(DaemonCommand::Deploy).ok();
+                        }
+                        MenuAction::Exit => {
+                            command_tx.send(DaemonCommand::Shutdown).ok();
+                            break;
+                        }
+                    }
+                }
+            }
         }
         
         Ok::<(), anyhow::Error>(())
