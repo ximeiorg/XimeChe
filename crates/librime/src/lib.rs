@@ -6,7 +6,7 @@ pub mod commit;
 pub mod status;
 pub mod key;
 
-pub use key::{KeyCode, Modifier, K_SHIFT_MASK, K_CONTROL_MASK, K_ALT_MASK, K_RELEASE_MASK};
+pub use key::{KeyCode, Modifier, K_SHIFT_MASK, K_CONTROL_MASK, K_ALT_MASK, K_RELEASE_MASK, XK_Shift_L};
 
 use once_cell::sync::Lazy;
 use std::sync::Mutex;

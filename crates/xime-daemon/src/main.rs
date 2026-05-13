@@ -1,4 +1,5 @@
 use std::sync::mpsc::{self, Sender, Receiver};
+use std::sync::Arc;
 use std::os::unix::io::{OwnedFd, FromRawFd, AsRawFd};
 use std::thread;
 use nix::unistd::dup;
@@ -6,10 +7,12 @@ use zbus::{Connection, interface};
 use zbus::zvariant::Fd;
 use xime_wayland::{WaylandConnectionV1, InputMethodV1State};
 use xime_xkb::XkbContext;
-use librime::{traits::Traits, session::Session, K_RELEASE_MASK};
+use xime_tray::{TrayManager, InputMode};
+use librime::traits::Traits;
 
 enum DaemonCommand {
     OpenWaylandSocket(OwnedFd, String),
+    ToggleMode,
     Shutdown,
 }
 
@@ -26,14 +29,8 @@ impl Clone for XimeDaemon {
 }
 
 impl XimeDaemon {
-    pub fn new() -> Self {
-        let (tx, rx) = mpsc::channel();
-        
-        thread::spawn(|| {
-            run_wayland_loop(rx);
-        });
-        
-        Self { command_tx: tx }
+    pub fn new_with_channel(command_tx: Sender<DaemonCommand>) -> Self {
+        Self { command_tx }
     }
 }
 
@@ -47,7 +44,6 @@ impl XimeDaemon {
         let raw_fd = fd.as_raw_fd();
         eprintln!("DEBUG: Received OpenWaylandSocket(fd={}, display={})", raw_fd, display);
         
-        // Duplicate the fd because zbus::Fd will close it when dropped
         let dup_fd = dup(raw_fd)
             .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to dup fd: {}", e)))?;
         let owned_fd = unsafe { OwnedFd::from_raw_fd(dup_fd) };
@@ -60,7 +56,7 @@ impl XimeDaemon {
     }
 }
 
-fn run_wayland_loop(rx: Receiver<DaemonCommand>) {
+fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tokio::runtime::Handle) {
     eprintln!("DEBUG: Wayland loop thread started");
     
     let mut conn: Option<WaylandConnectionV1> = None;
@@ -91,6 +87,8 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>) {
     
     let rime_session = librime::create_session().ok();
     let mut candidate_window_visible = false;
+    let mut last_ascii_mode = false;
+    let mut last_state = InputMethodV1State::Inactive;
     
     loop {
         match rx.try_recv() {
@@ -113,6 +111,30 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>) {
                     }
                 }
             }
+            Ok(DaemonCommand::ToggleMode) => {
+                eprintln!("DEBUG: ToggleMode command received");
+                if let Some(session) = rime_session.as_ref() {
+                    let result = session.process_key(librime::XK_Shift_L as i32, 0);
+                    eprintln!("DEBUG: Rime toggle press result: {}", result);
+                    
+                    let result2 = session.process_key(librime::XK_Shift_L as i32, librime::K_RELEASE_MASK as i32);
+                    eprintln!("DEBUG: Rime toggle release result: {}", result2);
+                    
+                    if let Ok(status) = session.status() {
+                        let is_ascii = status.is_ascii_mode;
+                        last_ascii_mode = is_ascii;
+                        let tray_mode = if is_ascii {
+                            InputMode::English
+                        } else {
+                            InputMode::Chinese
+                        };
+                        rt.block_on(async {
+                            tray.set_mode(tray_mode).await;
+                        });
+                        eprintln!("DEBUG: Tray updated after toggle: ascii_mode={}", is_ascii);
+                    }
+                }
+            }
             Ok(DaemonCommand::Shutdown) => {
                 eprintln!("DEBUG: Shutdown requested");
                 break;
@@ -128,10 +150,29 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>) {
             if let Err(e) = c.dispatch_events() {
                 eprintln!("DEBUG: Dispatch error: {}", e);
                 conn = None;
+                rt.block_on(async {
+                    tray.set_visible(false).await;
+                });
+                last_state = InputMethodV1State::Inactive;
                 continue;
             }
             
             let state = c.get_state();
+            
+            // Handle state changes (activate/deactivate)
+            if state.state != last_state {
+                eprintln!("DEBUG: State changed from {:?} to {:?}", last_state, state.state);
+                let is_active = state.state == InputMethodV1State::Active;
+                rt.block_on(async {
+                    tray.set_visible(is_active).await;
+                });
+                last_state = state.state;
+                
+                if !is_active {
+                    candidate_window_visible = false;
+                    continue;
+                }
+            }
             
             if state.state == InputMethodV1State::Active {
                 if let Some(ref mut x) = xkb {
@@ -164,47 +205,58 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>) {
                                 eprintln!("DEBUG: Rime result: {:?}", result);
                                 
                                 if let Ok(status) = session.status() {
-                                    eprintln!("DEBUG: ascii_mode={}, composing={}", status.is_ascii_mode, status.is_composing);
+                                    let is_ascii = status.is_ascii_mode;
+                                    if is_ascii != last_ascii_mode {
+                                        last_ascii_mode = is_ascii;
+                                        let tray_mode = if is_ascii {
+                                            InputMode::English
+                                        } else {
+                                            InputMode::Chinese
+                                        };
+                                        rt.block_on(async {
+                                            tray.set_mode(tray_mode).await;
+                                        });
+                                        eprintln!("DEBUG: Tray updated: ascii_mode={}", is_ascii);
+                                    }
+                                    eprintln!("DEBUG: ascii_mode={}, composing={}", is_ascii, status.is_composing);
                                 }
                                 
                                 if !result {
                                     c.forward_key(event.serial, event.time, event.key, event.pressed);
                                 }
                                 
-if let Some(commit) = session.commit() {
-                                        c.commit_string(commit.text());
-                                        let _ = c.flush();
-                                        eprintln!("DEBUG: Committed: {}", commit.text());
-                                    }
+                                if let Some(commit) = session.commit() {
+                                    c.commit_string(commit.text());
+                                    let _ = c.flush();
+                                    eprintln!("DEBUG: Committed: {}", commit.text());
+                                }
                                 
-if let Some(ctx) = session.context() {
-                                        // Handle preedit FIRST (input encoding), regardless of candidates
-                                        if let Some(p) = ctx.composition().preedit {
-                                            c.set_preedit(p, p.len() as i32);
-                                        } else {
-                                            c.clear_preedit();
-                                        }
-                                        let _ = c.flush();
-                                        
-                                        // Then handle candidate window
-                                        let menu = ctx.menu();
-                                        if menu.num_candidates > 0 {
-                                            let candidate_texts: Vec<String> = 
-                                                menu.candidates.iter().map(|x| x.text.to_string()).collect();
-                                            eprintln!("DEBUG: Candidates: {:?}", candidate_texts);
-                                            
-                                            let width = xime_ui::calculate_candidate_width(&candidate_texts);
-                                            let height = 36;
-                                            if let Err(e) = c.show_candidate_window(width, height, &candidate_texts) {
-                                                eprintln!("DEBUG: Candidate window error: {}", e);
-                                            }
-                                            candidate_window_visible = true;
-                                        } else if candidate_window_visible {
-                                            c.hide_candidate_window();
-                                            let _ = c.flush();
-                                            candidate_window_visible = false;
-                                        }
+                                if let Some(ctx) = session.context() {
+                                    if let Some(p) = ctx.composition().preedit {
+                                        c.set_preedit(p, p.len() as i32);
+                                    } else {
+                                        c.clear_preedit();
                                     }
+                                    let _ = c.flush();
+                                    
+                                    let menu = ctx.menu();
+                                    if menu.num_candidates > 0 {
+                                        let candidate_texts: Vec<String> = 
+                                            menu.candidates.iter().map(|x| x.text.to_string()).collect();
+                                        eprintln!("DEBUG: Candidates: {:?}", candidate_texts);
+                                        
+                                        let width = xime_ui::calculate_candidate_width(&candidate_texts);
+                                        let height = 36;
+                                        if let Err(e) = c.show_candidate_window(width, height, &candidate_texts) {
+                                            eprintln!("DEBUG: Candidate window error: {}", e);
+                                        }
+                                        candidate_window_visible = true;
+                                    } else if candidate_window_visible {
+                                        c.hide_candidate_window();
+                                        let _ = c.flush();
+                                        candidate_window_visible = false;
+                                    }
+                                }
                             }
                         }
                     }
@@ -227,11 +279,25 @@ fn main() -> anyhow::Result<()> {
     eprintln!("DEBUG: xime-daemon starting");
     
     let rt = tokio::runtime::Runtime::new()?;
+    let rt_handle = rt.handle().clone();
     
     rt.block_on(async {
-        let daemon = XimeDaemon::new();
-        
         let connection = Connection::session().await?;
+        
+        let (tray, mut toggle_rx) = TrayManager::register(&connection).await?;
+        let tray = Arc::new(tray);
+        
+        let (command_tx, command_rx) = mpsc::channel();
+        
+        thread::spawn({
+            let tray = tray.clone();
+            let rt_handle = rt_handle.clone();
+            move || {
+                run_wayland_loop(command_rx, tray, rt_handle);
+            }
+        });
+        
+        let daemon = XimeDaemon::new_with_channel(command_tx.clone());
         
         connection.object_server()
             .at("/org/xime/Xime", daemon)
@@ -240,9 +306,13 @@ fn main() -> anyhow::Result<()> {
         connection.request_name("org.xime.Xime").await?;
         
         eprintln!("DEBUG: DBus service registered at org.xime.Xime");
+        eprintln!("DEBUG: Tray icon registered");
         eprintln!("DEBUG: Waiting for Wayland connection from launcher...");
         
-        std::future::pending::<()>().await;
+        while toggle_rx.recv().await.is_some() {
+            eprintln!("DEBUG: Toggle request received from tray");
+            command_tx.send(DaemonCommand::ToggleMode).ok();
+        }
         
         Ok::<(), anyhow::Error>(())
     })?;
