@@ -74,12 +74,20 @@ impl XkbContext {
 
     pub fn get_modifiers(&self) -> ModifierState {
         if let Some(state) = &self.state {
+            let depressed = state.serialize_mods(xkbcommon::xkb::STATE_MODS_DEPRESSED);
+            let latched = state.serialize_mods(xkbcommon::xkb::STATE_MODS_LATCHED);
+            let locked = state.serialize_mods(xkbcommon::xkb::STATE_MODS_LOCKED);
+            let effective = state.serialize_mods(xkbcommon::xkb::STATE_MODS_EFFECTIVE);
+            let layout = state.serialize_layout(xkbcommon::xkb::STATE_LAYOUT_EFFECTIVE);
+            
+            eprintln!("DEBUG XKB: depressed={}, latched={}, locked={}, effective={}", depressed, latched, locked, effective);
+            
             ModifierState {
-                depressed: state.serialize_mods(xkbcommon::xkb::STATE_MODS_DEPRESSED),
-                latched: state.serialize_mods(xkbcommon::xkb::STATE_MODS_LATCHED),
-                locked: state.serialize_mods(xkbcommon::xkb::STATE_MODS_LOCKED),
-                effective: state.serialize_mods(xkbcommon::xkb::STATE_MODS_EFFECTIVE),
-                layout: state.serialize_layout(xkbcommon::xkb::STATE_LAYOUT_EFFECTIVE),
+                depressed,
+                latched,
+                locked,
+                effective,
+                layout,
             }
         } else {
             ModifierState::default()

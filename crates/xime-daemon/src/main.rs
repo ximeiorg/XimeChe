@@ -152,22 +152,23 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>) {
                     if let Some(ref mut x) = xkb {
                         let keysym = x.key_from_keycode(event.key + 8);
                         if let Some(sym) = keysym {
-                            eprintln!("DEBUG: keysym={}", sym.raw());
+                            let modifiers = x.get_modifiers();
+                            let release_mask = if !event.pressed { librime::K_RELEASE_MASK } else { 0 };
+                            eprintln!("DEBUG: keysym={}, modifiers={}, release={}", sym.raw(), modifiers.effective, release_mask);
                             
                             if let Some(session) = rime_session.as_ref() {
-                                let modifiers = x.get_modifiers();
-                                let release_mask = if !event.pressed { librime::K_RELEASE_MASK } else { 0 };
                                 let result = session.process_key(
                                     sym.raw() as i32,
                                     modifiers.effective as i32 | release_mask as i32,
                                 );
                                 eprintln!("DEBUG: Rime result: {:?}", result);
                                 
+                                if let Ok(status) = session.status() {
+                                    eprintln!("DEBUG: ascii_mode={}, composing={}", status.is_ascii_mode, status.is_composing);
+                                }
+                                
                                 if !result {
-                                    // Rime doesn't handle this key, forward to app
-                                    eprintln!("DEBUG: Forwarding key to app: keysym={}", sym.raw());
                                     c.forward_key(event.serial, event.time, event.key, event.pressed);
-                                    c.forward_key(event.serial, event.time, event.key, !event.pressed);
                                 }
                                 
                                 if let Some(commit) = session.commit() {
