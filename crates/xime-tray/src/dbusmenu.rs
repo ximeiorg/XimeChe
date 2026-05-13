@@ -1,14 +1,27 @@
 use zbus::{interface, object_server::SignalEmitter};
 use zbus::zvariant::Value;
 use std::collections::HashMap;
+use tokio::sync::mpsc::Sender;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuAction {
+    ToggleMode,
+    Deploy,
+    Exit,
+}
 
 pub struct DBusMenu {
     revision: u32,
+    action_tx: Option<Sender<MenuAction>>,
 }
 
 impl DBusMenu {
     pub fn new() -> Self {
-        Self { revision: 0 }
+        Self { revision: 0, action_tx: None }
+    }
+    
+    pub fn with_action_channel(action_tx: Sender<MenuAction>) -> Self {
+        Self { revision: 0, action_tx: Some(action_tx) }
     }
 }
 
@@ -24,7 +37,20 @@ impl DBusMenu {
         removed: Vec<(i32, Vec<String>)>,
     ) -> zbus::Result<()> {}
     
-    fn event(&self, _id: i32, _event_type: &str, _data: Value<'_>, _timestamp: u32) {}
+    async fn event(&self, id: i32, event_type: &str, _data: Value<'_>, _timestamp: u32) {
+        if event_type == "clicked" {
+            if let Some(tx) = &self.action_tx {
+                let action = match id {
+                    1 => MenuAction::ToggleMode,
+                    3 => MenuAction::Deploy,
+                    4 => MenuAction::Exit,
+                    _ => return,
+                };
+                let _ = tx.send(action).await;
+                eprintln!("DEBUG: Menu item {} clicked, action: {:?}", id, action);
+            }
+        }
+    }
     
     fn get_property(&self, _id: i32, _property: &str) -> zbus::fdo::Result<Value<'static>> {
         Err(zbus::fdo::Error::NotSupported("Not implemented".into()))
@@ -46,7 +72,7 @@ impl DBusMenu {
                     ("type".to_string(), Value::new("separator")),
                 ]), Vec::<Value<'static>>::new())),
                 Value::new((3, HashMap::from([
-                    ("label".to_string(), Value::new("重启")),
+                    ("label".to_string(), Value::new("重新部署")),
                     ("icon-name".to_string(), Value::new("view-refresh")),
                 ]), Vec::<Value<'static>>::new())),
                 Value::new((4, HashMap::from([

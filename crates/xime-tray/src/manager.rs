@@ -1,6 +1,6 @@
 use zbus::Connection;
 use zbus::object_server::InterfaceRef;
-use crate::{StatusNotifierItem, DBusMenu, InputMode};
+use crate::{StatusNotifierItem, DBusMenu, InputMode, MenuAction};
 use crate::sni::StatusNotifierItemSignals;
 use tokio::sync::mpsc::{channel, Receiver};
 
@@ -15,10 +15,11 @@ pub struct TrayManager {
 }
 
 impl TrayManager {
-    pub async fn register(connection: &Connection) -> zbus::Result<(Self, Receiver<()>)> {
+    pub async fn register(connection: &Connection) -> zbus::Result<(Self, Receiver<()>, Receiver<MenuAction>)> {
         let (toggle_tx, toggle_rx) = channel::<()>(1);
+        let (action_tx, action_rx) = channel::<MenuAction>(1);
         
-        connection.object_server().at(MENU_OBJECT, DBusMenu::new()).await?;
+        connection.object_server().at(MENU_OBJECT, DBusMenu::with_action_channel(action_tx)).await?;
         connection.object_server().at(SNI_OBJECT, StatusNotifierItem::with_toggle_channel(toggle_tx)).await?;
         
         let sni_ref = connection.object_server()
@@ -33,7 +34,7 @@ impl TrayManager {
         ).await?;
         
         eprintln!("DEBUG: SNI registered successfully (initially hidden)");
-        Ok((Self { sni_ref }, toggle_rx))
+        Ok((Self { sni_ref }, toggle_rx, action_rx))
     }
     
     pub async fn set_mode(&self, mode: InputMode) {

@@ -3,5 +3,5 @@ pub mod dbusmenu;
 pub mod manager;
 
 pub use sni::{StatusNotifierItem, InputMode};
-pub use dbusmenu::DBusMenu;
+pub use dbusmenu::{DBusMenu, MenuAction};
 pub use manager::TrayManager;
