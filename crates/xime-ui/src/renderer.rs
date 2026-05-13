@@ -117,18 +117,19 @@ impl CandidateRenderer {
     }
 
     fn draw_text(&mut self, pixmap: &mut Pixmap, width: u32, height: u32, candidates: &[String]) {
-        let font_size = 18.0f32;
-        let metrics = Metrics::new(font_size, font_size + 4.0);
+        let font_size = 16.0f32;
+        let line_height = 20.0f32;
+        let metrics = Metrics::new(font_size, line_height);
         let attrs = Attrs::new().family(Family::SansSerif);
 
         let normal_color = Color::rgba(0x33, 0x33, 0x33, 0xFF);
         let highlight_color = Color::rgba(0xFF, 0xFF, 0xFF, 0xFF);
 
-        let width_usize = width as usize;
-        let height_usize = height as usize;
+        let pixmap_width = pixmap.width() as usize;
+        let pixmap_height = pixmap.height() as usize;
 
-        let y_center = height as f32 / 2.0;
-        let baseline = y_center + 6.0;
+        let text_area_height = line_height;
+        let y_offset = ((height as f32 - text_area_height) / 2.0).max(0.0) as i32;
 
         let mut x_offset: f32 = 15.0;
 
@@ -140,7 +141,6 @@ impl CandidateRenderer {
             let mut buffer = Buffer::new(&mut self.font_system, metrics);
             buffer.set_text(&mut self.font_system, &text, attrs.clone(), Shaping::Advanced);
 
-            let y_pos = baseline as i32;
             let x_start = x_offset as i32;
 
             let pixmap_data = pixmap.data_mut();
@@ -150,7 +150,7 @@ impl CandidateRenderer {
                 &mut self.swash_cache,
                 text_color,
                 |x, y, w, h, color| {
-                    blend_glyph(pixmap_data, x as i32 + x_start, y as i32 + y_pos, w as i32, h as i32, color, width_usize, height_usize);
+                    blend_glyph(pixmap_data, x as i32 + x_start, y + y_offset, w as i32, h as i32, color, pixmap_width, pixmap_height);
                 },
             );
 
