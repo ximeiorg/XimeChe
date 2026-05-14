@@ -8,6 +8,7 @@ use wayland_client::protocol::wl_keyboard::WlKeyboard;
 use wayland_client::protocol::wl_compositor::WlCompositor;
 use wayland_client::protocol::wl_shm::WlShm;
 use wayland_client::protocol::wl_surface::WlSurface;
+use wayland_client::protocol::wl_output::WlOutput;
 use wayland_client::protocol::wl_buffer::WlBuffer;
 use wayland_client::protocol::wl_shm_pool::WlShmPool;
 use wayland_client::{
@@ -21,6 +22,8 @@ use std::os::unix::io::{OwnedFd, AsFd, FromRawFd};
 use std::os::unix::net::UnixStream;
 use std::slice;
 use xime_ui::draw_candidates_to_buffer;
+use xime_ui::draw_root_to_buffer;
+use xime_ui::calculate_root_width;
 use xime_ui::CandidateItem;
 
 pub mod __interfaces {
@@ -86,6 +89,17 @@ impl Dispatch<WlSeat, InputMethodV1Data> for InputMethodV1Data {
         _state: &mut InputMethodV1Data,
         _proxy: &WlSeat,
         _event: <WlSeat as Proxy>::Event,
+        _data: &InputMethodV1Data,
+        _conn: &wayland_client::Connection,
+        _qhandle: &QueueHandle<InputMethodV1Data>,
+    ) {}
+}
+
+impl Dispatch<WlOutput, InputMethodV1Data> for InputMethodV1Data {
+    fn event(
+        _state: &mut InputMethodV1Data,
+        _proxy: &WlOutput,
+        _event: <WlOutput as Proxy>::Event,
         _data: &InputMethodV1Data,
         _conn: &wayland_client::Connection,
         _qhandle: &QueueHandle<InputMethodV1Data>,
@@ -331,9 +345,13 @@ pub struct WaylandConnectionV1 {
     input_panel: Option<ZwpInputPanelV1>,
     compositor: Option<WlCompositor>,
     shm: Option<WlShm>,
+    output: Option<WlOutput>,
     has_v1_global: bool,
     panel_surface: Option<ZwpInputPanelSurfaceV1>,
     candidate_surface: Option<WlSurface>,
+    root_surface: Option<WlSurface>,
+    root_buffer: Option<WlBuffer>,
+    root_pool: Option<WlShmPool>,
     current_buffer: Option<WlBuffer>,
     current_pool: Option<WlShmPool>,
 }
@@ -382,6 +400,10 @@ impl WaylandConnectionV1 {
             .bind(&qh, 1..=1, state.clone())
             .ok();
 
+        let output: Option<WlOutput> = globals
+            .bind(&qh, 1..=1, state.clone())
+            .ok();
+
         // Check if v1 global exists by checking bind result
         let has_v1_global = input_method.is_some() || input_panel.is_some();
 
@@ -394,9 +416,13 @@ impl WaylandConnectionV1 {
             input_panel,
             compositor,
             shm,
+            output,
             has_v1_global,
             panel_surface: None,
             candidate_surface: None,
+            root_surface: None,
+            root_buffer: None,
+            root_pool: None,
             current_buffer: None,
             current_pool: None,
         })
@@ -613,6 +639,109 @@ fn draw_candidates(&self, fd: &OwnedFd, width: u32, height: u32, candidates: &[C
             surface.commit();
             eprintln!("DEBUG: Hidden candidate window");
         }
+    }
+    
+    /// Show a single key root display window
+    /// Displays "a: 工匚戈艹廿龷七弋戈" in a small popup
+    pub fn show_root_window(&mut self, key: char, root: &str) -> Result<()> {
+        eprintln!("DEBUG: show_root_window called for key={}, root={}", key, root);
+        
+        let width = calculate_root_width(key, root);
+        let height = 36;
+        
+        // Create root surface if not exists
+        if self.root_surface.is_none() {
+            self.create_root_surface()?;
+        }
+        
+        // Destroy old buffer and pool
+        if let Some(buffer) = self.root_buffer.take() {
+            buffer.destroy();
+        }
+        if let Some(pool) = self.root_pool.take() {
+            pool.destroy();
+        }
+        
+        let shm = self.shm.as_ref().ok_or(Error::NoShm)?;
+        let surface = self.root_surface.as_ref().unwrap();
+        
+        let qh = self.event_queue.handle();
+        
+        let stride = width * 4;
+        let size = stride * height;
+        
+        let (pool, fd) = self.create_shm_pool_with_fd(shm, size)?;
+        self.root_pool = Some(pool.clone());
+        
+        self.draw_root(&fd, width, height, key, root)?;
+        
+        let buffer = pool.create_buffer(0, width as i32, height as i32, stride as i32, wl_shm::Format::Argb8888, &qh, self.state.clone());
+        self.root_buffer = Some(buffer.clone());
+        
+        surface.attach(Some(&buffer), 0, 0);
+        surface.damage_buffer(0, 0, width as i32, height as i32);
+        surface.commit();
+        
+        eprintln!("DEBUG: Showed root window {}x{} for key {}", width, height, key);
+        Ok(())
+    }
+    
+    pub fn hide_root_window(&mut self) {
+        if let Some(surface) = &self.root_surface {
+            surface.attach(None::<&WlBuffer>, 0, 0);
+            surface.commit();
+            eprintln!("DEBUG: Hidden root window");
+        }
+    }
+    
+    fn create_root_surface(&mut self) -> Result<()> {
+        let compositor = self.compositor.as_ref().ok_or(Error::NoCompositor)?;
+        let input_panel = self.input_panel.as_ref().ok_or(Error::NoInputPanel)?;
+        let qh = self.event_queue.handle();
+        
+        let surface = compositor.create_surface(&qh, self.state.clone());
+        
+        let panel_surface = input_panel.get_input_panel_surface(&surface, &qh, self.state.clone());
+        
+        // Use set_toplevel if output is available (shows at screen bottom)
+        // Otherwise use set_overlay_panel (shows near cursor)
+        if let Some(output) = &self.output {
+            panel_surface.set_toplevel(output, 0);  // position = center_bottom
+            eprintln!("DEBUG: Created root panel surface with set_toplevel");
+        } else {
+            panel_surface.set_overlay_panel();
+            eprintln!("DEBUG: Created root panel surface with set_overlay_panel (no output)");
+        }
+        
+        self.root_surface = Some(surface);
+        Ok(())
+    }
+    
+    fn draw_root(&self, fd: &OwnedFd, width: u32, height: u32, key: char, root: &str) -> Result<()> {
+        let size = (width * height * 4) as usize;
+        let size_nonzero = std::num::NonZero::new(size).expect("size should be non-zero");
+        
+        let ptr = unsafe {
+            nix::sys::mman::mmap(
+                None,
+                size_nonzero,
+                nix::sys::mman::ProtFlags::PROT_READ | nix::sys::mman::ProtFlags::PROT_WRITE,
+                nix::sys::mman::MapFlags::MAP_SHARED,
+                fd.as_fd(),
+                0,
+            ).map_err(|e| Error::Io(std::io::Error::from_raw_os_error(e as i32)))?
+        };
+        
+        let pixels: &mut [u8] = unsafe { slice::from_raw_parts_mut(ptr.as_ptr() as *mut u8, size) };
+        
+        draw_root_to_buffer(pixels, width, height, key, root);
+        
+        unsafe {
+            nix::sys::mman::munmap(ptr, size)
+                .map_err(|e| Error::Io(std::io::Error::from_raw_os_error(e as i32)))?;
+        }
+        
+        Ok(())
     }
     
     fn create_anonymous_file(size: u32) -> Result<OwnedFd> {

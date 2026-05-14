@@ -195,7 +195,7 @@ impl CandidateRenderer {
                 pixmap.data_mut(), pixmap_width, pixmap_height
             );
 
-            let comment_width = if !candidate.comment.is_empty() {
+let _comment_width = if !candidate.comment.is_empty() {
                 self.draw_text_item(
                     &candidate.comment, 12.0, comment_color,
                     (x_offset + main_width + 3.0) as i32, y_offset + 4,

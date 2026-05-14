@@ -6715,6 +6715,8 @@ dependencies = [
  "anyhow",
  "librime",
  "nix 0.29.0",
+ "serde",
+ "serde_yaml",
  "thiserror 2.0.18",
  "tokio",
  "xime-tray",

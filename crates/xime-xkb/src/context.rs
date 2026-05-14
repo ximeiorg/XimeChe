@@ -1,9 +1,68 @@
-use xkbcommon::xkb::{Context, Keymap, State, Keysym, Keycode, ModIndex};
+use xkbcommon::xkb::{Context, Keymap, State, Keysym, Keycode, ModIndex, keysym_from_name, KEYSYM_CASE_INSENSITIVE};
 use std::os::unix::io::{RawFd, FromRawFd, OwnedFd};
 use std::fs::File;
 
 use crate::Error;
 use crate::Result;
+
+/// Key binding parsed from string like "Ctrl+Alt+F1"
+#[derive(Debug, Clone, Default)]
+pub struct KeyBinding {
+    pub ctrl: bool,
+    pub alt: bool,
+    pub shift: bool,
+    pub super_key: bool,
+    pub keysym: Option<Keysym>,
+    pub key_name: String,
+}
+
+impl KeyBinding {
+    /// Parse a key binding string like "Ctrl+Alt+F1" or "Win+Alt+a"
+    pub fn parse(s: &str) -> Self {
+        let mut binding = KeyBinding::default();
+        let parts: Vec<&str> = s.split('+').collect();
+        
+        for part in parts.iter() {
+            let trimmed = part.trim();
+            match trimmed.to_lowercase().as_str() {
+                "ctrl" | "control" => binding.ctrl = true,
+                "alt" => binding.alt = true,
+                "shift" => binding.shift = true,
+                "super" | "win" | "meta" => binding.super_key = true,
+                key => {
+                    binding.key_name = key.to_uppercase();
+                    // Use xkbcommon to parse keysym name (case insensitive)
+                    binding.keysym = Some(keysym_from_name(key, KEYSYM_CASE_INSENSITIVE));
+                }
+            }
+        }
+        binding
+    }
+    
+    /// Get the keysym value for Rime
+    pub fn keysym_raw(&self) -> Option<u32> {
+        self.keysym.map(|k| k.raw())
+    }
+    
+    /// Check if modifiers match (for hotkey detection) - without super
+    pub fn matches_modifiers(&self, ctrl: bool, alt: bool, shift: bool) -> bool {
+        self.ctrl == ctrl && self.alt == alt && self.shift == shift
+    }
+    
+    /// Check if all modifiers match including super/win
+    pub fn matches_modifiers_full(&self, ctrl: bool, alt: bool, shift: bool, super_key: bool) -> bool {
+        self.ctrl == ctrl && self.alt == alt && self.shift == shift && self.super_key == super_key
+    }
+    
+    /// Get modifier mask for Rime
+    pub fn modifier_mask(&self) -> u32 {
+        let mut mask = 0u32;
+        if self.ctrl { mask |= 0x04; }  // K_CONTROL_MASK
+        if self.alt { mask |= 0x08; }   // K_ALT_MASK
+        if self.shift { mask |= 0x01; } // K_SHIFT_MASK
+        mask
+    }
+}
 
 pub struct XkbContext {
     context: Context,
@@ -79,7 +138,15 @@ impl XkbContext {
             let effective = state.serialize_mods(xkbcommon::xkb::STATE_MODS_EFFECTIVE);
             let layout = state.serialize_layout(xkbcommon::xkb::STATE_LAYOUT_EFFECTIVE);
             
-            eprintln!("DEBUG XKB: depressed={}, latched={}, locked={}, effective={}", depressed, latched, locked, effective);
+            // Check individual modifiers
+            let shift = state.mod_index_is_active(0, xkbcommon::xkb::STATE_MODS_EFFECTIVE);
+            let ctrl = state.mod_index_is_active(2, xkbcommon::xkb::STATE_MODS_EFFECTIVE);
+            let alt = state.mod_index_is_active(1, xkbcommon::xkb::STATE_MODS_EFFECTIVE);
+            // Mod4 (index 3) is usually Super/Win
+            let super_key = state.mod_index_is_active(3, xkbcommon::xkb::STATE_MODS_EFFECTIVE);
+            
+            eprintln!("DEBUG XKB: depressed={}, latched={}, locked={}, effective={}, shift={}, ctrl={}, alt={}, super={}", 
+                      depressed, latched, locked, effective, shift, ctrl, alt, super_key);
             
             ModifierState {
                 depressed,
@@ -87,6 +154,10 @@ impl XkbContext {
                 locked,
                 effective,
                 layout,
+                shift,
+                ctrl,
+                alt,
+                super_key,
             }
         } else {
             ModifierState::default()
@@ -113,6 +184,10 @@ pub struct ModifierState {
     pub locked: u32,
     pub effective: u32,
     pub layout: u32,
+    pub shift: bool,
+    pub ctrl: bool,
+    pub alt: bool,
+    pub super_key: bool,
 }
 
 pub fn keysym_to_rime_keycode(keysym: Keysym) -> i32 {
@@ -130,6 +205,21 @@ pub fn keysym_to_char(keysym: Keysym) -> Option<char> {
     } else if raw == 0x20 {
         Some(' ')
     } else {
+        None
+    }
+}
+
+/// Convert keysym raw value to lowercase letter (for hotkey matching)
+pub fn keysym_to_letter(keysym_raw: u32) -> Option<char> {
+    // Lowercase letters: 0x61-0x7a (a-z)
+    if keysym_raw >= 0x61 && keysym_raw <= 0x7a {
+        Some((keysym_raw as u8 as char).to_ascii_lowercase())
+    }
+    // Uppercase letters: 0x41-0x5a (A-Z)
+    else if keysym_raw >= 0x41 && keysym_raw <= 0x5a {
+        Some((keysym_raw as u8 as char).to_ascii_lowercase())
+    }
+    else {
         None
     }
 }

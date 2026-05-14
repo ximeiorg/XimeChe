@@ -16,3 +16,5 @@ anyhow.workspace = true
 zbus = "5"
 nix = { version = "0.29", features = ["fs", "mman"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
