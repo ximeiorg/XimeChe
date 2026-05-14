@@ -29,6 +29,9 @@ sed -i "s|@BINDIR@|${BINDIR}|g" "${DATADIR}/applications/xime-launcher.desktop"
 # Update desktop database
 update-desktop-database "${DATADIR}/applications" 2>/dev/null || true
 
+# Install default config file
+install -Dm644 "${PROJECT_ROOT}/resources/xime.yaml" "${DATADIR}/xime/xime.yaml"
+
 echo "Installation complete!"
 echo ""
 echo "To use with KDE Plasma:"

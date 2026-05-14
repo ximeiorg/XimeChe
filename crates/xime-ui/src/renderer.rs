@@ -1,9 +1,12 @@
-use cosmic_text::{FontSystem, SwashCache, Buffer, Metrics, Attrs, Color, Shaping, Family};
+use cosmic_text::{FontSystem, SwashCache, Buffer, Metrics, Attrs, Color, Shaping, Family, fontdb};
 use tiny_skia::{Pixmap, Paint, PathBuilder, FillRule};
 use crate::candidate::CandidateItem;
 
 const SHADOW_OFFSET_X: f32 = 2.0;
 const SHADOW_OFFSET_Y: f32 = 4.0;
+
+// Embed vivoSans font for candidate display
+const VIVO_FONT: &[u8] = include_bytes!("../resources/fonts/vivoSans-Regular.ttf");
 
 pub struct CandidateRenderer {
     font_system: FontSystem,
@@ -12,7 +15,9 @@ pub struct CandidateRenderer {
 
 impl CandidateRenderer {
     pub fn new() -> Self {
-        let font_system = FontSystem::new();
+        // Create font system with embedded vivoSans font
+        let font_source = fontdb::Source::Binary(std::sync::Arc::new(VIVO_FONT));
+        let font_system = FontSystem::new_with_fonts([font_source]);
         let swash_cache = SwashCache::new();
         Self { font_system, swash_cache }
     }

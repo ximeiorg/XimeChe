@@ -1,7 +1,10 @@
-use cosmic_text::{FontSystem, SwashCache, Buffer, Metrics, Attrs, Color, Shaping, Family};
+use cosmic_text::{FontSystem, SwashCache, Buffer, Metrics, Attrs, Color, Shaping, Family, fontdb};
 use tiny_skia::{Pixmap, Paint, PathBuilder, FillRule};
 
 const CORNER_RADIUS: f32 = 8.0;
+
+// Embed ChaiPUA font for root display
+const CHAI_FONT: &[u8] = include_bytes!("../resources/fonts/ChaiPUA-0.2.7-snow.ttf");
 
 pub struct RootRenderer {
     font_system: FontSystem,
@@ -10,7 +13,9 @@ pub struct RootRenderer {
 
 impl RootRenderer {
     pub fn new() -> Self {
-        let font_system = FontSystem::new();
+        // Create font system with embedded ChaiPUA font
+        let font_source = fontdb::Source::Binary(std::sync::Arc::new(CHAI_FONT));
+        let font_system = FontSystem::new_with_fonts([font_source]);
         let swash_cache = SwashCache::new();
         Self { font_system, swash_cache }
     }
@@ -20,8 +25,12 @@ impl RootRenderer {
     pub fn calculate_width(key: char, root: &str) -> u32 {
         let text = format!("{}: {}", key, root);
         let metrics = Metrics::new(16.0, 20.0);
-        let attrs = Attrs::new().family(Family::SansSerif);
-        let mut font_system = FontSystem::new();
+        // Use ChaiPUA font by name
+        let attrs = Attrs::new().family(Family::Name("ChaiPUA-0.2.7"));
+        
+        // Use embedded font for width calculation
+        let font_source = fontdb::Source::Binary(std::sync::Arc::new(CHAI_FONT));
+        let mut font_system = FontSystem::new_with_fonts([font_source]);
         let mut buffer = Buffer::new(&mut font_system, metrics);
         buffer.set_text(&text, &attrs, Shaping::Advanced, None);
         buffer.shape_until_scroll(&mut font_system, false);
@@ -72,7 +81,7 @@ impl RootRenderer {
 
         // Draw border
         let mut border_paint = Paint::default();
-        border_paint.set_color_rgba8(0x8F, 0x73, 0xE2, 0xFF);
+        border_paint.set_color_rgba8(0xE0, 0xE0, 0xE0, 0xFF);
         border_paint.anti_alias = true;
 
         let stroke = tiny_skia::Stroke { width: 2.0, ..Default::default() };
@@ -87,7 +96,8 @@ impl RootRenderer {
 
     fn draw_text(&mut self, pixmap: &mut Pixmap, width: u32, height: u32, key: char, root: &str) {
         let metrics = Metrics::new(16.0, 20.0);
-        let attrs = Attrs::new().family(Family::SansSerif);
+        // Use ChaiPUA font by name
+        let attrs = Attrs::new().family(Family::Name("ChaiPUA-0.2.7"));
         
         let text = format!("{}: {}", key, root);
         let mut buffer = Buffer::new(&mut self.font_system, metrics);

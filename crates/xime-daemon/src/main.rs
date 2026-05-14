@@ -4,6 +4,7 @@ use std::sync::mpsc::{self, Sender, Receiver};
 use std::sync::Arc;
 use std::os::unix::io::{OwnedFd, FromRawFd, AsRawFd};
 use std::thread;
+use std::io::Write;
 use nix::unistd::dup;
 use zbus::{Connection, interface};
 use zbus::zvariant::Fd;
@@ -13,6 +14,27 @@ use xime_tray::{TrayManager, InputMode, MenuAction};
 use librime::traits::Traits;
 use config::XimeConfig;
 use xime_xkb::keysym_to_letter;
+
+fn log_file() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+    std::path::PathBuf::from(home).join(".config/xime/xime.log")
+}
+
+macro_rules! log_msg {
+    ($($arg:tt)*) => {
+        {
+            let msg = format!("[{}] {}\n", chrono::Local::now().format("%Y-%m-%d %H:%M:%S"), format!($($arg)*));
+            eprintln!("{}", msg.trim());
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(log_file())
+            {
+                let _ = f.write_all(msg.as_bytes());
+            }
+        }
+    };
+}
 
 pub(crate) enum DaemonCommand {
     OpenWaylandSocket(OwnedFd, String),
@@ -47,7 +69,7 @@ impl XimeDaemon {
         display: String,
     ) -> zbus::fdo::Result<()> {
         let raw_fd = fd.as_raw_fd();
-        eprintln!("DEBUG: Received OpenWaylandSocket(fd={}, display={})", raw_fd, display);
+        log_msg!("DEBUG: Received OpenWaylandSocket(fd={}, display={})", raw_fd, display);
         
         let dup_fd = dup(raw_fd)
             .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to dup fd: {}", e)))?;
@@ -62,7 +84,7 @@ impl XimeDaemon {
 }
 
 fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tokio::runtime::Handle) {
-    eprintln!("DEBUG: Wayland loop thread started");
+    log_msg!("DEBUG: Wayland loop thread started");
     
     let mut conn: Option<WaylandConnectionV1> = None;
     let mut xkb: Option<XkbContext> = None;
@@ -71,14 +93,14 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
     let xime_config = XimeConfig::load();
     let _root_table_binding = xime_config.get_root_table_binding();
     let _single_root_binding = xime_config.get_single_root_binding();
-    eprintln!("DEBUG: Loaded hotkeys: show_root_table={}, show_single_root={}", 
+    log_msg!("DEBUG: Loaded hotkeys: show_root_table={}, show_single_root={}", 
               xime_config.hotkeys.show_root_table, xime_config.hotkeys.show_single_root);
     
     let config_dir = get_config_dir();
     if !config_dir.exists() {
         std::fs::create_dir_all(&config_dir)
             .expect("Failed to create config directory");
-        eprintln!("DEBUG: Created config directory: {}", config_dir.display());
+        log_msg!("DEBUG: Created config directory: {}", config_dir.display());
     }
     let config_dir_str = config_dir.to_string_lossy().to_string();
     
@@ -89,13 +111,13 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
     
     librime::setup(&mut traits);
     if let Err(e) = librime::initialize(&mut traits) {
-        eprintln!("ERROR: Failed to initialize Rime: {}", e);
+        log_msg!("ERROR: Failed to initialize Rime: {}", e);
         return;
     }
     
     match librime::full_deploy_and_wait() {
-        librime::DeployResult::Success => eprintln!("DEBUG: Rime deployed"),
-        librime::DeployResult::Failure => eprintln!("WARNING: Rime deploy failed"),
+        librime::DeployResult::Success => log_msg!("DEBUG: Rime deployed"),
+        librime::DeployResult::Failure => log_msg!("WARNING: Rime deploy failed"),
     }
     
     if librime::is_maintenance_mode() {
@@ -112,32 +134,32 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
     loop {
         match rx.try_recv() {
             Ok(DaemonCommand::OpenWaylandSocket(fd, display)) => {
-                eprintln!("DEBUG: Connecting from fd for display {}", display);
+                log_msg!("DEBUG: Connecting from fd for display {}", display);
                 
                 xkb = XkbContext::new().ok();
                 
                 match WaylandConnectionV1::connect_from_fd(fd) {
                     Ok(c) => {
                         if c.get_input_method().is_ok() {
-                            eprintln!("DEBUG: zwp_input_method_v1 available");
+                            log_msg!("DEBUG: zwp_input_method_v1 available");
                         } else {
-                            eprintln!("WARNING: zwp_input_method_v1 not available");
+                            log_msg!("WARNING: zwp_input_method_v1 not available");
                         }
                         conn = Some(c);
                     }
                     Err(e) => {
-                        eprintln!("ERROR: Failed to connect: {}", e);
+                        log_msg!("ERROR: Failed to connect: {}", e);
                     }
                 }
             }
             Ok(DaemonCommand::ToggleMode) => {
-                eprintln!("DEBUG: ToggleMode command received");
+                log_msg!("DEBUG: ToggleMode command received");
                 if let Some(session) = rime_session.as_ref() {
                     // Get current ascii_mode and toggle it directly
                     let current_ascii = session.get_option("ascii_mode").unwrap_or(false);
                     let new_ascii = !current_ascii;
                     session.set_option("ascii_mode", new_ascii).ok();
-                    eprintln!("DEBUG: Set ascii_mode to {}", new_ascii);
+                    log_msg!("DEBUG: Set ascii_mode to {}", new_ascii);
                     
                     last_ascii_mode = new_ascii;
                     let tray_mode = if new_ascii {
@@ -148,11 +170,11 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
                     rt.block_on(async {
                         tray.set_mode(tray_mode).await;
                     });
-                    eprintln!("DEBUG: Tray updated after toggle: ascii_mode={}", new_ascii);
+                    log_msg!("DEBUG: Tray updated after toggle: ascii_mode={}", new_ascii);
                 }
             }
             Ok(DaemonCommand::Deploy) => {
-                eprintln!("DEBUG: Deploy command received, starting Rime deployment...");
+                log_msg!("DEBUG: Deploy command received, starting Rime deployment...");
                 librime::finalize();
                 
                 let mut traits = Traits::new();
@@ -162,11 +184,11 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
                 
                 librime::setup(&mut traits);
                 if let Err(e) = librime::initialize(&mut traits) {
-                    eprintln!("ERROR: Failed to reinitialize Rime: {}", e);
+                    log_msg!("ERROR: Failed to reinitialize Rime: {}", e);
                 } else {
                     match librime::full_deploy_and_wait() {
-                        librime::DeployResult::Success => eprintln!("DEBUG: Rime redeployed successfully"),
-                        librime::DeployResult::Failure => eprintln!("WARNING: Rime deploy failed"),
+                        librime::DeployResult::Success => log_msg!("DEBUG: Rime redeployed successfully"),
+                        librime::DeployResult::Failure => log_msg!("WARNING: Rime deploy failed"),
                     }
                     
                     if librime::is_maintenance_mode() {
@@ -174,23 +196,23 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
                     }
                     
                     rime_session = librime::create_session().ok();
-                    eprintln!("DEBUG: New Rime session created after deployment");
+                    log_msg!("DEBUG: New Rime session created after deployment");
                 }
             }
             Ok(DaemonCommand::Shutdown) => {
-                eprintln!("DEBUG: Shutdown requested");
+                log_msg!("DEBUG: Shutdown requested");
                 break;
             }
             Err(mpsc::TryRecvError::Empty) => {}
             Err(mpsc::TryRecvError::Disconnected) => {
-                eprintln!("DEBUG: Command channel disconnected");
+                log_msg!("DEBUG: Command channel disconnected");
                 break;
             }
         }
         
         if let Some(c) = conn.as_mut() {
             if let Err(e) = c.dispatch_events() {
-                eprintln!("DEBUG: Dispatch error: {}", e);
+                log_msg!("DEBUG: Dispatch error: {}", e);
                 conn = None;
                 rt.block_on(async {
                     tray.set_visible(false).await;
@@ -203,7 +225,7 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
             
             // Handle state changes (activate/deactivate)
             if state.state != last_state {
-                eprintln!("DEBUG: State changed from {:?} to {:?}", last_state, state.state);
+                log_msg!("DEBUG: State changed from {:?} to {:?}", last_state, state.state);
                 let is_active = state.state == InputMethodV1State::Active;
                 rt.block_on(async {
                     tray.set_visible(is_active).await;
@@ -220,7 +242,7 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
                 if let Some(ref mut x) = xkb {
                     if let Some((fd, size)) = c.get_keymap_pending() {
                         if let Err(e) = x.set_keymap_from_owned_fd(fd, size) {
-                            eprintln!("DEBUG: Keymap error: {}", e);
+                            log_msg!("DEBUG: Keymap error: {}", e);
                         }
                     }
                     
@@ -230,17 +252,20 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
                 
                 let events = c.pop_key_events();
                 for event in events {
-                    eprintln!("DEBUG: Key event: keycode={}, pressed={}", event.key, event.pressed);
+                    log_msg!("DEBUG: Key event: keycode={}, pressed={}", event.key, event.pressed);
                     
                     if let Some(ref mut x) = xkb {
                         let keysym = x.key_from_keycode(event.key + 8);
                         if let Some(sym) = keysym {
                             let modifiers = x.get_modifiers();
                             let release_mask = if !event.pressed { librime::K_RELEASE_MASK } else { 0 };
-                            eprintln!("DEBUG: keysym={}, modifiers={}, release={}", sym.raw(), modifiers.effective, release_mask);
+                            log_msg!("DEBUG: keysym={}, modifiers={}, release={}", sym.raw(), modifiers.effective, release_mask);
                             
                             // Handle Ctrl key for showing last input's root
-                            if candidate_window_visible && sym.raw() == 0xFFE3 {  // XK_Control_L
+                            // XK_Control_L = 0xFFE3 (65507), XK_Control_R = 0xFFE4 (65508)
+                            let is_ctrl = sym.raw() == 0xFFE3 || sym.raw() == 0xFFE4;
+                            log_msg!("DEBUG: is_ctrl={}, candidate_visible={}, last_key={:?}", is_ctrl, candidate_window_visible, last_input_keysym);
+                            if candidate_window_visible && is_ctrl {
                                 if event.pressed {
                                     let ctrl_pressed = modifiers.ctrl;
                                     let alt_pressed = modifiers.alt;
@@ -251,11 +276,14 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
                                     if ctrl_pressed && !alt_pressed && !shift_pressed && !super_pressed {
                                         if let Some(last_key) = last_input_keysym {
                                             let letter = keysym_to_letter(last_key);
+                                            log_msg!("DEBUG: last_key={}, letter={:?}", last_key, letter);
                                             if let Some(letter) = letter {
-                                                if let Some(root) = xime_config.get_root_for_key(letter) {
-                                                    eprintln!("DEBUG: Ctrl pressed, showing root for '{}': {}", letter, root);
+                                                let root = xime_config.get_root_for_key(letter);
+                                                log_msg!("DEBUG: root for '{}' = {:?}", letter, root);
+                                                if let Some(root) = root {
+                                                    log_msg!("DEBUG: Ctrl pressed, showing root for '{}': {}", letter, root);
                                                     if let Err(e) = c.show_root_window(letter, &root) {
-                                                        eprintln!("DEBUG: Failed to show root window: {}", e);
+                                                        log_msg!("DEBUG: Failed to show root window: {}", e);
                                                     } else {
                                                         ctrl_root_visible = true;
                                                     }
@@ -264,9 +292,36 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
                                         }
                                     }
                                 } else if ctrl_root_visible {
-                                    eprintln!("DEBUG: Ctrl released, hiding root window");
+                                    log_msg!("DEBUG: Ctrl released, restoring candidate window");
                                     c.hide_root_window();
                                     ctrl_root_visible = false;
+                                    
+                                    // Restore candidate window from current Rime state
+                                    if let Some(session) = rime_session.as_ref() {
+                                        if let Some(ctx) = session.context() {
+                                            let menu = ctx.menu();
+                                            if menu.num_candidates > 0 {
+                                                let candidate_items: Vec<xime_ui::CandidateItem> = 
+                                                    menu.candidates.iter().enumerate().map(|(i, x)| {
+                                                        let comment = x.comment.map(|c| c.to_string()).unwrap_or_default();
+                                                        xime_ui::CandidateItem {
+                                                            text: x.text.to_string(),
+                                                            comment,
+                                                            index: i,
+                                                        }
+                                                    }).collect();
+                                                let highlighted_index = menu.highlighted_candidate_index;
+                                                let width = xime_ui::calculate_candidate_width(&candidate_items);
+                                                let height = 36;
+                                                if let Err(e) = c.show_candidate_window(width, height, &candidate_items, highlighted_index) {
+                                                    log_msg!("DEBUG: Failed to restore candidate window: {}", e);
+                                                }
+                                                if let Err(e) = c.flush() {
+                                                    log_msg!("DEBUG: Failed to flush: {}", e);
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                                 continue;  // Don't pass Ctrl to Rime when candidate visible
                             }
@@ -276,14 +331,14 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
                                     sym.raw() as i32,
                                     modifiers.effective as i32 | release_mask as i32,
                                 );
-                                eprintln!("DEBUG: Rime result: {:?}", result);
+                                log_msg!("DEBUG: Rime result: {:?}", result);
                                 
                                 // Record last input key when Rime processed it successfully
                                 if result && event.pressed {
                                     let letter = keysym_to_letter(sym.raw());
                                     if letter.is_some() {
                                         last_input_keysym = Some(sym.raw());
-                                        eprintln!("DEBUG: Recorded last input keysym={}", sym.raw());
+                                        log_msg!("DEBUG: Recorded last input keysym={}", sym.raw());
                                     }
                                 }
                                 
@@ -299,9 +354,9 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
                                         rt.block_on(async {
                                             tray.set_mode(tray_mode).await;
                                         });
-                                        eprintln!("DEBUG: Tray updated: ascii_mode={}", is_ascii);
+                                        log_msg!("DEBUG: Tray updated: ascii_mode={}", is_ascii);
                                     }
-                                    eprintln!("DEBUG: ascii_mode={}, composing={}", is_ascii, status.is_composing);
+                                    log_msg!("DEBUG: ascii_mode={}, composing={}", is_ascii, status.is_composing);
                                 }
                                 
                                 if !result {
@@ -311,7 +366,7 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
                                 if let Some(commit) = session.commit() {
                                     c.commit_string(commit.text());
                                     let _ = c.flush();
-                                    eprintln!("DEBUG: Committed: {}", commit.text());
+                                    log_msg!("DEBUG: Committed: {}", commit.text());
                                 }
                                 
                                 if let Some(ctx) = session.context() {
@@ -327,7 +382,7 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
                                         let candidate_items: Vec<xime_ui::CandidateItem> = 
                                             menu.candidates.iter().enumerate().map(|(i, x)| {
                                                 let comment = x.comment.map(|c| c.to_string()).unwrap_or_default();
-                                                eprintln!("DEBUG: candidate {} text='{}' comment='{}'", i, x.text, comment);
+                                                log_msg!("DEBUG: candidate {} text='{}' comment='{}'", i, x.text, comment);
                                                 xime_ui::CandidateItem {
                                                     text: x.text.to_string(),
                                                     comment,
@@ -335,11 +390,11 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
                                                 }
                                             }).collect();
                                         let highlighted_index = menu.highlighted_candidate_index;
-                                        eprintln!("DEBUG: highlighted_index={}", highlighted_index);
+                                        log_msg!("DEBUG: highlighted_index={}", highlighted_index);
                                         let width = xime_ui::calculate_candidate_width(&candidate_items);
                                         let height = 36;
                                         if let Err(e) = c.show_candidate_window(width, height, &candidate_items, highlighted_index) {
-                                            eprintln!("DEBUG: Candidate window error: {}", e);
+                                            log_msg!("DEBUG: Candidate window error: {}", e);
                                         }
                                         candidate_window_visible = true;
                                     } else if candidate_window_visible {
@@ -367,7 +422,7 @@ fn get_config_dir() -> std::path::PathBuf {
 }
 
 fn main() -> anyhow::Result<()> {
-    eprintln!("DEBUG: xime-daemon starting");
+    log_msg!("DEBUG: xime-daemon starting");
     
     let rt = tokio::runtime::Runtime::new()?;
     let rt_handle = rt.handle().clone();
@@ -396,18 +451,18 @@ fn main() -> anyhow::Result<()> {
         
         connection.request_name("org.xime.Xime").await?;
         
-        eprintln!("DEBUG: DBus service registered at org.xime.Xime");
-        eprintln!("DEBUG: Tray icon registered");
-        eprintln!("DEBUG: Waiting for Wayland connection from launcher...");
+        log_msg!("DEBUG: DBus service registered at org.xime.Xime");
+        log_msg!("DEBUG: Tray icon registered");
+        log_msg!("DEBUG: Waiting for Wayland connection from launcher...");
         
         loop {
             tokio::select! {
                 Some(_) = toggle_rx.recv() => {
-                    eprintln!("DEBUG: Toggle request received from tray");
+                    log_msg!("DEBUG: Toggle request received from tray");
                     command_tx.send(DaemonCommand::ToggleMode).ok();
                 }
                 Some(action) = action_rx.recv() => {
-                    eprintln!("DEBUG: Menu action received: {:?}", action);
+                    log_msg!("DEBUG: Menu action received: {:?}", action);
                     match action {
                         MenuAction::ToggleMode => {
                             command_tx.send(DaemonCommand::ToggleMode).ok();
@@ -417,7 +472,7 @@ fn main() -> anyhow::Result<()> {
                             let setup_path = format!("{}/.local/bin/xime-setup", home);
                             std::process::Command::new(&setup_path)
                                 .spawn()
-                                .map_err(|e| eprintln!("ERROR: Failed to launch xime-setup: {}", e))
+                                .map_err(|e| log_msg!("ERROR: Failed to launch xime-setup: {}", e))
                                 .ok();
                         }
                         MenuAction::Deploy => {
