@@ -1,0 +1,109 @@
+customization:
+  distribution_code_name: Xime
+  distribution_version: 0.13.3
+  generator: "Xime"
+  modified_time: "2021-07-26"
+  rime_version: 0.14.3
+
+# 字根快捷键配置
+hotkeys:
+  # 在候选框可见时，单独按 Ctrl 显示最后按键的字根，松开隐藏
+  show_last_key_root: Ctrl
+
+wubi_root:
+  # 第一区：横起笔 (1)
+  g: "王龶五一戋"
+  f: "土士二干十寸雨"
+  d: "大犬三古龵镸石厂丆"
+  s: "木丁西"
+  a: "工匚戈艹廿龷七弋戈"
+  
+  # 第二区：竖起笔 (2)
+  h: "目丨卜⺊上止龰"
+  j: "日曰早廾刂虫丿Ⅱ"
+  k: "口Ⅲ川"
+  l: "田甲囗四罒车皿力"
+  m: "山由贝冂冎几"
+  
+  # 第三区：撇起笔 (3)
+  t: "禾竹丿𠂉彳夂攵"
+  r: "白手龵扌斤𰀪𠂆"
+  e: "月⺼彡乃用爫彡𧘇豕"
+  w: "人亻八癶"
+  q: "金 钅𠂊勺㐅 犭𱼀"
+  
+  # 第四区：捺起笔 (4)
+  y: "言讠文方广亠丶乀"
+  u: "立六辛冫丬门疒丷䒑"
+  i: "水氵小氺头𭕄⺌"
+  o: "火灬米"
+  p: "之辶冖宀廴礻"
+  
+  # 第五区：折起笔 (5)
+  n: "已己巳心忄羽乙𠃜"
+  b: "子耳了也阝卩㔾凵"
+  v: "女刀九臼巛彐"
+  c: "又巴马厶龴ス"
+  x: "弓匕纟幺弓𠤎"
+
+style:
+  inline_preedit: true
+  color_scheme: WhiteAqua  # 匹配正文的颜色方案，对应正文的颜色方案名
+  display_tray_icon: false
+  horizontal: true    # 横向排列候选
+  font_point: 12      # 字号
+  font_face: "Microsoft Yahei"                  # 字体 - 候选文字
+  layout:
+    min_width: 160
+    min_height: 30
+    border_width: 1       # 边框宽度
+    margin_x: 10          # 内容离边框的，左右边界
+    margin_y: 10          # 内容离边框的，上下边界
+    spacing: 0            # 候选词之间的间隔
+    candidate_spacing: 30
+    hilite_spacing: 5     # 候选词背景宽度
+    hilite_padding: 15    # 候选词背景的边界宽度
+    round_corner: 0       # 选中的候选词背景
+
+preset_color_schemes:   # 主题：颜色方案
+  MacRoseo: # 玫红字体
+    name: MacRoseo
+    author: "KyleBing <https://kylebing.cn>"
+    creat_time: "2021-07-26"
+    back_color: 0xFFFFFF
+    border_color: 0xD6D6D6
+    text_color: 0x000000
+    hilited_text_color: 0x000000
+    hilited_back_color: 0xFFFFFF
+    hilited_candidate_text_color: 0x4F11FA
+    hilited_candidate_back_color: 0xEDEDF9
+    candidate_text_color: 0x000000
+    comment_text_color: 0xBBCC27
+
+  MacRoseoAlt: # 玫红背景
+    name: MacRoseo
+    author: "KyleBing <https://kylebing.cn>"
+    creat_time: "2021-07-26"
+    back_color: 0xFFFFFF
+    border_color: 0xD6D6D6
+    text_color: 0x000000
+    hilited_text_color: 0x000000
+    hilited_back_color: 0xFFFFFF
+    hilited_candidate_text_color: 0xFFFFFF
+    hilited_candidate_back_color: 0x4F11FA
+    candidate_text_color: 0x000000
+    comment_text_color: 0xBBCC27
+
+  WhiteAqua: # 水绿背景
+    name: WhiteAqua
+    author: "KyleBing <https://kylebing.cn>"
+    creat_time: "2021-07-26"
+    back_color: 0xFFFFFF
+    border_color: 0xD6D6D6
+    text_color: 0x000000
+    hilited_text_color: 0x000000
+    hilited_back_color: 0xFFFFFF
+    hilited_candidate_text_color: 0xFFFFFF
+    hilited_candidate_back_color: 0x9BAD23
+    candidate_text_color: 0x000000
+    comment_text_color: 0xBBCC27

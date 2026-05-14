@@ -1,3 +1,5 @@
+mod config;
+
 use std::sync::mpsc::{self, Sender, Receiver};
 use std::sync::Arc;
 use std::os::unix::io::{OwnedFd, FromRawFd, AsRawFd};
@@ -9,6 +11,8 @@ use xime_wayland::{WaylandConnectionV1, InputMethodV1State};
 use xime_xkb::XkbContext;
 use xime_tray::{TrayManager, InputMode, MenuAction};
 use librime::traits::Traits;
+use config::XimeConfig;
+use xime_xkb::keysym_to_letter;
 
 pub(crate) enum DaemonCommand {
     OpenWaylandSocket(OwnedFd, String),
@@ -63,6 +67,13 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
     let mut conn: Option<WaylandConnectionV1> = None;
     let mut xkb: Option<XkbContext> = None;
     
+    // Load Xime config for hotkeys and wubi roots
+    let xime_config = XimeConfig::load();
+    let _root_table_binding = xime_config.get_root_table_binding();
+    let _single_root_binding = xime_config.get_single_root_binding();
+    eprintln!("DEBUG: Loaded hotkeys: show_root_table={}, show_single_root={}", 
+              xime_config.hotkeys.show_root_table, xime_config.hotkeys.show_single_root);
+    
     let config_dir = get_config_dir();
     if !config_dir.exists() {
         std::fs::create_dir_all(&config_dir)
@@ -93,6 +104,8 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
     
     let mut rime_session = librime::create_session().ok();
     let mut candidate_window_visible = false;
+    let mut last_input_keysym: Option<u32> = None;  // Record last input key
+    let mut ctrl_root_visible = false;  // Is Ctrl showing root window?
     let mut last_ascii_mode = false;
     let mut last_state = InputMethodV1State::Inactive;
     
@@ -226,12 +239,53 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
                             let release_mask = if !event.pressed { librime::K_RELEASE_MASK } else { 0 };
                             eprintln!("DEBUG: keysym={}, modifiers={}, release={}", sym.raw(), modifiers.effective, release_mask);
                             
+                            // Handle Ctrl key for showing last input's root
+                            if candidate_window_visible && sym.raw() == 0xFFE3 {  // XK_Control_L
+                                if event.pressed {
+                                    let ctrl_pressed = modifiers.ctrl;
+                                    let alt_pressed = modifiers.alt;
+                                    let shift_pressed = modifiers.shift;
+                                    let super_pressed = modifiers.super_key;
+                                    
+                                    // Only Ctrl pressed (no other modifiers)
+                                    if ctrl_pressed && !alt_pressed && !shift_pressed && !super_pressed {
+                                        if let Some(last_key) = last_input_keysym {
+                                            let letter = keysym_to_letter(last_key);
+                                            if let Some(letter) = letter {
+                                                if let Some(root) = xime_config.get_root_for_key(letter) {
+                                                    eprintln!("DEBUG: Ctrl pressed, showing root for '{}': {}", letter, root);
+                                                    if let Err(e) = c.show_root_window(letter, &root) {
+                                                        eprintln!("DEBUG: Failed to show root window: {}", e);
+                                                    } else {
+                                                        ctrl_root_visible = true;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else if ctrl_root_visible {
+                                    eprintln!("DEBUG: Ctrl released, hiding root window");
+                                    c.hide_root_window();
+                                    ctrl_root_visible = false;
+                                }
+                                continue;  // Don't pass Ctrl to Rime when candidate visible
+                            }
+                            
                             if let Some(session) = rime_session.as_ref() {
                                 let result = session.process_key(
                                     sym.raw() as i32,
                                     modifiers.effective as i32 | release_mask as i32,
                                 );
                                 eprintln!("DEBUG: Rime result: {:?}", result);
+                                
+                                // Record last input key when Rime processed it successfully
+                                if result && event.pressed {
+                                    let letter = keysym_to_letter(sym.raw());
+                                    if letter.is_some() {
+                                        last_input_keysym = Some(sym.raw());
+                                        eprintln!("DEBUG: Recorded last input keysym={}", sym.raw());
+                                    }
+                                }
                                 
                                 if let Ok(status) = session.status() {
                                     let is_ascii = status.is_ascii_mode;
