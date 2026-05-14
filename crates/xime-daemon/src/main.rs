@@ -275,13 +275,14 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
                                     if menu.num_candidates > 0 {
                                         let candidate_items: Vec<xime_ui::CandidateItem> = 
                                             menu.candidates.iter().enumerate().map(|(i, x)| {
+                                                let comment = x.comment.map(|c| c.to_string()).unwrap_or_default();
+                                                eprintln!("DEBUG: candidate {} text='{}' comment='{}'", i, x.text, comment);
                                                 xime_ui::CandidateItem {
                                                     text: x.text.to_string(),
-                                                    comment: x.comment.map(|c| c.to_string()).unwrap_or_default(),
+                                                    comment,
                                                     index: i,
                                                 }
                                             }).collect();
-                                        eprintln!("DEBUG: Candidates: {:?}", candidate_items);
                                         
                                         let width = xime_ui::calculate_candidate_width(&candidate_items);
                                         let height = 36;
