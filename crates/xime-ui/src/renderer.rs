@@ -29,24 +29,36 @@ impl CandidateRenderer {
             if !candidate.comment.is_empty() {
                 total_width += self.measure_text_width(&candidate.comment, 12.0) + 5.0;
             }
-            total_width += 20.0;
+            total_width += 23.0;
         }
         total_width += 15.0;
 
         (total_width.ceil() as u32).max(100)
     }
 
-    pub fn draw_candidates(&mut self, pixels: &mut [u8], width: u32, height: u32, candidates: &[CandidateItem]) {
+    pub fn draw_candidates(&mut self, pixels: &mut [u8], width: u32, height: u32, candidates: &[CandidateItem], highlighted_index: usize) {
         if candidates.is_empty() {
             return;
         }
 
         let mut pixmap = Pixmap::new(width, height).expect("Failed to create pixmap");
 
+        // First calculate all widths
+        let widths: Vec<f32> = candidates.iter().enumerate().map(|(idx, c)| {
+            let main_text = format!("{}. {}", idx + 1, c.text);
+            let w = self.measure_text_width(&main_text, 16.0);
+            let comment_w = if !c.comment.is_empty() {
+                self.measure_text_width(&c.comment, 12.0) + 5.0
+            } else {
+                0.0
+            };
+            w + comment_w + 23.0
+        }).collect();
+
         self.draw_shadow(&mut pixmap, width, height);
         self.draw_background(&mut pixmap, width, height);
-        self.draw_highlight(&mut pixmap, width, height, candidates);
-        self.draw_text(&mut pixmap, width, height, candidates);
+        self.draw_highlight(&mut pixmap, width, height, candidates, highlighted_index, &widths);
+        self.draw_text(&mut pixmap, width, height, candidates, highlighted_index, &widths);
 
         let data = pixmap.data();
         for i in (0..data.len()).step_by(4) {
@@ -113,13 +125,19 @@ impl CandidateRenderer {
         );
     }
 
-    fn draw_highlight(&mut self, pixmap: &mut Pixmap, _width: u32, height: u32, candidates: &[CandidateItem]) {
-        if candidates.is_empty() {
+    fn draw_highlight(&mut self, pixmap: &mut Pixmap, _width: u32, height: u32, candidates: &[CandidateItem], highlighted_index: usize, widths: &[f32]) {
+        if candidates.is_empty() || highlighted_index >= candidates.len() {
             return;
         }
 
-        let candidate = &candidates[0];
-        let main_text = format!("1. {}", candidate.text);
+        // Calculate x offset for highlighted candidate using precomputed widths
+        let mut x_offset: f32 = 15.0;
+        for i in 0..highlighted_index {
+            x_offset += widths[i];
+        }
+
+        let candidate = &candidates[highlighted_index];
+        let main_text = format!("{}. {}", highlighted_index + 1, candidate.text);
         let text_width = self.measure_text_width(&main_text, 16.0);
         let comment_width = if !candidate.comment.is_empty() {
             self.measure_text_width(&candidate.comment, 12.0) + 5.0
@@ -127,7 +145,7 @@ impl CandidateRenderer {
             0.0
         };
 
-        let hl_x = 8.0f32;
+        let hl_x = x_offset - 7.0;
         let hl_width = text_width + comment_width + 14.0f32;
         let hl_height = height as f32 - 8.0f32;
         let hl_y = 4.0f32;
@@ -148,7 +166,7 @@ impl CandidateRenderer {
         );
     }
 
-    fn draw_text(&mut self, pixmap: &mut Pixmap, _width: u32, height: u32, candidates: &[CandidateItem]) {
+    fn draw_text(&mut self, pixmap: &mut Pixmap, _width: u32, height: u32, candidates: &[CandidateItem], highlighted_index: usize, widths: &[f32]) {
         let line_height = 20.0f32;
         let y_offset = ((height as f32 - line_height) / 2.0).max(0.0) as i32;
 
@@ -158,14 +176,14 @@ impl CandidateRenderer {
         let mut x_offset: f32 = 15.0;
 
         for (idx, candidate) in candidates.iter().enumerate() {
-            let is_first = idx == 0;
+            let is_highlighted = idx == highlighted_index;
 
-            let main_color = if is_first {
+            let main_color = if is_highlighted {
                 Color::rgba(0xFF, 0xFF, 0xFF, 0xFF)
             } else {
                 Color::rgba(0x33, 0x33, 0x33, 0xFF)
             };
-            let comment_color = if is_first {
+            let comment_color = if is_highlighted {
                 Color::rgba(0xCC, 0xCC, 0xCC, 0xFF)
             } else {
                 Color::rgba(0x99, 0x99, 0x99, 0xFF)
@@ -187,7 +205,8 @@ impl CandidateRenderer {
                 0.0
             };
 
-            x_offset += main_width + comment_width + 23.0;
+            // Use precomputed width for positioning
+            x_offset += widths[idx];
         }
     }
 
@@ -291,9 +310,9 @@ fn build_rounded_rect(x: f32, y: f32, w: f32, h: f32, r: f32) -> tiny_skia::Path
     pb.finish().unwrap()
 }
 
-pub fn draw_candidates_to_buffer(pixels: &mut [u8], width: u32, height: u32, candidates: &[CandidateItem]) {
+pub fn draw_candidates_to_buffer(pixels: &mut [u8], width: u32, height: u32, candidates: &[CandidateItem], highlighted_index: usize) {
     let mut renderer = CandidateRenderer::new();
-    renderer.draw_candidates(pixels, width, height, candidates);
+    renderer.draw_candidates(pixels, width, height, candidates, highlighted_index);
 }
 
 pub fn calculate_candidate_width(candidates: &[CandidateItem]) -> u32 {

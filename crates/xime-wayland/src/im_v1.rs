@@ -529,8 +529,8 @@ impl WaylandConnectionV1 {
         Ok(())
     }
     
-    pub fn show_candidate_window(&mut self, width: u32, height: u32, candidates: &[CandidateItem]) -> Result<()> {
-        eprintln!("DEBUG: show_candidate_window called with width={}, height={}, candidates={}", width, height, candidates.len());
+    pub fn show_candidate_window(&mut self, width: u32, height: u32, candidates: &[CandidateItem], highlighted_index: usize) -> Result<()> {
+        eprintln!("DEBUG: show_candidate_window called with width={}, height={}, candidates={}, highlighted={}", width, height, candidates.len(), highlighted_index);
         
         if self.candidate_surface.is_none() {
             self.create_candidate_surface()?;
@@ -555,7 +555,7 @@ impl WaylandConnectionV1 {
         let (pool, fd) = self.create_shm_pool_with_fd(shm, size)?;
         self.current_pool = Some(pool.clone());
         
-        self.draw_candidates(&fd, width, height, candidates)?;
+        self.draw_candidates(&fd, width, height, candidates, highlighted_index)?;
         
         eprintln!("DEBUG: About to create_buffer: offset=0, width={}, height={}, stride={}", width, height, stride);
         let buffer = pool.create_buffer(0, width as i32, height as i32, stride as i32, wl_shm::Format::Argb8888, &qh, self.state.clone());
@@ -570,7 +570,7 @@ impl WaylandConnectionV1 {
         Ok(())
     }
     
-fn draw_candidates(&self, fd: &OwnedFd, width: u32, height: u32, candidates: &[CandidateItem]) -> Result<()> {
+fn draw_candidates(&self, fd: &OwnedFd, width: u32, height: u32, candidates: &[CandidateItem], highlighted_index: usize) -> Result<()> {
         let size = (width * height * 4) as usize;
         let size_nonzero = std::num::NonZero::new(size).expect("size should be non-zero");
         
@@ -587,7 +587,7 @@ fn draw_candidates(&self, fd: &OwnedFd, width: u32, height: u32, candidates: &[C
         
         let pixels: &mut [u8] = unsafe { slice::from_raw_parts_mut(ptr.as_ptr() as *mut u8, size) };
         
-        draw_candidates_to_buffer(pixels, width, height, candidates);
+        draw_candidates_to_buffer(pixels, width, height, candidates, highlighted_index);
         
         unsafe {
             nix::sys::mman::munmap(ptr, size)

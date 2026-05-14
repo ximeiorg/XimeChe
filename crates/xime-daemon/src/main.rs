@@ -283,10 +283,11 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
                                                     index: i,
                                                 }
                                             }).collect();
-                                        
+                                        let highlighted_index = menu.highlighted_candidate_index;
+                                        eprintln!("DEBUG: highlighted_index={}", highlighted_index);
                                         let width = xime_ui::calculate_candidate_width(&candidate_items);
                                         let height = 36;
-                                        if let Err(e) = c.show_candidate_window(width, height, &candidate_items) {
+                                        if let Err(e) = c.show_candidate_window(width, height, &candidate_items, highlighted_index) {
                                             eprintln!("DEBUG: Candidate window error: {}", e);
                                         }
                                         candidate_window_visible = true;
