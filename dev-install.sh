@@ -10,6 +10,12 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "Installing xime-wayland for development to ${HOME}/.local"
 
+# Stop existing xime processes to refresh
+echo "Stopping existing xime processes..."
+pkill -9 xime-daemon 2>/dev/null || true
+pkill -9 xime-launcher 2>/dev/null || true
+sleep 1
+
 # Build release
 cargo build --release -p xime-daemon -p xime-launcher -p xime-setup
 

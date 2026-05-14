@@ -33,21 +33,15 @@ find ~/.config/xime/rime -name "*.log" -type f -delete 2>/dev/null || true
 # 清理 Rime 构建缓存日志
 rm -f ~/.config/xime/rime/build/*.log 2>/dev/null || true
 
-# 6. 重置 KWin 虚拟键盘配置（可选）
-read -p "是否重置 KWin 虚拟键盘配置? [y/N] " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
-    echo "重置 KWin 配置..."
-    kwriteconfig5 --file kwinrc --group Wayland --key VirtualKeyboard ""
-    kwriteconfig5 --file kwinrc --group Wayland --key InputMethod ""
-    kwriteconfig5 --file kwinrc --group Wayland --key VirtualKeyboardEnabled "" 2>/dev/null || true
-    echo "KWin 配置已重置，重新登录后生效"
-fi
+# 6. 重置 KWin 虚拟键盘配置
+echo "重置 KWin 配置..."
+kwriteconfig5 --file kwinrc --group Wayland --key VirtualKeyboard ""
+kwriteconfig5 --file kwinrc --group Wayland --key InputMethod ""
+kwriteconfig5 --file kwinrc --group Wayland --key VirtualKeyboardEnabled "" 2>/dev/null || true
+echo "KWin 配置已重置，重新登录后生效"
 
-# 7. 清理配置文件（可选）
-read -p "是否删除配置文件和词典 (~/.config/xime)? [y/N] " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Yy]$ ]]; then
+# 7. 清理配置文件（只有明确指定 --purge 才删除）
+if [[ "$1" == "--purge" ]]; then
     echo "删除配置文件..."
     rm -rf ~/.config/xime
     echo "配置文件已删除"
