@@ -152,6 +152,35 @@ impl Session {
         }
     }
 
+    pub fn set_option(&self, option: &str, value: bool) -> Result<()> {
+        let cstr = CString::new(option)?;
+        unsafe {
+            let api = get_api();
+            if api.is_null() {
+                return Err(Error::ApiNotInitialized);
+            }
+            if let Some(set_option) = (*api).set_option {
+                set_option(self.session_id, cstr.as_ptr(), if value { 1 } else { 0 });
+            }
+        }
+        Ok(())
+    }
+
+    pub fn get_option(&self, option: &str) -> Result<bool> {
+        let cstr = CString::new(option)?;
+        unsafe {
+            let api = get_api();
+            if api.is_null() {
+                return Err(Error::ApiNotInitialized);
+            }
+            if let Some(get_option) = (*api).get_option {
+                Ok(get_option(self.session_id, cstr.as_ptr()) != 0)
+            } else {
+                Err(Error::FunctionNotAvailable("get_option"))
+            }
+        }
+    }
+
     pub fn close(&mut self) -> Result<()> {
         if self.closed {
             return Ok(());

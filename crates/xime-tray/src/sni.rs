@@ -184,10 +184,8 @@ impl StatusNotifierItem {
         if let Some(tx) = &self.toggle_tx {
             let _ = tx.send(()).await;
         }
-        self.toggle_mode();
-        let _ = emitter.new_icon().await;
-        let _ = emitter.new_tool_tip().await;
-        eprintln!("DEBUG: Tray icon clicked, toggled mode");
+        // Don't toggle mode here - let daemon handle it based on Rime state
+        eprintln!("DEBUG: Tray icon clicked, sending toggle request to daemon");
     }
     
     fn secondary_activate(&self, _x: i32, _y: i32) {}
