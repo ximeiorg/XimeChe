@@ -2,21 +2,34 @@ use gpui::*;
 use crate::theme::ThemeColors;
 use crate::state::SettingsState;
 
+#[cfg(target_os = "linux")]
+fn make_draggable(el: Stateful<Div>) -> Stateful<Div> {
+    el.on_mouse_down(MouseButton::Left, |_event, window, _cx| {
+        window.start_window_move();
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn make_draggable(el: Stateful<Div>) -> Stateful<Div> {
+    el.window_control_area(WindowControlArea::Drag)
+}
+
 pub struct TitleBar;
 
 impl TitleBar {
     pub fn render(settings: Entity<SettingsState>, colors: &ThemeColors, cx: &mut App) -> impl IntoElement {
         let deploy_message = cx.read_entity(&settings, |state, _| state.deploy_message.clone());
         
-        let drag_region = div()
-            .id("drag-region")
-            .flex_1()
-            .h(px(40.0))
-            .bg(colors.background)
-            .flex()
-            .items_center()
-            .justify_center()
-            .window_control_area(WindowControlArea::Drag);
+        let drag_region = make_draggable(
+            div()
+                .id("drag-region")
+                .flex_1()
+                .h(px(40.0))
+                .bg(colors.background)
+                .flex()
+                .items_center()
+                .justify_center()
+        );
         
         let drag_region_with_msg = if let Some(msg) = deploy_message {
             drag_region.child(
@@ -34,16 +47,18 @@ impl TitleBar {
             .w_full()
             .h(px(40.0))
             .child(
-                div()
-                    .w(px(213.0))
-                    .h(px(40.0))
-                    .bg(rgb(0x2d1f3d))
-                    .flex()
-                    .items_center()
-                    .pl(px(12.0))
-                    .child(Self::logo())
-                    .child(Self::title_text())
-                    .window_control_area(WindowControlArea::Drag)
+                make_draggable(
+                    div()
+                        .id("logo-title")
+                        .w(px(213.0))
+                        .h(px(40.0))
+                        .bg(rgb(0x2d1f3d))
+                        .flex()
+                        .items_center()
+                        .pl(px(12.0))
+                        .child(Self::logo())
+                        .child(Self::title_text())
+                )
             )
             .child(drag_region_with_msg)
             .child(Self::deploy_button(colors, settings))
