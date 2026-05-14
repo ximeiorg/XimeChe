@@ -120,25 +120,22 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
             Ok(DaemonCommand::ToggleMode) => {
                 eprintln!("DEBUG: ToggleMode command received");
                 if let Some(session) = rime_session.as_ref() {
-                    let result = session.process_key(librime::XK_SHIFT_L as i32, 0);
-                    eprintln!("DEBUG: Rime toggle press result: {}", result);
+                    // Get current ascii_mode and toggle it directly
+                    let current_ascii = session.get_option("ascii_mode").unwrap_or(false);
+                    let new_ascii = !current_ascii;
+                    session.set_option("ascii_mode", new_ascii).ok();
+                    eprintln!("DEBUG: Set ascii_mode to {}", new_ascii);
                     
-                    let result2 = session.process_key(librime::XK_SHIFT_L as i32, librime::K_RELEASE_MASK as i32);
-                    eprintln!("DEBUG: Rime toggle release result: {}", result2);
-                    
-                    if let Ok(status) = session.status() {
-                        let is_ascii = status.is_ascii_mode;
-                        last_ascii_mode = is_ascii;
-                        let tray_mode = if is_ascii {
-                            InputMode::English
-                        } else {
-                            InputMode::Chinese
-                        };
-                        rt.block_on(async {
-                            tray.set_mode(tray_mode).await;
-                        });
-                        eprintln!("DEBUG: Tray updated after toggle: ascii_mode={}", is_ascii);
-                    }
+                    last_ascii_mode = new_ascii;
+                    let tray_mode = if new_ascii {
+                        InputMode::English
+                    } else {
+                        InputMode::Chinese
+                    };
+                    rt.block_on(async {
+                        tray.set_mode(tray_mode).await;
+                    });
+                    eprintln!("DEBUG: Tray updated after toggle: ascii_mode={}", new_ascii);
                 }
             }
             Ok(DaemonCommand::Deploy) => {
