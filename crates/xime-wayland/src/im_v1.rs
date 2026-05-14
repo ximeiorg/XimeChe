@@ -318,6 +318,9 @@ pub enum Error {
     #[error("No input panel available")]
     NoInputPanel,
 
+    #[error("No output available")]
+    NoOutput,
+
     #[error("No compositor available")]
     NoCompositor,
 
@@ -349,9 +352,6 @@ pub struct WaylandConnectionV1 {
     has_v1_global: bool,
     panel_surface: Option<ZwpInputPanelSurfaceV1>,
     candidate_surface: Option<WlSurface>,
-    root_surface: Option<WlSurface>,
-    root_buffer: Option<WlBuffer>,
-    root_pool: Option<WlShmPool>,
     current_buffer: Option<WlBuffer>,
     current_pool: Option<WlShmPool>,
 }
@@ -420,9 +420,6 @@ impl WaylandConnectionV1 {
             has_v1_global,
             panel_surface: None,
             candidate_surface: None,
-            root_surface: None,
-            root_buffer: None,
-            root_pool: None,
             current_buffer: None,
             current_pool: None,
         })
@@ -649,21 +646,17 @@ fn draw_candidates(&self, fd: &OwnedFd, width: u32, height: u32, candidates: &[C
         let width = calculate_root_width(key, root);
         let height = 36;
         
-        // Create root surface if not exists
-        if self.root_surface.is_none() {
-            self.create_root_surface()?;
-        }
+        // Use candidate_surface to display root (same surface, different content)
+        let shm = self.shm.as_ref().ok_or(Error::NoShm)?;
+        let surface = self.candidate_surface.as_ref().ok_or(Error::Io(std::io::Error::new(std::io::ErrorKind::Other, "No candidate surface")))?;
         
         // Destroy old buffer and pool
-        if let Some(buffer) = self.root_buffer.take() {
+        if let Some(buffer) = self.current_buffer.take() {
             buffer.destroy();
         }
-        if let Some(pool) = self.root_pool.take() {
+        if let Some(pool) = self.current_pool.take() {
             pool.destroy();
         }
-        
-        let shm = self.shm.as_ref().ok_or(Error::NoShm)?;
-        let surface = self.root_surface.as_ref().unwrap();
         
         let qh = self.event_queue.handle();
         
@@ -671,50 +664,27 @@ fn draw_candidates(&self, fd: &OwnedFd, width: u32, height: u32, candidates: &[C
         let size = stride * height;
         
         let (pool, fd) = self.create_shm_pool_with_fd(shm, size)?;
-        self.root_pool = Some(pool.clone());
+        self.current_pool = Some(pool.clone());
         
         self.draw_root(&fd, width, height, key, root)?;
         
         let buffer = pool.create_buffer(0, width as i32, height as i32, stride as i32, wl_shm::Format::Argb8888, &qh, self.state.clone());
-        self.root_buffer = Some(buffer.clone());
+        self.current_buffer = Some(buffer.clone());
         
         surface.attach(Some(&buffer), 0, 0);
         surface.damage_buffer(0, 0, width as i32, height as i32);
         surface.commit();
         
-        eprintln!("DEBUG: Showed root window {}x{} for key {}", width, height, key);
+        self.connection.flush()
+            .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+        
+        eprintln!("DEBUG: Showed root window {}x{} for key {} (on candidate surface)", width, height, key);
         Ok(())
     }
     
     pub fn hide_root_window(&mut self) {
-        if let Some(surface) = &self.root_surface {
-            surface.attach(None::<&WlBuffer>, 0, 0);
-            surface.commit();
-            eprintln!("DEBUG: Hidden root window");
-        }
-    }
-    
-    fn create_root_surface(&mut self) -> Result<()> {
-        let compositor = self.compositor.as_ref().ok_or(Error::NoCompositor)?;
-        let input_panel = self.input_panel.as_ref().ok_or(Error::NoInputPanel)?;
-        let qh = self.event_queue.handle();
-        
-        let surface = compositor.create_surface(&qh, self.state.clone());
-        
-        let panel_surface = input_panel.get_input_panel_surface(&surface, &qh, self.state.clone());
-        
-        // Use set_toplevel if output is available (shows at screen bottom)
-        // Otherwise use set_overlay_panel (shows near cursor)
-        if let Some(output) = &self.output {
-            panel_surface.set_toplevel(output, 0);  // position = center_bottom
-            eprintln!("DEBUG: Created root panel surface with set_toplevel");
-        } else {
-            panel_surface.set_overlay_panel();
-            eprintln!("DEBUG: Created root panel surface with set_overlay_panel (no output)");
-        }
-        
-        self.root_surface = Some(surface);
-        Ok(())
+        // No need to hide, main loop will restore candidate display
+        eprintln!("DEBUG: hide_root_window called - will restore candidate on next update");
     }
     
     fn draw_root(&self, fd: &OwnedFd, width: u32, height: u32, key: char, root: &str) -> Result<()> {

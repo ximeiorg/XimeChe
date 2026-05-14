@@ -97,7 +97,13 @@ impl XimeConfig {
 
     pub fn config_path() -> PathBuf {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
-        PathBuf::from(home).join(".config/xime/rime/xime.yaml")
+        let path1 = PathBuf::from(&home).join(".config/xime/xime.yaml");
+        let path2 = PathBuf::from(&home).join(".config/xime/rime/xime.yaml");
+        if path1.exists() {
+            path1
+        } else {
+            path2
+        }
     }
 
     /// Parse show_root_table hotkey binding

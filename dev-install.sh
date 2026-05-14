@@ -37,6 +37,13 @@ sed -i "s|@BINDIR@|${BINDIR}|g" "${DATADIR}/applications/xime-launcher.desktop"
 # Update desktop database
 update-desktop-database "${DATADIR}/applications" 2>/dev/null || true
 
+# Install default config file (if not exists)
+CONFIGDIR="${HOME}/.config/xime"
+if [ ! -f "${CONFIGDIR}/xime.yaml" ]; then
+    install -Dm644 "${PROJECT_ROOT}/resources/xime.yaml" "${CONFIGDIR}/xime.yaml"
+    echo "Installed default config to ${CONFIGDIR}/xime.yaml"
+fi
+
 # Configure KWin
 kwriteconfig5 --file kwinrc --group Wayland --key VirtualKeyboard xime-launcher.desktop
 kwriteconfig5 --file kwinrc --group Wayland --key VirtualKeyboardEnabled true
