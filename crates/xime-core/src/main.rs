@@ -273,9 +273,10 @@ impl Xime {
                                 }
                             }).collect();
                             
+                            let highlighted_index = menu.highlighted_candidate_index;
                             let width = xime_ui::calculate_candidate_width(&candidate_items);
                             let height = 36;
-                            if let Err(e) = conn.show_candidate_window(width, height, &candidate_items) {
+                            if let Err(e) = conn.show_candidate_window(width, height, &candidate_items, highlighted_index) {
                                 eprintln!("DEBUG: Failed to show candidate window: {}", e);
                             } else {
                                 candidate_window_visible = true;
