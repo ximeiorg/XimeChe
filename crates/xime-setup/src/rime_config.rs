@@ -14,6 +14,10 @@ fn get_shared_data_dir() -> PathBuf {
     PathBuf::from("/usr/share/rime-data")
 }
 
+fn get_xime_data_dir() -> PathBuf {
+    PathBuf::from("/usr/share/xime/rime-data")
+}
+
 fn ensure_config_files() {
     let user_dir = get_user_data_dir();
     if !user_dir.exists() {
@@ -98,8 +102,54 @@ impl SchemaManager {
     }
     
     pub fn get_schema_list(&self) -> Vec<SchemaInfo> {
+        let xime_dir = get_xime_data_dir();
         let shared_dir = get_shared_data_dir();
         let mut schemas = Vec::new();
+        let mut seen_ids = std::collections::HashSet::new();
+        
+        if let Ok(entries) = fs::read_dir(&self.user_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if name.ends_with(".schema.yaml") {
+                        let schema_id = name.replace(".schema.yaml", "");
+                        
+                        if let Ok(content) = fs::read_to_string(&path) {
+                            let schema_name = extract_schema_name(&content, &schema_id);
+                            schemas.push(SchemaInfo {
+                                schema_id: schema_id.clone(),
+                                name: schema_name,
+                            });
+                            seen_ids.insert(schema_id);
+                        }
+                    }
+                }
+            }
+        }
+        
+        if let Ok(entries) = fs::read_dir(&xime_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if name.ends_with(".schema.yaml") {
+                        let schema_id = name.replace(".schema.yaml", "");
+                        
+                        if seen_ids.contains(&schema_id) {
+                            continue;
+                        }
+                        
+                        if let Ok(content) = fs::read_to_string(&path) {
+                            let schema_name = extract_schema_name(&content, &schema_id);
+                            schemas.push(SchemaInfo {
+                                schema_id: schema_id.clone(),
+                                name: schema_name,
+                            });
+                            seen_ids.insert(schema_id);
+                        }
+                    }
+                }
+            }
+        }
         
         if let Ok(entries) = fs::read_dir(&shared_dir) {
             for entry in entries.flatten() {
@@ -107,6 +157,10 @@ impl SchemaManager {
                 if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                     if name.ends_with(".schema.yaml") {
                         let schema_id = name.replace(".schema.yaml", "");
+                        
+                        if seen_ids.contains(&schema_id) {
+                            continue;
+                        }
                         
                         if let Ok(content) = fs::read_to_string(&path) {
                             let schema_name = extract_schema_name(&content, &schema_id);

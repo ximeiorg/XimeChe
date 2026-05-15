@@ -32,6 +32,17 @@ update-desktop-database "${DATADIR}/applications" 2>/dev/null || true
 # Install default config file
 install -Dm644 "${PROJECT_ROOT}/resources/xime.yaml" "${DATADIR}/xime/xime.yaml"
 
+# Install rime-wubi schemas to shared directory
+if [ -d "${PROJECT_ROOT}/rime-wubi" ]; then
+    install -d "${DATADIR}/xime/rime-data"
+    for file in "${PROJECT_ROOT}/rime-wubi"/*.schema.yaml "${PROJECT_ROOT}/rime-wubi"/*.dict.yaml "${PROJECT_ROOT}/rime-wubi"/*.lua; do
+        [ -f "$file" ] && install -m644 "$file" "${DATADIR}/xime/rime-data/"
+    done
+    install -m644 "${PROJECT_ROOT}/rime-wubi"/default.custom.yaml "${DATADIR}/xime/rime-data/" 2>/dev/null || true
+    install -m644 "${PROJECT_ROOT}/rime-wubi"/xime.custom.yaml "${DATADIR}/xime/rime-data/" 2>/dev/null || true
+    echo "Installed rime-wubi schemas to ${DATADIR}/xime/rime-data"
+fi
+
 echo "Installation complete!"
 echo ""
 echo "To use with KDE Plasma:"

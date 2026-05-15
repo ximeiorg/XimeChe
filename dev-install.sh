@@ -39,9 +39,20 @@ update-desktop-database "${DATADIR}/applications" 2>/dev/null || true
 
 # Install default config file (if not exists)
 CONFIGDIR="${HOME}/.config/xime"
+RIMEDIR="${CONFIGDIR}/rime"
+
 if [ ! -f "${CONFIGDIR}/xime.yaml" ]; then
     install -Dm644 "${PROJECT_ROOT}/resources/xime.yaml" "${CONFIGDIR}/xime.yaml"
     echo "Installed default config to ${CONFIGDIR}/xime.yaml"
+fi
+
+# Install rime-wubi schemas to user directory
+if [ -d "${PROJECT_ROOT}/rime-wubi" ]; then
+    mkdir -p "${RIMEDIR}"
+    cp -r "${PROJECT_ROOT}/rime-wubi"/*.schema.yaml "${PROJECT_ROOT}/rime-wubi"/*.dict.yaml "${PROJECT_ROOT}/rime-wubi"/*.lua "${RIMEDIR}/" 2>/dev/null || true
+    cp "${PROJECT_ROOT}/rime-wubi"/default.custom.yaml "${RIMEDIR}/" 2>/dev/null || true
+    cp "${PROJECT_ROOT}/rime-wubi"/xime.custom.yaml "${RIMEDIR}/" 2>/dev/null || true
+    echo "Installed rime-wubi schemas to ${RIMEDIR}"
 fi
 
 # Configure KWin
