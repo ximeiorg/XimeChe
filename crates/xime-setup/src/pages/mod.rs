@@ -51,6 +51,7 @@ impl Render for SettingsApp {
         
         let sidebar = div()
             .w(px(213.0))
+            .flex_none()
             .h_full()
             .bg(rgb(0x2d1f3d))
             .flex()
@@ -128,6 +129,7 @@ impl Render for SettingsApp {
                         div()
                             .id("content-scroll")
                             .flex_1()
+                            .min_w(px(400.0))
                             .overflow_y_scroll()
                             .bg(colors.background)
                             .child(content)
