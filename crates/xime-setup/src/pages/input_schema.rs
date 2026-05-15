@@ -59,9 +59,10 @@ pub fn render(settings: Entity<SettingsState>, cx: &mut Context<SettingsApp>) ->
             
             div()
                 .id(("schema", i))
+                .w_full()
                 .flex()
-                .items_center()
-                .gap(px(12.0))
+                .flex_col()
+                .gap(px(4.0))
                 .py(px(8.0))
                 .px(px(12.0))
                 .rounded(px(8.0))
@@ -84,13 +85,46 @@ pub fn render(settings: Entity<SettingsState>, cx: &mut Context<SettingsApp>) ->
                         }
                     });
                 })
-                .child(Radio::new(is_selected).theme(radio_colors))
                 .child(
                     div()
-                        .text_size(px(14.0))
-                        .text_color(if is_selected { primary } else { colors.foreground })
-                        .child(schema.name.clone())
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .child(Radio::new(is_selected).theme(radio_colors))
+                        .child(
+                            div()
+                                .text_size(px(15.0))
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(if is_selected { primary.clone() } else { colors.foreground })
+                                .child(schema.name.clone())
+                        )
+                        .child(
+                            div()
+                                .text_size(px(12.0))
+                                .text_color(colors.foreground_muted)
+                                .child(format!("v{}", schema.version))
+                        )
                 )
+                .when(!schema.author.is_empty() && schema.author != "未知", |this| {
+                    this.child(
+                        div()
+                            .text_size(px(12.0))
+                            .text_color(colors.foreground_muted)
+                            .px(px(28.0))
+                            .child(format!("作者: {}", schema.author))
+                    )
+                })
+                .when(!schema.description.is_empty(), |this| {
+                    this.child(
+                        div()
+                            .text_size(px(12.0))
+                            .text_color(colors.foreground_muted)
+                            .px(px(28.0))
+                            .w_full()
+                            .overflow_x_hidden()
+                            .child(schema.description.clone())
+                    )
+                })
                 .into_any_element()
         })
         .collect();

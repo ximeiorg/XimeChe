@@ -87,6 +87,9 @@ pub fn deploy_all() -> Result<(), String> {
 pub struct SchemaInfo {
     pub schema_id: String,
     pub name: String,
+    pub version: String,
+    pub author: String,
+    pub description: String,
 }
 
 pub struct SchemaManager {
@@ -115,11 +118,8 @@ impl SchemaManager {
                         let schema_id = name.replace(".schema.yaml", "");
                         
                         if let Ok(content) = fs::read_to_string(&path) {
-                            let schema_name = extract_schema_name(&content, &schema_id);
-                            schemas.push(SchemaInfo {
-                                schema_id: schema_id.clone(),
-                                name: schema_name,
-                            });
+                            let info = extract_schema_info(&content, &schema_id);
+                            schemas.push(info.clone());
                             seen_ids.insert(schema_id);
                         }
                     }
@@ -139,11 +139,8 @@ impl SchemaManager {
                         }
                         
                         if let Ok(content) = fs::read_to_string(&path) {
-                            let schema_name = extract_schema_name(&content, &schema_id);
-                            schemas.push(SchemaInfo {
-                                schema_id: schema_id.clone(),
-                                name: schema_name,
-                            });
+                            let info = extract_schema_info(&content, &schema_id);
+                            schemas.push(info.clone());
                             seen_ids.insert(schema_id);
                         }
                     }
@@ -163,11 +160,8 @@ impl SchemaManager {
                         }
                         
                         if let Ok(content) = fs::read_to_string(&path) {
-                            let schema_name = extract_schema_name(&content, &schema_id);
-                            schemas.push(SchemaInfo {
-                                schema_id,
-                                name: schema_name,
-                            });
+                            let info = extract_schema_info(&content, &schema_id);
+                            schemas.push(info);
                         }
                     }
                 }
@@ -218,16 +212,127 @@ patch:
     }
 }
 
-fn extract_schema_name(content: &str, schema_id: &str) -> String {
-    for line in content.lines() {
-        if line.starts_with("schema_name:") {
-            let name = line.split(':').nth(1)
-                .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
-                .unwrap_or_else(|| schema_id.to_string());
-            return name;
+fn extract_schema_info(content: &str, schema_id: &str) -> SchemaInfo {
+    let mut name = schema_id.to_string();
+    let mut version = "未知".to_string();
+    let mut author = "未知".to_string();
+    let mut description = "".to_string();
+    
+    let lines: Vec<&str> = content.lines().collect();
+    let mut in_schema_block = false;
+    let mut indent_level = 0;
+    
+    for i in 0..lines.len() {
+        let line = lines[i];
+        let trimmed = line.trim();
+        
+        if trimmed == "schema:" {
+            in_schema_block = true;
+            indent_level = line.len() - line.trim_start().len();
+            continue;
+        }
+        
+        if in_schema_block {
+            let current_indent = line.len() - line.trim_start().len();
+            
+            if current_indent <= indent_level && !trimmed.is_empty() && !trimmed.starts_with('#') {
+                break;
+            }
+            
+            if trimmed.starts_with("name:") {
+                name = trimmed.split(':').nth(1)
+                    .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
+                    .unwrap_or_else(|| schema_id.to_string());
+            } else if trimmed.starts_with("version:") {
+                version = trimmed.split(':').nth(1)
+                    .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
+                    .unwrap_or_else(|| "未知".to_string());
+            } else if trimmed.starts_with("author:") {
+                author = extract_author(&lines, i);
+            } else if trimmed.starts_with("description:") {
+                description = extract_description(&lines, i);
+            }
         }
     }
-    schema_id.to_string()
+    
+    SchemaInfo {
+        schema_id: schema_id.to_string(),
+        name,
+        version,
+        author,
+        description,
+    }
+}
+
+fn extract_author(lines: &[&str], start_idx: usize) -> String {
+    let line = lines[start_idx];
+    let trimmed = line.trim();
+    
+    if let Some(single) = trimmed.split(':').nth(1) {
+        let author = single.trim().trim_matches('"').trim_matches('\'');
+        if !author.is_empty() && !author.starts_with('-') && !author.starts_with('[') {
+            return author.to_string();
+        }
+    }
+    
+    let indent = line.len() - line.trim_start().len();
+    let mut authors = Vec::new();
+    
+    for i in (start_idx + 1)..lines.len() {
+        let next_line = lines[i];
+        let next_trimmed = next_line.trim();
+        let next_indent = next_line.len() - next_line.trim_start().len();
+        
+        if next_indent <= indent || next_trimmed.is_empty() || !next_trimmed.starts_with('-') {
+            break;
+        }
+        
+        let author_name = next_trimmed.trim_start_matches('-').trim().trim_matches('"').trim_matches('\'');
+        if !author_name.is_empty() {
+            authors.push(author_name.to_string());
+        }
+    }
+    
+    if authors.is_empty() {
+        "未知".to_string()
+    } else {
+        authors.join(", ")
+    }
+}
+
+fn extract_description(lines: &[&str], start_idx: usize) -> String {
+    let line = lines[start_idx];
+    let trimmed = line.trim();
+    
+    if let Some(desc) = trimmed.split(':').nth(1) {
+        let desc = desc.trim();
+        if !desc.is_empty() && !desc.starts_with('|') {
+            return desc.trim_matches('"').trim_matches('\'').to_string();
+        }
+    }
+    
+    if trimmed.ends_with('|') {
+        let indent = line.len() - line.trim_start().len();
+        let mut desc_lines = Vec::new();
+        
+        for i in (start_idx + 1)..lines.len() {
+            let next_line = lines[i];
+            let next_trimmed = next_line.trim();
+            let next_indent = next_line.len() - next_line.trim_start().len();
+            
+            if next_indent < indent && !next_trimmed.is_empty() {
+                break;
+            }
+            
+            if !next_trimmed.is_empty() {
+                desc_lines.push(next_trimmed.to_string());
+            }
+        }
+        
+        desc_lines.join(" ").trim().to_string()
+    } else {
+        "".to_string()
+    }
 }
 
 fn extract_selected_schema(content: &str) -> Option<String> {
