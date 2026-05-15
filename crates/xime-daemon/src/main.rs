@@ -7,12 +7,27 @@ use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, Env
 use tracing_appender::non_blocking::WorkerGuard;
 use zbus::Connection;
 use xime_tray::{TrayManager, MenuAction};
+use xime_server::{ServerState, serve, PlatformProviders};
 
 use xime_daemon::{XimeDaemon, DaemonCommand, WaylandLoop};
 
+fn get_log_dir() -> std::path::PathBuf {
+    #[cfg(target_os = "linux")]
+    {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+        std::path::PathBuf::from(home).join(".config/xime")
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let app_data = std::env::var("APPDATA")
+            .or_else(|_| std::env::var("LOCALAPPDATA"))
+            .unwrap_or_else(|_| "C:\\AppData\\Roaming".to_string());
+        std::path::PathBuf::from(app_data).join("xime")
+    }
+}
+
 fn init_tracing() -> WorkerGuard {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
-    let log_dir = std::path::PathBuf::from(home).join(".config/xime");
+    let log_dir = get_log_dir();
     
     if !log_dir.exists() {
         std::fs::create_dir_all(&log_dir).ok();
@@ -67,6 +82,20 @@ fn main() -> anyhow::Result<()> {
                 wayland_loop.run();
             }
         });
+        
+        let providers = PlatformProviders::new()
+            .expect("Failed to initialize platform providers");
+        
+        let server_state = ServerState::new(providers);
+        let server_port = 16888;
+        
+        rt_handle.spawn(async move {
+            if let Err(e) = serve(server_state, server_port).await {
+                error!("HTTP server error: {}", e);
+            }
+        });
+        
+        info!("HTTP server started on port {}", server_port);
         
         let daemon = XimeDaemon::new(command_tx.clone());
         

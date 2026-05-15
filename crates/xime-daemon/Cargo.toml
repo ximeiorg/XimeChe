@@ -11,6 +11,7 @@ xime-wayland.workspace = true
 xime-xkb.workspace = true
 xime-ui.workspace = true
 xime-tray.workspace = true
+xime-server.workspace = true
 librime.workspace = true
 thiserror.workspace = true
 anyhow.workspace = true

@@ -1,7 +1,7 @@
 # XIME-Wayland 开发进度
 
 ## 当前状态
-**单元测试覆盖率大幅提升：25 → 103 个测试。**
+**xime-server HTTP API 服务已实现，支持局域网剪切板同步。**
 
 ## 已完成功能
 1. **候选栏绘制**
@@ -56,12 +56,28 @@
    - 松开 Ctrl 自动隐藏
 
 10. **单元测试体系建立**
-   - xime-xkb: 34 个测试（KeyBinding 解析、modifier 匹配、keysym 转换）
-   - librime: 21 个测试（KeyEvent from_char、Traits builder pattern）
-   - xime-config: 17 个测试（配置解析、颜色方案、合并逻辑）
-   - xime-ui: 23 个测试（CandidateList 分页、导航、选择逻辑）
-   - xime-tray: 8 个测试（状态切换、颜色设置）
-   - 总计: 103 个测试，覆盖核心纯函数逻辑
+    - xime-xkb: 34 个测试（KeyBinding 解析、modifier 匹配、keysym 转换）
+    - librime: 21 个测试（KeyEvent from_char、Traits builder pattern）
+    - xime-config: 17 个测试（配置解析、颜色方案、合并逻辑）
+    - xime-ui: 23 个测试（CandidateList 分页、导航、选择逻辑）
+    - xime-tray: 8 个测试（状态切换、颜色设置）
+    - 总计: 103 个测试，覆盖核心纯函数逻辑
+
+11. **局域网剪切板同步服务 (xime-server)**
+    - 基于 Axum 的 HTTP REST API 服务
+    - 配对功能：6 位配对码 + HMAC-SHA256 Token 认证
+    - 剪切板读写：hash 去重防循环
+    - 配对持久化：`~/.config/xime/pairs.json`
+    - 端口：16888（硬编码，待配置化）
+    - API Endpoints：
+      - `POST /pair/request` - 发起配对请求
+      - `GET /pair/status?code=xxx` - 查询配对状态
+      - `POST /pair/confirm` - 确认配对
+      - `GET /pair/list` - 列出已配对设备
+      - `POST /pair/remove/{device_id}` - 移除设备
+      - `GET /clipboard/read` - 读取剪切板（需 Token）
+      - `POST /clipboard/write` - 写入剪切板（需 Token）
+      - `GET /health` - 健康检查
 
 ## 待解决问题
 1. **阴影效果优化** - 当前使用简单偏移阴影，可考虑添加模糊效果
@@ -79,6 +95,8 @@
 - `tiny-skia` - 背景/形状绘制
 - `zbus` - DBus 通信（系统托盘）
 - `serde_yaml` - 配置文件解析
+- `axum` + `tower-http` - HTTP REST API 服务
+- `hmac` + `sha2` - Token 签名认证
 
 ## 测试覆盖
 - **xime-xkb**: 34 tests - KeyBinding 解析、keysym 转换
@@ -92,3 +110,18 @@
 1. 测试主题颜色实时更新功能（重新安装后验证）
 2. 测试 Ctrl 键字根显示功能
 3. 考虑为 xime-daemon/xime-launcher 添加集成测试
+
+## 剪切板同步待完成功能
+1. **托盘集成**：在 `xime-tray` 添加配对确认菜单
+   - 收到配对请求时弹出菜单："xxx 设备请求配对，码 123456，允许？"
+   - 添加"已配对设备"菜单项，支持查看/移除
+2. **剪切板读写**：接入 `zbus` 读取/写入桌面剪切板
+   - 使用 `org.freedesktop.portal.Desktop` clipboard portal
+   - 或使用 `arboard` crate 直接读写
+3. **mDNS 发现**：添加 `mdns-sd` crate
+   - PC 发布 `_xime._tcp` 服务
+   - 手机扫描局域网发现 PC
+4. **端口配置**：从 `xime.yaml` 读取端口
+   - 配置项：`server.port: 16888`
+   - 配置项：`server.enabled: true/false`
+5. **词库同步接口预留**：为未来扩展预留 `/dict/*` 路由
