@@ -100,13 +100,13 @@ cargo deb -p xime
 
 **目前仅支持 KDE Plasma (KWin)**，通过 VirtualKeyboard 机制自动启动。
 
-### 测试流程
+### TODO
 
-1. 安装后重新登录 KDE Plasma
-2. 打开 Kate 或其他文本编辑器
-3. 点击文本区域，KWin 自动启动 xime
-4. 系统托盘显示输入法图标
-5. 输入五笔编码，候选窗显示候选词
+1. [ ] xime-setup 完成 Rime 配置界面
+2. [ ] 智能联想功能
+3. [ ] 词条管理（编辑）
+4. [ ] 跨平台剪切板 
+
 
 ## FAQ
 
