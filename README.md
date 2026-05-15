@@ -37,16 +37,17 @@ xime-wayland/
 
 ### 系统依赖
 
-- `librime1` (>= 1.8) - Rime 输入法引擎
-- `libxkbcommon0` (>= 1.0) - 键盘布局处理
-- `rime-data-wubi` (推荐) - 五笔方案数据
+- `librime` (>= 1.8) - Rime 输入法引擎
+- `libxkbcommon` (>= 1.0) - 键盘布局处理
 
 安装方法：
 
 ```bash
 # Ubuntu/Debian
-sudo apt install librime1 libxkbcommon0 rime-data-wubi
+sudo apt install librime libxkbcommon
 ```
+
+五笔方案数据由项目自带（`rime-wubi` 子模块），安装时会自动部署到 `~/.config/xime/rime/`。
 
 ## 安装
 
@@ -115,7 +116,7 @@ A: VSCode 需要以 Wayland 模式启动。官方网站下载的 VSCode 可以�
 
 ### Q: 如何切换中英文？
 
-A: 点击托盘图标，或使用右键菜单"切换中英文"。
+A: 点击托盘图标，或使用右键菜单"切换中英文"。支持 Shift 键切换（Shift_L 内联输入，Shift_R 提交文本）。
 
 ### Q: 如何添加新的输入方案？
 
