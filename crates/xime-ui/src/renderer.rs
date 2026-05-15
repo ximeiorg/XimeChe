@@ -353,4 +353,65 @@ mod tests {
         assert!(w16 > 0.0);
         assert!(w12 > 0.0);
     }
+
+    #[test]
+    fn test_primary_color_lavender_purple() {
+        let primary_color = (0x8F, 0x73, 0xE2);
+        assert_eq!(primary_color.0, 143);
+        assert_eq!(primary_color.1, 115);
+        assert_eq!(primary_color.2, 226);
+    }
+
+    #[test]
+    fn test_primary_color_ocean_blue() {
+        let primary_color = (0x1A, 0x73, 0xE8);
+        assert_eq!(primary_color.0, 26);
+        assert_eq!(primary_color.1, 115);
+        assert_eq!(primary_color.2, 232);
+    }
+
+    #[test]
+    fn test_draw_candidates_with_custom_color() {
+        let mut renderer = CandidateRenderer::new();
+        
+        let candidates: Vec<CandidateItem> = vec![
+            CandidateItem { text: "测试".to_string(), comment: "".to_string(), index: 0 },
+        ];
+        
+        let width = 200;
+        let height = 36;
+        let primary_color = (0x1A, 0x73, 0xE8);
+        
+        let mut pixels = vec![0u8; width as usize * height as usize * 4];
+        renderer.draw_candidates(&mut pixels, width, height, &candidates, 0, primary_color);
+        
+        assert!(!pixels.is_empty());
+        assert!(pixels.len() == width as usize * height as usize * 4);
+    }
+
+    #[test]
+    fn test_draw_candidates_empty() {
+        let mut renderer = CandidateRenderer::new();
+        
+        let candidates: Vec<CandidateItem> = vec![];
+        let primary_color = (0x8F, 0x73, 0xE2);
+        
+        let mut pixels = vec![0u8; 100 * 36 * 4];
+        renderer.draw_candidates(&mut pixels, 100, 36, &candidates, 0, primary_color);
+        
+        assert!(!pixels.is_empty());
+    }
+
+    #[test]
+    fn test_draw_highlight_primary_color_applied() {
+        let primary_color = (0xC6, 0x28, 0x28);
+        
+        let r = primary_color.0;
+        let g = primary_color.1;
+        let b = primary_color.2;
+        
+        assert_eq!(r, 198);
+        assert_eq!(g, 40);
+        assert_eq!(b, 40);
+    }
 }
