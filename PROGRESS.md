@@ -1,7 +1,7 @@
 # XIME-Wayland 开发进度
 
 ## 当前状态
-**主题颜色实时更新已修复，Ctrl 键显示字根待验证。**
+**单元测试覆盖率大幅提升：25 → 103 个测试。**
 
 ## 已完成功能
 1. **候选栏绘制**
@@ -55,13 +55,13 @@
    - 使用 `set_toplevel(output, center_bottom)` 让窗口显示在屏幕底部
    - 松开 Ctrl 自动隐藏
 
-9. **配置系统重构（xime-config）**
-   - 创建独立的 `xime-config` crate 作为共享配置模块
-   - 支持 YAML 配置文件解析
-   - 配置合并逻辑：系统默认 + 用户覆盖
-   - 内置默认配置（编译时嵌入）
-   - DBus `ReloadStyle` 方法支持实时更新主题颜色
-   - 修复 `font_size` 类型问题：`i32` → `f32`
+10. **单元测试体系建立**
+   - xime-xkb: 34 个测试（KeyBinding 解析、modifier 匹配、keysym 转换）
+   - librime: 21 个测试（KeyEvent from_char、Traits builder pattern）
+   - xime-config: 17 个测试（配置解析、颜色方案、合并逻辑）
+   - xime-ui: 23 个测试（CandidateList 分页、导航、选择逻辑）
+   - xime-tray: 8 个测试（状态切换、颜色设置）
+   - 总计: 103 个测试，覆盖核心纯函数逻辑
 
 ## 待解决问题
 1. **阴影效果优化** - 当前使用简单偏移阴影，可考虑添加模糊效果
@@ -80,7 +80,15 @@
 - `zbus` - DBus 通信（系统托盘）
 - `serde_yaml` - 配置文件解析
 
+## 测试覆盖
+- **xime-xkb**: 34 tests - KeyBinding 解析、keysym 转换
+- **librime**: 21 tests - KeyEvent、Traits builder
+- **xime-config**: 17 tests - 配置解析、合并逻辑
+- **xime-ui**: 23 tests - CandidateList 状态机
+- **xime-tray**: 8 tests - 状态切换、颜色设置
+- **总计**: 103 tests
+
 ## 下一步
-1. 重新安装并测试候选窗口颜色是否正确
-2. 测试托盘图标颜色是否正确
-3. 测试 Ctrl 键字根显示功能
+1. 测试主题颜色实时更新功能（重新安装后验证）
+2. 测试 Ctrl 键字根显示功能
+3. 考虑为 xime-daemon/xime-launcher 添加集成测试
