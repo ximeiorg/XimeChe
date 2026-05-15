@@ -1,6 +1,5 @@
 pub mod input_schema;
 pub mod appearance;
-pub mod clipboard;
 pub mod hotkeys;
 pub mod smart_suggestion;
 pub mod dictionary;
@@ -30,11 +29,9 @@ fn get_page_icon(index: usize) -> &'static str {
     match index {
         0 => "icons/keyboard.svg",
         1 => "icons/palette.svg",
-        2 => "icons/clipboard.svg",
-        3 => "icons/command.svg",
-        4 => "icons/thinking.svg",
-        5 => "icons/word.svg",
-        6 => "icons/about.svg",
+        2 => "icons/command.svg",
+        3 => "icons/thinking.svg",
+        4 => "icons/about.svg",
         _ => "icons/keyboard.svg",
     }
 }
@@ -43,7 +40,7 @@ impl Render for SettingsApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         window.set_background_appearance(WindowBackgroundAppearance::Blurred);
         
-        let pages = ["输入方案", "外观", "剪切板", "快捷键", "智能联想", "词库管理", "关于"];
+        let pages = ["输入方案", "外观", "快捷键", "智能联想", "关于"];
         let current = self.current_page;
         let settings = self.settings.clone();
         let settings_for_title = settings.clone();
@@ -104,11 +101,9 @@ impl Render for SettingsApp {
         let content = match self.current_page {
             0 => input_schema::render(settings, cx),
             1 => appearance::render(settings, cx),
-            2 => clipboard::render(settings, cx),
-            3 => hotkeys::render(settings, cx),
-            4 => smart_suggestion::render(settings, cx),
-            5 => dictionary::render(settings, cx),
-            6 => about::render(settings, cx),
+            2 => hotkeys::render(settings, cx),
+            3 => smart_suggestion::render(settings, cx),
+            4 => about::render(settings, cx),
             _ => input_schema::render(settings, cx),
         };
 

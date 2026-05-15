@@ -5,7 +5,6 @@ use crate::rime_config::{RimeConfigManager, SchemaManager, SchemaConfig, SchemaC
 pub struct SettingsState {
     pub appearance: AppearanceState,
     pub input_schema: InputSchemaState,
-    pub clipboard: ClipboardState,
     pub smart_suggestion: SmartSuggestionState,
     pub system_theme: SystemTheme,
     pub deploy_message: Option<String>,
@@ -17,7 +16,6 @@ impl SettingsState {
         Self {
             appearance: AppearanceState::default(),
             input_schema: InputSchemaState::default(),
-            clipboard: ClipboardState::default(),
             smart_suggestion: SmartSuggestionState::default(),
             system_theme: SystemTheme::detect(),
             deploy_message: None,
@@ -154,21 +152,9 @@ impl SettingsState {
         }
         
         Ok(())
-    }
+}
 
-    pub fn save_clipboard(&self) -> Result<(), String> {
-        let manager = RimeConfigManager::new()?;
-        
-        manager.set_bool("clipboard/enabled", self.clipboard.enabled)?;
-        manager.set_int("clipboard/history_count", self.clipboard.history_count)?;
-        manager.set_int("clipboard/retention_days", self.clipboard.retention_days)?;
-        
-        manager.save()?;
-        
-        Ok(())
-    }
-
-    pub fn save_smart_suggestion(&self) -> Result<(), String> {
+pub fn save_smart_suggestion(&self) -> Result<(), String> {
         let manager = RimeConfigManager::new()?;
         
         manager.set_bool("smart_suggestion/enabled", self.smart_suggestion.enabled)?;
@@ -231,13 +217,6 @@ pub struct InputSchemaState {
     pub available_schemas: Vec<SchemaInfo>,
     pub schema_config: Option<SchemaConfig>,
     pub config_loaded: bool,
-}
-
-#[derive(Clone, Default)]
-pub struct ClipboardState {
-    pub enabled: bool,
-    pub history_count: i32,
-    pub retention_days: i32,
 }
 
 #[derive(Clone, Default)]
