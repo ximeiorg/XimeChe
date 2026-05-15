@@ -1,6 +1,8 @@
 use std::env;
 use std::os::unix::io::{OwnedFd, AsRawFd, FromRawFd};
 use nix::unistd::dup;
+use tracing::{debug, error, warn};
+use tracing_subscriber::EnvFilter;
 use zbus::Connection;
 use zbus::zvariant::Fd;
 
@@ -34,20 +36,18 @@ fn get_wayland_socket_fd() -> Result<OwnedFd, Error> {
 }
 
 async fn connect_to_daemon(fd: OwnedFd) -> Result<(), Error> {
-    let display = env::var("WAYLAND_DISPLAY")
+    let display_name = env::var("WAYLAND_DISPLAY")
         .unwrap_or_else(|_| "wayland-0".to_string());
     
-    eprintln!("DEBUG: Duplicating fd {} for DBus transfer", fd.as_raw_fd());
+    debug!("Duplicating fd {} for DBus transfer", fd.as_raw_fd());
     
-    // Duplicate fd because we need to keep the original alive until DBus call completes
     let dup_fd = dup(fd.as_raw_fd())
         .map_err(|e| Error::Io(std::io::Error::from_raw_os_error(e as i32)))?;
     let owned_dup = unsafe { OwnedFd::from_raw_fd(dup_fd) };
     
     let connection = Connection::session().await?;
     
-    // Activate daemon first
-    eprintln!("DEBUG: Activating daemon via DBus");
+    debug!("Activating daemon via DBus");
     let _ = connection.call_method(
         Some("org.freedesktop.DBus"),
         "/org/freedesktop/DBus",
@@ -63,24 +63,35 @@ async fn connect_to_daemon(fd: OwnedFd) -> Result<(), Error> {
         XIME_DBUS_IFACE,
     ).await?;
     
-    eprintln!("DEBUG: Launcher calling OpenWaylandSocket with fd and display={}", display);
+    debug!("Launcher calling OpenWaylandSocket with fd and display={:?}", &display_name);
     
     let fd_for_dbus = Fd::from(&owned_dup);
-    proxy.call_method("OpenWaylandSocket", &(fd_for_dbus, &display)).await?;
+    proxy.call_method("OpenWaylandSocket", &(fd_for_dbus, &display_name)).await?;
     
-    eprintln!("DEBUG: OpenWaylandSocket succeeded");
+    debug!("OpenWaylandSocket succeeded");
     Ok(())
 }
 
 fn main() {
+    #[cfg(debug_assertions)]
+    let default_level = tracing::Level::DEBUG;
+    #[cfg(not(debug_assertions))]
+    let default_level = tracing::Level::INFO;
+    
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env()
+            .add_directive(default_level.into()))
+        .with_writer(std::io::stderr)
+        .init();
+    
     if env::args().any(|arg| arg == "--reopen") {
-        eprintln!("DEBUG: Launcher started with --reopen flag");
+        debug!("Launcher started with --reopen flag");
     }
     
     if let Ok(socket) = env::var("WAYLAND_SOCKET") {
-        eprintln!("DEBUG: WAYLAND_SOCKET={} at startup", socket);
+        debug!("WAYLAND_SOCKET={} at startup", socket);
     } else {
-        eprintln!("WARNING: No WAYLAND_SOCKET, exiting");
+        warn!("No WAYLAND_SOCKET, exiting");
         std::process::exit(0);
     }
     
@@ -92,11 +103,11 @@ fn main() {
             .expect("Failed to get WAYLAND_SOCKET fd");
         
         if let Err(e) = connect_to_daemon(fd).await {
-            eprintln!("ERROR: {}", e);
+            error!("{}", e);
             std::process::exit(1);
         }
         
-        eprintln!("DEBUG: Launcher keeping process alive");
+        debug!("Launcher keeping process alive");
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
         }

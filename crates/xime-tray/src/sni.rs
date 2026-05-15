@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc::Sender;
 use tiny_skia::{Pixmap, Paint, PathBuilder, FillRule, Transform, Shader, Color};
 use cosmic_text::{FontSystem, SwashCache, Buffer, Metrics, Attrs, Color as CosmicColor, Shaping, Family};
+use tracing::debug;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
@@ -193,12 +194,11 @@ impl StatusNotifierItem {
     
     fn scroll(&self, _delta: i32, _orientation: &str) {}
     
-    async fn activate(&self, #[zbus(signal_emitter)] emitter: SignalEmitter<'_>, _x: i32, _y: i32) {
+    async fn activate(&self, #[zbus(signal_emitter)] _emitter: SignalEmitter<'_>, _x: i32, _y: i32) {
         if let Some(tx) = &self.toggle_tx {
             let _ = tx.send(()).await;
         }
-        // Don't toggle mode here - let daemon handle it based on Rime state
-        eprintln!("DEBUG: Tray icon clicked, sending toggle request to daemon");
+        debug!("Tray icon clicked, sending toggle request to daemon");
     }
     
     fn secondary_activate(&self, _x: i32, _y: i32) {}

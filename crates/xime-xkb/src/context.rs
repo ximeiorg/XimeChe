@@ -1,6 +1,7 @@
 use xkbcommon::xkb::{Context, Keymap, State, Keysym, Keycode, ModIndex, keysym_from_name, KEYSYM_CASE_INSENSITIVE};
 use std::os::unix::io::{RawFd, FromRawFd, OwnedFd};
 use std::fs::File;
+use tracing::debug;
 
 use crate::Error;
 use crate::Result;
@@ -87,10 +88,9 @@ impl XkbContext {
     }
 
     pub fn set_keymap_from_owned_fd(&mut self, owned_fd: OwnedFd, size: usize) -> Result<()> {
-        // 使用 new_from_file 避免 CString::new 的 NUL 字符 panic
         let mut file = File::from(owned_fd);
         
-        eprintln!("DEBUG: Loading keymap from file (size: {} bytes)", size);
+        debug!("Loading keymap from file (size: {} bytes)", size);
         
         let keymap = Keymap::new_from_file(
             &self.context,
@@ -104,11 +104,11 @@ impl XkbContext {
                 let state = State::new(&km);
                 self.keymap = Some(km);
                 self.state = Some(state);
-                eprintln!("DEBUG: Keymap loaded successfully");
+                debug!("Keymap loaded successfully");
                 Ok(())
             }
             None => {
-                eprintln!("DEBUG: Keymap creation failed");
+                debug!("Keymap creation failed");
                 Err(Error::KeymapCreationFailed)
             }
         }
@@ -145,7 +145,7 @@ impl XkbContext {
             // Mod4 (index 3) is usually Super/Win
             let super_key = state.mod_index_is_active(3, xkbcommon::xkb::STATE_MODS_EFFECTIVE);
             
-            eprintln!("DEBUG XKB: depressed={}, latched={}, locked={}, effective={}, shift={}, ctrl={}, alt={}, super={}", 
+            debug!("XKB: depressed={}, latched={}, locked={}, effective={}, shift={}, ctrl={}, alt={}, super={}", 
                       depressed, latched, locked, effective, shift, ctrl, alt, super_key);
             
             ModifierState {

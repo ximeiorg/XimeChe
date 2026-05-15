@@ -2,6 +2,7 @@ use zbus::{interface, object_server::SignalEmitter};
 use zbus::zvariant::Value;
 use std::collections::HashMap;
 use tokio::sync::mpsc::Sender;
+use tracing::debug;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuAction {
@@ -49,7 +50,7 @@ impl DBusMenu {
                     _ => return,
                 };
                 let _ = tx.send(action).await;
-                eprintln!("DEBUG: Menu item {} clicked, action: {:?}", id, action);
+                debug!("Menu item {} clicked, action: {:?}", id, action);
             }
         }
     }

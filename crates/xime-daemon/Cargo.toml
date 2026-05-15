@@ -16,7 +16,9 @@ thiserror.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_yaml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-appender.workspace = true
 zbus = "5"
 nix = { version = "0.31.3", features = ["fs", "mman"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
-chrono = "0.4"
