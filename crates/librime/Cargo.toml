@@ -3,7 +3,7 @@ name = "librime"
 version = "0.1.0"
 edition = "2021"
 authors = ["Kor1 <kingzcheung@gmail.com>"]
-license = "GPL-3.0-or-later"
+license = "BSD-3-Clause"
 description = "Safe Rust bindings to librime"
 repository = "https://github.com/ximeiorg/xime-wayland"
 
