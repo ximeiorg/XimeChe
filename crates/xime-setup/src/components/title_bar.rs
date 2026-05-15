@@ -52,18 +52,18 @@ impl TitleBar {
                         .id("logo-title")
                         .w(px(213.0))
                         .h(px(40.0))
-                        .bg(rgb(0x2d1f3d))
+                        .bg(colors.surface_variant)
                         .flex()
                         .items_center()
                         .pl(px(12.0))
                         .child(Self::logo())
-                        .child(Self::title_text())
+                        .child(Self::title_text(&colors))
                 )
             )
             .child(drag_region_with_msg)
             .child(Self::deploy_button(colors, settings))
             .child(Self::separator(colors))
-            .child(Self::close_button(colors.foreground, colors.background))
+            .child(Self::close_button(colors.foreground, colors.background, colors.error))
     }
 
     fn logo() -> impl IntoElement {
@@ -74,7 +74,7 @@ impl TitleBar {
             .mr_2()
     }
 
-    fn title_text() -> impl IntoElement {
+    fn title_text(colors: &ThemeColors) -> impl IntoElement {
         div()
             .flex()
             .items_center()
@@ -83,13 +83,13 @@ impl TitleBar {
                 div()
                     .text_size(px(14.0))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(rgb(0xe0e0e0))
+                    .text_color(colors.foreground)
                     .child("Xime")
             )
             .child(
                 div()
                     .text_size(px(12.0))
-                    .text_color(rgb(0x808080))
+                    .text_color(colors.foreground_muted)
                     .child("曦码输入法")
             )
     }
@@ -134,7 +134,7 @@ impl TitleBar {
             .bg(colors.border)
     }
 
-    fn close_button(text_color: Hsla, bg: Hsla) -> impl IntoElement {
+    fn close_button(text_color: Hsla, bg: Hsla, error_color: Hsla) -> impl IntoElement {
         div()
             .id("close-btn")
             .flex()
@@ -146,7 +146,7 @@ impl TitleBar {
             .text_size(px(14.0))
             .text_color(text_color)
             .cursor_pointer()
-            .hover(|style| style.bg(rgb(0xc42b1c)))
+            .hover(|style| style.bg(error_color))
             .on_click(|_event, window, _cx| {
                 window.remove_window();
             })

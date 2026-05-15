@@ -12,15 +12,17 @@ pub struct SettingsState {
 }
 
 impl SettingsState {
-    pub fn new(_cx: &mut Context<Self>) -> Self {
-        Self {
+    pub fn new(cx: &mut Context<Self>) -> Self {
+        let mut state = Self {
             appearance: AppearanceState::default(),
             input_schema: InputSchemaState::default(),
             smart_suggestion: SmartSuggestionState::default(),
             system_theme: SystemTheme::detect(),
             deploy_message: None,
             schemas_loaded: false,
-        }
+        };
+        state.load_color_schemes(cx);
+        state
     }
 
     pub fn load_schemas(&mut self, cx: &mut Context<Self>) {
@@ -51,7 +53,16 @@ impl SettingsState {
     }
 
     pub fn colors(&self) -> ThemeColors {
-        ThemeColors::from_theme(&self.system_theme)
+        let primary_color = self.get_primary_color();
+        ThemeColors::from_theme(&self.system_theme, primary_color)
+    }
+    
+    fn get_primary_color(&self) -> u32 {
+        self.appearance.available_color_schemes
+            .iter()
+            .find(|(id, _, _)| id == &self.appearance.color_scheme)
+            .map(|(_, _, color)| *color)
+            .unwrap_or(0x8F73E2)
     }
     
     pub fn load_color_schemes(&mut self, cx: &mut Context<Self>) {
@@ -71,6 +82,13 @@ impl SettingsState {
         }
     }
 
+pub fn save_color_scheme(&self) -> Result<(), String> {
+        let mut manager = XimeStyleManager::load()?;
+        manager.set_color_scheme(&self.appearance.color_scheme)?;
+        notify_daemon_reload_style();
+        Ok(())
+    }
+    
     pub fn save_appearance(&self) -> Result<(), String> {
         let mut manager = XimeStyleManager::load()?;
         
@@ -79,12 +97,7 @@ impl SettingsState {
         manager.set_show_code_hint(self.appearance.show_code_hint)?;
         manager.set_corner_radius(self.appearance.corner_radius as f32)?;
         
-        Ok(())
-    }
-    
-    pub fn save_color_scheme(&self) -> Result<(), String> {
-        let mut manager = XimeStyleManager::load()?;
-        manager.set_color_scheme(&self.appearance.color_scheme)?;
+        notify_daemon_reload_style();
         Ok(())
     }
 
@@ -222,6 +235,21 @@ fn notify_daemon_reload() -> bool {
             .ok()
         })
         .is_some()
+}
+
+fn notify_daemon_reload_style() {
+    zbus::blocking::Connection::session()
+        .ok()
+        .and_then(|conn| {
+            conn.call_method(
+                Some("org.xime.Xime"),
+                "/org/xime/Xime",
+                Some("org.xime.Xime.Controller"),
+                "ReloadStyle",
+                &(),
+            )
+            .ok()
+        });
 }
 
 #[derive(Clone, Default)]

@@ -46,6 +46,7 @@ style:
   candidate_count: 5
   show_code_hint: false
   corner_radius: 8.0
+  color_scheme: lavender_purple
 "#).ok();
     }
 }
@@ -746,16 +747,11 @@ fn default_corner_radius() -> f32 { 8.0 }
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ColorSchemeEntry {
     pub name: String,
-    #[serde(deserialize_with = "deserialize_hex_color")]
+    #[serde(
+        deserialize_with = "deserialize_hex_color",
+        serialize_with = "serialize_hex_color"
+    )]
     pub primary_color: u32,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct XimeConfigFile {
-    #[serde(default)]
-    pub style: XimeStyleConfig,
-    #[serde(default)]
-    pub color_schemes: std::collections::HashMap<String, ColorSchemeEntry>,
 }
 
 fn deserialize_hex_color<'de, D>(deserializer: D) -> Result<u32, D::Error>
@@ -783,6 +779,19 @@ where D: serde::Deserializer<'de> {
     }
 }
 
+fn serialize_hex_color<S>(value: &u32, serializer: S) -> Result<S::Ok, S::Error>
+where S: serde::Serializer {
+    serializer.serialize_str(&format!("0x{:06X}", value))
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct XimeConfigFile {
+    #[serde(default)]
+    pub style: XimeStyleConfig,
+    #[serde(default)]
+    pub color_schemes: std::collections::HashMap<String, ColorSchemeEntry>,
+}
+
 pub struct XimeStyleManager {
     config_path: PathBuf,
     config: XimeConfigFile,
@@ -799,10 +808,36 @@ impl XimeStyleManager {
         let content = fs::read_to_string(&config_path)
             .map_err(|e| format!("Failed to read xime.yaml: {}", e))?;
         
-        let config: XimeConfigFile = serde_yaml::from_str(&content)
+        let mut config: XimeConfigFile = serde_yaml::from_str(&content)
             .map_err(|e| format!("Failed to parse xime.yaml: {}", e))?;
         
+        let system_config = Self::load_system_color_schemes().unwrap_or_default();
+        config.color_schemes.extend(system_config.color_schemes);
+        
         Ok(Self { config_path, config })
+    }
+    
+    fn load_system_color_schemes() -> Option<XimeConfigFile> {
+        let manifest_dir = env!("CARGO_MANIFEST_DIR");
+        let system_path = PathBuf::from(manifest_dir)
+            .parent()
+            .and_then(|p| p.parent())
+            .map(|p| p.join("resources/xime.yaml"))
+            .unwrap_or_else(|| PathBuf::from("/usr/share/xime/xime.yaml"));
+        
+        if !system_path.exists() {
+            return None;
+        }
+        
+        let content = fs::read_to_string(&system_path).ok()?;
+        
+        let config: XimeConfigFile = serde_yaml::from_str(&content)
+            .ok()?;
+        
+        Some(XimeConfigFile {
+            color_schemes: config.color_schemes,
+            ..Default::default()
+        })
     }
     
     pub fn get_style(&self) -> XimeStyleConfig {

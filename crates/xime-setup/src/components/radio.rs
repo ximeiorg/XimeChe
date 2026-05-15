@@ -22,7 +22,7 @@ impl IntoElement for Radio {
 
     fn into_element(self) -> Self::Element {
         let size = px(16.0);
-        let colors = self.colors.unwrap_or_else(|| ThemeColors::from_theme(&crate::theme::SystemTheme::Light));
+        let colors = self.colors.unwrap_or_else(|| ThemeColors::from_theme(&crate::theme::SystemTheme::Light, 0x8F73E2));
         
         div()
             .w(size)
