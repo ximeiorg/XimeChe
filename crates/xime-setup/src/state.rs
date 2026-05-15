@@ -1,6 +1,6 @@
 use gpui::*;
 use crate::theme::{SystemTheme, ThemeColors};
-use crate::rime_config::{RimeConfigManager, SchemaManager, SchemaConfig, SchemaConfigManager, deploy_all, SchemaInfo};
+use crate::rime_config::{RimeConfigManager, SchemaManager, SchemaConfig, SchemaConfigManager, deploy_all, SchemaInfo, XimeStyleManager};
 
 pub struct SettingsState {
     pub appearance: AppearanceState,
@@ -53,17 +53,38 @@ impl SettingsState {
     pub fn colors(&self) -> ThemeColors {
         ThemeColors::from_theme(&self.system_theme)
     }
+    
+    pub fn load_color_schemes(&mut self, cx: &mut Context<Self>) {
+        if self.appearance.color_schemes_loaded {
+            return;
+        }
+        if let Ok(manager) = XimeStyleManager::load() {
+            let style = manager.get_style();
+            self.appearance.color_scheme = style.color_scheme;
+            self.appearance.available_color_schemes = manager.get_color_schemes();
+            self.appearance.font_size = style.font_size as f64;
+            self.appearance.candidate_count = style.candidate_count;
+            self.appearance.show_code_hint = style.show_code_hint;
+            self.appearance.corner_radius = style.corner_radius as f64;
+            self.appearance.color_schemes_loaded = true;
+            cx.notify();
+        }
+    }
 
     pub fn save_appearance(&self) -> Result<(), String> {
-        let manager = RimeConfigManager::new()?;
+        let mut manager = XimeStyleManager::load()?;
         
-        manager.set_double("style/font_size", self.appearance.font_size)?;
-        manager.set_int("style/candidate_count", self.appearance.candidate_count)?;
-        manager.set_bool("style/show_code_hint", self.appearance.show_code_hint)?;
-        manager.set_double("style/corner_radius", self.appearance.corner_radius)?;
+        manager.set_font_size(self.appearance.font_size as f32)?;
+        manager.set_candidate_count(self.appearance.candidate_count)?;
+        manager.set_show_code_hint(self.appearance.show_code_hint)?;
+        manager.set_corner_radius(self.appearance.corner_radius as f32)?;
         
-        manager.save()?;
-        
+        Ok(())
+    }
+    
+    pub fn save_color_scheme(&self) -> Result<(), String> {
+        let mut manager = XimeStyleManager::load()?;
+        manager.set_color_scheme(&self.appearance.color_scheme)?;
         Ok(())
     }
 
@@ -209,6 +230,9 @@ pub struct AppearanceState {
     pub candidate_count: i32,
     pub show_code_hint: bool,
     pub corner_radius: f64,
+    pub color_scheme: String,
+    pub available_color_schemes: Vec<(String, String, u32)>,
+    pub color_schemes_loaded: bool,
 }
 
 #[derive(Clone, Default)]

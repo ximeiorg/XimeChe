@@ -8,53 +8,6 @@ pub struct SettingsItem {
     description: Option<String>,
 }
 
-pub enum SettingsControl {
-    Switch(Switch),
-    Dropdown(Dropdown),
-    NumberInput(NumberInput),
-    Button(Button),
-    Kbd(Kbd),
-    Label(Label),
-}
-
-impl SettingsControl {
-    pub fn switch(checked: bool) -> Self {
-        SettingsControl::Switch(Switch::new(checked))
-    }
-    
-    pub fn switch_with(checked: bool, on_change: impl Fn(bool, &mut Window, &mut App) + 'static) -> Self {
-        SettingsControl::Switch(Switch::new(checked).on_change(on_change))
-    }
-
-    pub fn dropdown(options: Vec<(String, String)>, selected: String) -> Self {
-        SettingsControl::Dropdown(Dropdown::new(options, selected))
-    }
-
-    pub fn number_input(value: f64) -> Self {
-        SettingsControl::NumberInput(NumberInput::new(value))
-    }
-    
-    pub fn number_input_with(value: f64, on_change: impl Fn(f64, &mut Window, &mut App) + 'static) -> Self {
-        SettingsControl::NumberInput(NumberInput::new(value).on_change(on_change))
-    }
-
-    pub fn button(label: impl Into<String>) -> Self {
-        SettingsControl::Button(Button::new(label))
-    }
-    
-    pub fn button_with(label: impl Into<String>, on_click: impl Fn(&mut Window, &mut App) + 'static) -> Self {
-        SettingsControl::Button(Button::new(label).on_click(on_click))
-    }
-
-    pub fn kbd(key: impl Into<String>) -> Self {
-        SettingsControl::Kbd(Kbd::new(key))
-    }
-
-    pub fn label(text: impl Into<String>) -> Self {
-        SettingsControl::Label(Label::new(text))
-    }
-}
-
 impl SettingsItem {
     pub fn new(label: impl Into<String>, control: SettingsControl) -> Self {
         Self {
@@ -92,9 +45,7 @@ impl SettingsItem {
     pub fn label(text: impl Into<String>) -> SettingsControl {
         SettingsControl::label(text)
     }
-}
 
-impl SettingsItem {
     pub fn render(&self, colors: &ThemeColors) -> Div {
         let control_element: AnyElement = match &self.control {
             SettingsControl::Switch(s) => {
@@ -119,6 +70,7 @@ impl SettingsItem {
                     .theme(colors.foreground);
                 themed.into_any_element()
             },
+            SettingsControl::Custom => div().into_any_element(),
         };
 
         div()
@@ -149,18 +101,108 @@ impl SettingsItem {
             )
             .child(control_element)
     }
+    
+    pub fn render_custom(colors: &ThemeColors, label: impl Into<String>, description: Option<impl Into<String>>, content: impl IntoElement) -> Div {
+        let label = label.into();
+        let description = description.map(|d| d.into());
+        
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(12.0))
+            .py(px(12.0))
+            .px(px(16.0))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.0))
+                    .child(
+                        div()
+                            .text_size(px(14.0))
+                            .text_color(colors.foreground)
+                            .child(label)
+                    )
+                    .when_some(description, |this: Div, desc| {
+                        this.child(
+                            div()
+                                .text_size(px(12.0))
+                                .text_color(colors.foreground_muted)
+                                .child(desc)
+                        )
+                    })
+            )
+            .child(content)
+    }
+}
+
+pub enum SettingsControl {
+    Switch(Switch),
+    Dropdown(Dropdown),
+    NumberInput(NumberInput),
+    Button(Button),
+    Kbd(Kbd),
+    Label(Label),
+    Custom,
+}
+
+impl SettingsControl {
+    pub fn is_custom(&self) -> bool {
+        matches!(self, SettingsControl::Custom)
+    }
+    
+    pub fn switch(checked: bool) -> Self {
+        SettingsControl::Switch(Switch::new(checked))
+    }
+    
+    pub fn switch_with(checked: bool, on_change: impl Fn(bool, &mut Window, &mut App) + 'static) -> Self {
+        SettingsControl::Switch(Switch::new(checked).on_change(on_change))
+    }
+
+    pub fn dropdown(options: Vec<(String, String)>, selected: String) -> Self {
+        SettingsControl::Dropdown(Dropdown::new(options, selected))
+    }
+
+    pub fn number_input(value: f64) -> Self {
+        SettingsControl::NumberInput(NumberInput::new(value))
+    }
+    
+    pub fn number_input_with(value: f64, on_change: impl Fn(f64, &mut Window, &mut App) + 'static) -> Self {
+        SettingsControl::NumberInput(NumberInput::new(value).on_change(on_change))
+    }
+
+    pub fn button(label: impl Into<String>) -> Self {
+        SettingsControl::Button(Button::new(label))
+    }
+    
+    pub fn button_with(label: impl Into<String>, on_click: impl Fn(&mut Window, &mut App) + 'static) -> Self {
+        SettingsControl::Button(Button::new(label).on_click(on_click))
+    }
+
+    pub fn kbd(key: impl Into<String>) -> Self {
+        SettingsControl::Kbd(Kbd::new(key))
+    }
+
+    pub fn label(text: impl Into<String>) -> Self {
+        SettingsControl::Label(Label::new(text))
+    }
+
+    pub fn custom() -> Self {
+        SettingsControl::Custom
+    }
 }
 
 pub struct SettingsGroup {
     title: String,
     description: Option<String>,
     items: Vec<SettingsItem>,
+    custom_items: Vec<Div>,
     colors: ThemeColors,
 }
 
 impl SettingsGroup {
     pub fn new(title: impl Into<String>, colors: ThemeColors) -> Self {
-        Self { title: title.into(), description: None, items: vec![], colors }
+        Self { title: title.into(), description: None, items: vec![], custom_items: vec![], colors }
     }
 
     pub fn description(mut self, desc: impl Into<String>) -> Self {
@@ -170,6 +212,11 @@ impl SettingsGroup {
 
     pub fn items(mut self, items: Vec<SettingsItem>) -> Self {
         self.items = items;
+        self
+    }
+    
+    pub fn custom_item(mut self, item: Div) -> Self {
+        self.custom_items.push(item);
         self
     }
 }
@@ -210,6 +257,7 @@ impl IntoElement for SettingsGroup {
                     })
             )
             .children(self.items.iter().map(|item| item.render(&self.colors)))
+            .children(self.custom_items)
     }
 }
 

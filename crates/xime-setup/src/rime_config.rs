@@ -703,3 +703,150 @@ fn get_yaml_value(content: &str, key: &str) -> Option<String> {
         _ => None,
     }
 }
+
+fn get_xime_config_path() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+    let user_paths = [
+        PathBuf::from(&home).join(".config/xime/xime.yaml"),
+        PathBuf::from(&home).join(".config/xime/rime/xime.yaml"),
+    ];
+    
+    for path in &user_paths {
+        if path.exists() {
+            return path.clone();
+        }
+    }
+    
+    let system_path = PathBuf::from("/usr/share/xime/xime.yaml");
+    if system_path.exists() {
+        return system_path;
+    }
+    
+    user_paths[0].clone()
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct XimeStyleConfig {
+    #[serde(default)]
+    pub color_scheme: String,
+    #[serde(default = "default_font_size")]
+    pub font_size: f32,
+    #[serde(default = "default_candidate_count")]
+    pub candidate_count: i32,
+    #[serde(default)]
+    pub show_code_hint: bool,
+    #[serde(default = "default_corner_radius")]
+    pub corner_radius: f32,
+}
+
+fn default_font_size() -> f32 { 14.0 }
+fn default_candidate_count() -> i32 { 5 }
+fn default_corner_radius() -> f32 { 8.0 }
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ColorSchemeEntry {
+    pub name: String,
+    #[serde(deserialize_with = "deserialize_hex_color")]
+    pub primary_color: u32,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct XimeConfigFile {
+    #[serde(default)]
+    pub style: XimeStyleConfig,
+    #[serde(default)]
+    pub color_schemes: std::collections::HashMap<String, ColorSchemeEntry>,
+}
+
+fn deserialize_hex_color<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where D: serde::Deserializer<'de> {
+    let value: serde_yaml::Value = serde::Deserialize::deserialize(deserializer)?;
+    match value {
+        serde_yaml::Value::Number(n) => {
+            if let Some(num) = n.as_u64() {
+                Ok(num as u32)
+            } else {
+                Ok(0x8F73E2)
+            }
+        }
+        serde_yaml::Value::String(s) => {
+            let s = s.trim();
+            if s.starts_with("0x") || s.starts_with("0X") {
+                u32::from_str_radix(&s[2..], 16).map_err(|_| serde::de::Error::custom("Invalid hex color"))
+            } else if s.starts_with('#') {
+                u32::from_str_radix(&s[1..], 16).map_err(|_| serde::de::Error::custom("Invalid hex color"))
+            } else {
+                s.parse::<u32>().map_err(|_| serde::de::Error::custom("Invalid color number"))
+            }
+        }
+        _ => Ok(0x8F73E2),
+    }
+}
+
+pub struct XimeStyleManager {
+    config_path: PathBuf,
+    config: XimeConfigFile,
+}
+
+impl XimeStyleManager {
+    pub fn load() -> Result<Self, String> {
+        let config_path = get_xime_config_path();
+        
+        if !config_path.exists() {
+            return Err("xime.yaml not found".to_string());
+        }
+        
+        let content = fs::read_to_string(&config_path)
+            .map_err(|e| format!("Failed to read xime.yaml: {}", e))?;
+        
+        let config: XimeConfigFile = serde_yaml::from_str(&content)
+            .map_err(|e| format!("Failed to parse xime.yaml: {}", e))?;
+        
+        Ok(Self { config_path, config })
+    }
+    
+    pub fn get_style(&self) -> XimeStyleConfig {
+        self.config.style.clone()
+    }
+    
+    pub fn get_color_schemes(&self) -> Vec<(String, String, u32)> {
+        self.config.color_schemes.iter()
+            .map(|(id, entry)| (id.clone(), entry.name.clone(), entry.primary_color))
+            .collect()
+    }
+    
+    pub fn set_color_scheme(&mut self, scheme_id: &str) -> Result<(), String> {
+        self.config.style.color_scheme = scheme_id.to_string();
+        self.save()
+    }
+    
+    pub fn set_font_size(&mut self, size: f32) -> Result<(), String> {
+        self.config.style.font_size = size;
+        self.save()
+    }
+    
+    pub fn set_candidate_count(&mut self, count: i32) -> Result<(), String> {
+        self.config.style.candidate_count = count;
+        self.save()
+    }
+    
+    pub fn set_show_code_hint(&mut self, show: bool) -> Result<(), String> {
+        self.config.style.show_code_hint = show;
+        self.save()
+    }
+    
+    pub fn set_corner_radius(&mut self, radius: f32) -> Result<(), String> {
+        self.config.style.corner_radius = radius;
+        self.save()
+    }
+    
+    fn save(&self) -> Result<(), String> {
+        let content = serde_yaml::to_string(&self.config)
+            .map_err(|e| format!("Failed to serialize xime.yaml: {}", e))?;
+        
+        fs::write(&self.config_path, content)
+            .map_err(|e| format!("Failed to write xime.yaml: {}", e))?;
+        
+        Ok(())
+    }
+}
