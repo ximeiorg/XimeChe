@@ -84,3 +84,84 @@ impl KeyEvent {
         Self { key_code, modifiers: 0 }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_keyevent_new() {
+        let event = KeyEvent::new(XK_A, K_CONTROL_MASK);
+        assert_eq!(event.key_code, XK_A);
+        assert_eq!(event.modifiers, K_CONTROL_MASK);
+    }
+
+    #[test]
+    fn test_keyevent_from_char_lowercase_a() {
+        let event = KeyEvent::from_char('a');
+        assert_eq!(event.key_code, XK_A);
+        assert_eq!(event.modifiers, 0);
+    }
+
+    #[test]
+    fn test_keyevent_from_char_lowercase_z() {
+        let event = KeyEvent::from_char('z');
+        assert_eq!(event.key_code, XK_Z);
+        assert_eq!(event.modifiers, 0);
+    }
+
+    #[test]
+    fn test_keyevent_from_char_uppercase_a() {
+        let event = KeyEvent::from_char('A');
+        assert_eq!(event.key_code, XK_A);
+        assert_eq!(event.modifiers, 0);
+    }
+
+    #[test]
+    fn test_keyevent_from_char_uppercase_z() {
+        let event = KeyEvent::from_char('Z');
+        assert_eq!(event.key_code, XK_Z);
+        assert_eq!(event.modifiers, 0);
+    }
+
+    #[test]
+    fn test_keyevent_from_char_digits() {
+        for d in '0'..='9' {
+            let event = KeyEvent::from_char(d);
+            assert_eq!(event.key_code, XK_0 + (d as KeyCode - '0' as KeyCode));
+            assert_eq!(event.modifiers, 0);
+        }
+    }
+
+    #[test]
+    fn test_keyevent_from_char_space() {
+        let event = KeyEvent::from_char(' ');
+        assert_eq!(event.key_code, XK_SPACE);
+        assert_eq!(event.modifiers, 0);
+    }
+
+    #[test]
+    fn test_keyevent_from_char_middle_letter() {
+        let event = KeyEvent::from_char('m');
+        assert_eq!(event.key_code, XK_M);
+        assert_eq!(event.modifiers, 0);
+    }
+
+    #[test]
+    fn test_keycode_constants() {
+        assert_eq!(XK_BACK_SPACE, librime_sys2::RimeKeyCode_XK_BackSpace);
+        assert_eq!(XK_TAB, librime_sys2::RimeKeyCode_XK_Tab);
+        assert_eq!(XK_RETURN, librime_sys2::RimeKeyCode_XK_Return);
+        assert_eq!(XK_ESCAPE, librime_sys2::RimeKeyCode_XK_Escape);
+        assert_eq!(XK_DELETE, librime_sys2::RimeKeyCode_XK_Delete);
+        assert_eq!(XK_SPACE, librime_sys2::RimeKeyCode_XK_space);
+    }
+
+    #[test]
+    fn test_modifier_constants() {
+        assert_eq!(K_SHIFT_MASK, librime_sys2::RimeModifier_kShiftMask);
+        assert_eq!(K_CONTROL_MASK, librime_sys2::RimeModifier_kControlMask);
+        assert_eq!(K_ALT_MASK, librime_sys2::RimeModifier_kAltMask);
+        assert_eq!(K_RELEASE_MASK, librime_sys2::RimeModifier_kReleaseMask);
+    }
+}
