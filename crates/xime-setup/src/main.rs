@@ -8,6 +8,8 @@ use gpui::*;
 use pages::SettingsApp;
 use rust_embed::RustEmbed;
 use std::borrow::Cow;
+use std::fs::File;
+use std::path::PathBuf;
 
 #[derive(RustEmbed)]
 #[folder = "$CARGO_MANIFEST_DIR/assets"]
@@ -38,7 +40,43 @@ impl AssetSource for Assets {
     }
 }
 
+fn get_lock_file_path() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+    PathBuf::from(home).join(".config/xime/xime-setup.lock")
+}
+
+fn try_acquire_singleton_lock() -> bool {
+    let lock_path = get_lock_file_path();
+    
+    if let Some(parent) = lock_path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    
+    let file = File::create(&lock_path);
+    
+    match file {
+        Ok(f) => {
+            use nix::fcntl::{Flock, FlockArg};
+            use std::mem::forget;
+            
+            match Flock::lock(f, FlockArg::LockExclusiveNonblock) {
+                Ok(flock) => {
+                    forget(flock);
+                    true
+                }
+                Err(_) => false,
+            }
+        }
+        Err(_) => false,
+    }
+}
+
 fn main() {
+    if !try_acquire_singleton_lock() {
+        println!("xime-setup is already running, exiting...");
+        return;
+    }
+    
     Application::new().run(|cx: &mut App| {
         let _ = cx.open_window(
             WindowOptions {
