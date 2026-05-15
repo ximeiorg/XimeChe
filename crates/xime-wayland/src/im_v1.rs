@@ -640,10 +640,10 @@ fn draw_candidates(&self, fd: &OwnedFd, width: u32, height: u32, candidates: &[C
     
     /// Show a single key root display window
     /// Displays "a: 工匚戈艹廿龷七弋戈" in a small popup
-    pub fn show_root_window(&mut self, key: char, root: &str) -> Result<()> {
+    pub fn show_root_window(&mut self, key: char, root: &str, primary_color: (u8, u8, u8)) -> Result<()> {
         eprintln!("DEBUG: show_root_window called for key={}, root={}", key, root);
         
-        let width = calculate_root_width(key, root);
+        let width = calculate_root_width(key, root, primary_color);
         let height = 36;
         
         // Use candidate_surface to display root (same surface, different content)
@@ -666,7 +666,7 @@ fn draw_candidates(&self, fd: &OwnedFd, width: u32, height: u32, candidates: &[C
         let (pool, fd) = self.create_shm_pool_with_fd(shm, size)?;
         self.current_pool = Some(pool.clone());
         
-        self.draw_root(&fd, width, height, key, root)?;
+        self.draw_root(&fd, width, height, key, root, primary_color)?;
         
         let buffer = pool.create_buffer(0, width as i32, height as i32, stride as i32, wl_shm::Format::Argb8888, &qh, self.state.clone());
         self.current_buffer = Some(buffer.clone());
@@ -687,7 +687,7 @@ fn draw_candidates(&self, fd: &OwnedFd, width: u32, height: u32, candidates: &[C
         eprintln!("DEBUG: hide_root_window called - will restore candidate on next update");
     }
     
-    fn draw_root(&self, fd: &OwnedFd, width: u32, height: u32, key: char, root: &str) -> Result<()> {
+    fn draw_root(&self, fd: &OwnedFd, width: u32, height: u32, key: char, root: &str, primary_color: (u8, u8, u8)) -> Result<()> {
         let size = (width * height * 4) as usize;
         let size_nonzero = std::num::NonZero::new(size).expect("size should be non-zero");
         
@@ -704,7 +704,7 @@ fn draw_candidates(&self, fd: &OwnedFd, width: u32, height: u32, candidates: &[C
         
         let pixels: &mut [u8] = unsafe { slice::from_raw_parts_mut(ptr.as_ptr() as *mut u8, size) };
         
-        draw_root_to_buffer(pixels, width, height, key, root);
+        draw_root_to_buffer(pixels, width, height, key, root, primary_color);
         
         unsafe {
             nix::sys::mman::munmap(ptr, size)
