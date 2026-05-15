@@ -183,32 +183,19 @@ pub struct WubiRootConfig {
 impl XimeConfig {
     pub fn load() -> Self {
         let system_config = Self::load_system_config();
-        eprintln!("DEBUG config: system color_scheme={}", system_config.style.color_scheme);
-        
         let user_config = Self::load_user_config();
-        if let Some(ref uc) = user_config {
-            eprintln!("DEBUG config: user color_scheme={}", uc.style.color_scheme);
-        } else {
-            eprintln!("DEBUG config: no user config loaded");
-        }
-        
-        let merged = Self::merge_configs(system_config, user_config);
-        eprintln!("DEBUG config: merged color_scheme={}", merged.style.color_scheme);
-        merged
+        Self::merge_configs(system_config, user_config)
     }
     
 fn load_system_config() -> Self {
         let system_path = PathBuf::from("/usr/share/xime/xime.yaml");
         if system_path.exists() {
-            let content = fs::read_to_string(&system_path).ok();
-            if let Some(content) = content {
+            if let Ok(content) = fs::read_to_string(&system_path) {
                 if let Ok(config) = serde_yaml::from_str::<XimeConfig>(&content) {
-                    eprintln!("DEBUG: Loaded system xime config from {:?}", system_path);
                     return config;
                 }
             }
         }
-        
         Self::builtin_default()
     }
     
@@ -219,23 +206,10 @@ fn load_system_config() -> Self {
     
     fn load_user_config() -> Option<Self> {
         let config_path = Self::user_config_path();
-        eprintln!("DEBUG config: user_config_path={}", config_path.display());
-        eprintln!("DEBUG config: file_exists={}", config_path.exists());
-        
         if config_path.exists() {
-            let content = fs::read_to_string(&config_path).ok();
-            eprintln!("DEBUG config: read_content_ok={}", content.is_some());
-            
-            if let Some(content) = content {
-                eprintln!("DEBUG config: content_length={}", content.len());
-                let result: Result<XimeConfig, _> = serde_yaml::from_str(&content);
-                eprintln!("DEBUG config: parse_result={}", result.is_ok());
-                
-                if let Ok(config) = result {
-                    eprintln!("DEBUG config: parsed color_scheme={}", config.style.color_scheme);
+            if let Ok(content) = fs::read_to_string(&config_path) {
+                if let Ok(config) = serde_yaml::from_str::<XimeConfig>(&content) {
                     return Some(config);
-                } else if let Err(e) = result {
-                    eprintln!("DEBUG config: parse_error={}", e);
                 }
             }
         }

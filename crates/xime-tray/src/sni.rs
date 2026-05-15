@@ -312,3 +312,79 @@ impl StatusNotifierItem {
         self.set_mode(new_mode);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_primary_color() {
+        let sni = StatusNotifierItem::new();
+        let color = sni.get_primary_color();
+        assert_eq!(color, (0x8F, 0x73, 0xE2));
+    }
+
+    #[test]
+    fn test_set_primary_color() {
+        let sni = StatusNotifierItem::new();
+        
+        sni.set_primary_color((0x1A, 0x73, 0xE8));
+        let color = sni.get_primary_color();
+        assert_eq!(color, (26, 115, 232));
+        
+        sni.set_primary_color((0xC6, 0x28, 0x28));
+        let color = sni.get_primary_color();
+        assert_eq!(color, (198, 40, 40));
+    }
+
+    #[test]
+    fn test_primary_color_coral_red() {
+        let sni = StatusNotifierItem::new();
+        sni.set_primary_color((0xC6, 0x28, 0x28));
+        assert_eq!(sni.get_primary_color(), (198, 40, 40));
+    }
+
+    #[test]
+    fn test_primary_color_ocean_blue() {
+        let sni = StatusNotifierItem::new();
+        sni.set_primary_color((0x1A, 0x73, 0xE8));
+        assert_eq!(sni.get_primary_color(), (26, 115, 232));
+    }
+
+    #[test]
+    fn test_primary_color_slate_gray() {
+        let sni = StatusNotifierItem::new();
+        sni.set_primary_color((0x42, 0x42, 0x42));
+        assert_eq!(sni.get_primary_color(), (66, 66, 66));
+    }
+
+    #[test]
+    fn test_input_mode_default() {
+        let sni = StatusNotifierItem::new();
+        assert_eq!(sni.get_mode(), InputMode::Chinese);
+    }
+
+    #[test]
+    fn test_input_mode_toggle() {
+        let sni = StatusNotifierItem::new();
+        assert_eq!(sni.get_mode(), InputMode::Chinese);
+        
+        sni.set_mode(InputMode::English);
+        assert_eq!(sni.get_mode(), InputMode::English);
+        
+        sni.set_mode(InputMode::Chinese);
+        assert_eq!(sni.get_mode(), InputMode::Chinese);
+    }
+
+    #[test]
+    fn test_visibility() {
+        let sni = StatusNotifierItem::new();
+        assert!(!sni.is_visible());
+        
+        sni.set_visible(true);
+        assert!(sni.is_visible());
+        
+        sni.set_visible(false);
+        assert!(!sni.is_visible());
+    }
+}
