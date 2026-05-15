@@ -2,11 +2,11 @@ use std::ffi::CStr;
 use crate::get_api;
 
 pub struct Commit {
-    inner: librime_sys::RimeCommit,
+    inner: librime_sys2::RimeCommit,
 }
 
 impl Commit {
-    pub(crate) fn new(inner: librime_sys::RimeCommit) -> Self {
+    pub(crate) fn new(inner: librime_sys2::RimeCommit) -> Self {
         Self { inner }
     }
 

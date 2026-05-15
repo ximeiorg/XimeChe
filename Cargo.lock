@@ -2959,13 +2959,13 @@ dependencies = [
 name = "librime"
 version = "0.1.0"
 dependencies = [
- "librime-sys",
+ "librime-sys2",
  "once_cell",
  "thiserror 2.0.18",
 ]
 
 [[package]]
-name = "librime-sys"
+name = "librime-sys2"
 version = "0.1.0"
 dependencies = [
  "bindgen 0.70.1",
@@ -6790,7 +6790,7 @@ dependencies = [
  "anyhow",
  "gpui",
  "librime",
- "librime-sys",
+ "librime-sys2",
  "rust-embed",
  "serde",
  "serde_yaml",

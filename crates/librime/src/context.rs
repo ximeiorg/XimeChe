@@ -2,11 +2,11 @@ use std::ffi::CStr;
 use crate::get_api;
 
 pub struct Context {
-    inner: librime_sys::RimeContext,
+    inner: librime_sys2::RimeContext,
 }
 
 impl Context {
-    pub(crate) fn new(inner: librime_sys::RimeContext) -> Self {
+    pub(crate) fn new(inner: librime_sys2::RimeContext) -> Self {
         Self { inner }
     }
 
@@ -70,7 +70,7 @@ impl Context {
         }
     }
 
-    pub fn raw(&self) -> &librime_sys::RimeContext {
+    pub fn raw(&self) -> &librime_sys2::RimeContext {
         &self.inner
     }
 }

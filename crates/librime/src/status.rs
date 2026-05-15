@@ -2,7 +2,7 @@ use std::ffi::CStr;
 use crate::get_api;
 
 pub struct Status {
-    inner: librime_sys::RimeStatus,
+    inner: librime_sys2::RimeStatus,
     pub is_disabled: bool,
     pub is_composing: bool,
     pub is_ascii_mode: bool,
@@ -13,7 +13,7 @@ pub struct Status {
 }
 
 impl Status {
-    pub(crate) fn new(inner: librime_sys::RimeStatus) -> Self {
+    pub(crate) fn new(inner: librime_sys2::RimeStatus) -> Self {
         Self {
             inner,
             is_disabled: inner.is_disabled != 0,

@@ -1,11 +1,13 @@
 [package]
 name = "librime"
-version.workspace = true
-edition.workspace = true
-authors.workspace = true
-license.workspace = true
+version = "0.1.0"
+edition = "2021"
+authors = ["Kor1 <kingzcheung@gmail.com>"]
+license = "GPL-3.0-or-later"
+description = "Safe Rust bindings to librime"
+repository = "https://github.com/ximeiorg/xime-wayland"
 
 [dependencies]
-librime-sys.workspace = true
-thiserror.workspace = true
-once_cell.workspace = true
+librime-sys2 = { version = "0.1.0", path = "../librime-sys" }
+thiserror = "2.0.18"
+once_cell = "1.17"
