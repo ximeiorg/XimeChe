@@ -18,10 +18,16 @@ impl SettingsApp {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let settings = cx.new(|cx| SettingsState::new(cx));
         
-        Self { 
+        let this = Self { 
             current_page: 0,
-            settings,
-        }
+            settings: settings.clone(),
+        };
+        
+        cx.observe(&settings, |this: &mut SettingsApp, _settings, cx: &mut Context<SettingsApp>| {
+            cx.notify();
+        }).detach();
+        
+        this
     }
 }
 
@@ -50,7 +56,7 @@ impl Render for SettingsApp {
             .w(px(213.0))
             .flex_none()
             .h_full()
-            .bg(rgb(0x2d1f3d))
+            .bg(colors.surface_variant)
             .flex()
             .flex_col()
             .gap(px(2.0))
@@ -71,13 +77,13 @@ impl Render for SettingsApp {
                             .flex()
                             .items_center()
                             .gap(px(12.0))
-                            .when(is_current, |this: Stateful<Div>| this.bg(rgb(0x8F73E2)))
+                            .when(is_current, |this: Stateful<Div>| this.bg(colors.primary))
                             .when(!is_current, |this: Stateful<Div>| {
                                 this.cursor_pointer()
-                                    .hover(|style: StyleRefinement| style.bg(hsla(0.0, 0.0, 1.0, 0.05)))
+                                    .hover(|style: StyleRefinement| style.bg(if colors.foreground.l > 0.5 { hsla(0.0, 0.0, 0.0, 0.05) } else { hsla(0.0, 0.0, 1.0, 0.05) }))
                             })
                             .text_size(px(15.0))
-                            .text_color(if is_current { rgb(0xffffff) } else { rgb(0xb0b0b0) })
+                            .text_color(if is_current { colors.on_primary } else { colors.foreground_muted })
                             .on_click(move |_, _window: &mut Window, cx: &mut App| {
                                 cx.update_entity(&view, |app: &mut SettingsApp, cx: &mut Context<SettingsApp>| {
                                     app.current_page = i;
@@ -92,7 +98,7 @@ impl Render for SettingsApp {
                             .child(
                                 div()
                                     .text_size(px(15.0))
-                                    .text_color(if is_current { rgb(0xffffff) } else { rgb(0xb0b0b0) })
+                                    .text_color(if is_current { colors.on_primary } else { colors.foreground_muted })
                                     .child(name.to_string())
                             )
                     })

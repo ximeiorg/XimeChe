@@ -1,4 +1,3 @@
-use gpui::prelude::FluentBuilder;
 use gpui::*;
 use crate::components::{SettingsPage, SettingsGroup, SettingsItem, SettingsControl};
 use crate::state::SettingsState;

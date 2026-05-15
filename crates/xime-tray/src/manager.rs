@@ -63,4 +63,10 @@ impl TrayManager {
         let iface = self.sni_ref.get().await;
         iface.get_mode()
     }
+    
+    pub async fn set_primary_color(&self, color: (u8, u8, u8)) {
+        let iface = self.sni_ref.get_mut().await;
+        iface.set_primary_color(color);
+        self.sni_ref.new_icon().await.ok();
+    }
 }

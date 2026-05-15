@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
+xime-config.workspace = true
 xime-wayland.workspace = true
 xime-xkb.workspace = true
 xime-ui.workspace = true
@@ -13,9 +14,9 @@ xime-tray.workspace = true
 librime.workspace = true
 thiserror.workspace = true
 anyhow.workspace = true
+serde.workspace = true
+serde_yaml.workspace = true
 zbus = "5"
 nix = { version = "0.29", features = ["fs", "mman"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
-serde = { version = "1", features = ["derive"] }
-serde_yaml = "0.9"
 chrono = "0.4"

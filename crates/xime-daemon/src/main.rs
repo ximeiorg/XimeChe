@@ -1,5 +1,3 @@
-mod config;
-
 use std::sync::mpsc::{self, Sender, Receiver};
 use std::sync::Arc;
 use std::os::unix::io::{OwnedFd, FromRawFd, AsRawFd};
@@ -12,7 +10,7 @@ use xime_wayland::{WaylandConnectionV1, InputMethodV1State};
 use xime_xkb::XkbContext;
 use xime_tray::{TrayManager, InputMode, MenuAction};
 use librime::traits::Traits;
-use config::XimeConfig;
+use xime_config::XimeConfig;
 use xime_xkb::keysym_to_letter;
 
 fn log_file() -> std::path::PathBuf {
@@ -40,6 +38,7 @@ pub(crate) enum DaemonCommand {
     OpenWaylandSocket(OwnedFd, String),
     ToggleMode,
     Deploy,
+    ReloadStyle,
     Shutdown,
 }
 
@@ -81,6 +80,22 @@ impl XimeDaemon {
         
         Ok(())
     }
+    
+    async fn deploy(&self) -> zbus::fdo::Result<()> {
+        log_msg!("DEBUG: Received Deploy request");
+        self.command_tx
+            .send(DaemonCommand::Deploy)
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
+        Ok(())
+    }
+    
+    async fn reload_style(&self) -> zbus::fdo::Result<()> {
+        log_msg!("DEBUG: Received ReloadStyle request");
+        self.command_tx
+            .send(DaemonCommand::ReloadStyle)
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
+        Ok(())
+    }
 }
 
 fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tokio::runtime::Handle) {
@@ -90,10 +105,14 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
     let mut xkb: Option<XkbContext> = None;
     
     // Load Xime config for hotkeys and wubi roots
-    let xime_config = XimeConfig::load();
+    let mut xime_config = XimeConfig::load();
     let _last_key_root_binding = xime_config.get_last_key_root_binding();
-    log_msg!("DEBUG: Loaded hotkeys: show_last_key_root={}", 
-              xime_config.hotkeys.show_last_key_root);
+    let primary_color = xime_config.get_primary_color();
+    rt.block_on(async {
+        tray.set_primary_color(primary_color).await;
+    });
+    log_msg!("DEBUG: Loaded hotkeys: show_last_key_root={}, primary_color={:?}", 
+              xime_config.hotkeys.show_last_key_root, primary_color);
     
     let config_dir = get_config_dir();
     if !config_dir.exists() {
@@ -197,6 +216,16 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
                     rime_session = librime::create_session().ok();
                     log_msg!("DEBUG: New Rime session created after deployment");
                 }
+            }
+            Ok(DaemonCommand::ReloadStyle) => {
+                log_msg!("DEBUG: ReloadStyle command received, reloading xime config...");
+                let new_config = XimeConfig::load();
+                let new_color = new_config.get_primary_color();
+                rt.block_on(async {
+                    tray.set_primary_color(new_color).await;
+                });
+                xime_config = new_config;
+                log_msg!("DEBUG: Style config reloaded, new primary_color={:?}", new_color);
             }
             Ok(DaemonCommand::Shutdown) => {
                 log_msg!("DEBUG: Shutdown requested");
@@ -313,7 +342,8 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
                                                 let highlighted_index = menu.highlighted_candidate_index;
                                                 let width = xime_ui::calculate_candidate_width(&candidate_items);
                                                 let height = 36;
-                                                if let Err(e) = c.show_candidate_window(width, height, &candidate_items, highlighted_index) {
+                                                let primary_color = xime_config.get_primary_color();
+                                                if let Err(e) = c.show_candidate_window(width, height, &candidate_items, highlighted_index, primary_color) {
                                                     log_msg!("DEBUG: Failed to restore candidate window: {}", e);
                                                 }
                                                 if let Err(e) = c.flush() {
@@ -393,7 +423,8 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
                                         log_msg!("DEBUG: highlighted_index={}", highlighted_index);
                                         let width = xime_ui::calculate_candidate_width(&candidate_items);
                                         let height = 36;
-                                        if let Err(e) = c.show_candidate_window(width, height, &candidate_items, highlighted_index) {
+                                        let primary_color = xime_config.get_primary_color();
+                                        if let Err(e) = c.show_candidate_window(width, height, &candidate_items, highlighted_index, primary_color) {
                                             log_msg!("DEBUG: Candidate window error: {}", e);
                                         }
                                         candidate_window_visible = true;

@@ -71,14 +71,20 @@ pub struct ThemeColors {
 }
 
 impl ThemeColors {
-    pub fn from_theme(theme: &SystemTheme) -> Self {
+    pub fn from_theme(theme: &SystemTheme, primary_color: u32) -> Self {
+        let (r, g, b) = ((primary_color >> 16) as u8, (primary_color >> 8) as u8, primary_color as u8);
+        let hover_r = (r as f32 * 0.9) as u8;
+        let hover_g = (g as f32 * 0.9) as u8;
+        let hover_b = (b as f32 * 0.9) as u8;
+        let primary_hover = ((hover_r as u32) << 16) | ((hover_g as u32) << 8) | hover_b as u32;
+        
         if theme.is_dark() {
             Self {
                 background: hsla(0.0, 0.0, 0.05, 0.85),
                 surface: rgb(0x1a1a1a).into(),
                 surface_variant: rgb(0x262626).into(),
-                primary: rgb(0x8F73E2).into(),
-                primary_hover: rgb(0x7A5FD0).into(),
+                primary: rgb(primary_color).into(),
+                primary_hover: rgb(primary_hover).into(),
                 on_primary: rgb(0xffffff).into(),
                 foreground: rgb(0xe0e0e0).into(),
                 foreground_muted: rgb(0x808080).into(),
@@ -94,8 +100,8 @@ impl ThemeColors {
                 background: hsla(0.0, 0.0, 1.0, 0.95),
                 surface: rgb(0xffffff).into(),
                 surface_variant: rgb(0xf5f5f5).into(),
-                primary: rgb(0x7B5DC7).into(),
-                primary_hover: rgb(0x6A4DB5).into(),
+                primary: rgb(primary_color).into(),
+                primary_hover: rgb(primary_hover).into(),
                 on_primary: rgb(0xffffff).into(),
                 foreground: rgb(0x1a1a1a).into(),
                 foreground_muted: rgb(0x666666).into(),

@@ -41,7 +41,7 @@ impl CandidateRenderer {
         (total_width.ceil() as u32).max(100)
     }
 
-    pub fn draw_candidates(&mut self, pixels: &mut [u8], width: u32, height: u32, candidates: &[CandidateItem], highlighted_index: usize) {
+    pub fn draw_candidates(&mut self, pixels: &mut [u8], width: u32, height: u32, candidates: &[CandidateItem], highlighted_index: usize, primary_color: (u8, u8, u8)) {
         if candidates.is_empty() {
             return;
         }
@@ -62,7 +62,7 @@ impl CandidateRenderer {
 
         self.draw_shadow(&mut pixmap, width, height);
         self.draw_background(&mut pixmap, width, height);
-        self.draw_highlight(&mut pixmap, width, height, candidates, highlighted_index, &widths);
+        self.draw_highlight(&mut pixmap, width, height, candidates, highlighted_index, &widths, primary_color);
         self.draw_text(&mut pixmap, width, height, candidates, highlighted_index, &widths);
 
         let data = pixmap.data();
@@ -130,7 +130,7 @@ impl CandidateRenderer {
         );
     }
 
-    fn draw_highlight(&mut self, pixmap: &mut Pixmap, _width: u32, height: u32, candidates: &[CandidateItem], highlighted_index: usize, widths: &[f32]) {
+    fn draw_highlight(&mut self, pixmap: &mut Pixmap, _width: u32, height: u32, candidates: &[CandidateItem], highlighted_index: usize, widths: &[f32], primary_color: (u8, u8, u8)) {
         if candidates.is_empty() || highlighted_index >= candidates.len() {
             return;
         }
@@ -159,7 +159,7 @@ impl CandidateRenderer {
         let rounded_rect = build_rounded_rect(hl_x, hl_y, hl_width, hl_height, hl_radius);
 
         let mut paint = Paint::default();
-        paint.set_color_rgba8(0x8F, 0x73, 0xE2, 0xFF);
+        paint.set_color_rgba8(primary_color.0, primary_color.1, primary_color.2, 0xFF);
         paint.anti_alias = true;
 
         pixmap.fill_path(
@@ -315,9 +315,9 @@ fn build_rounded_rect(x: f32, y: f32, w: f32, h: f32, r: f32) -> tiny_skia::Path
     pb.finish().unwrap()
 }
 
-pub fn draw_candidates_to_buffer(pixels: &mut [u8], width: u32, height: u32, candidates: &[CandidateItem], highlighted_index: usize) {
+pub fn draw_candidates_to_buffer(pixels: &mut [u8], width: u32, height: u32, candidates: &[CandidateItem], highlighted_index: usize, primary_color: (u8, u8, u8)) {
     let mut renderer = CandidateRenderer::new();
-    renderer.draw_candidates(pixels, width, height, candidates, highlighted_index);
+    renderer.draw_candidates(pixels, width, height, candidates, highlighted_index, primary_color);
 }
 
 pub fn calculate_candidate_width(candidates: &[CandidateItem]) -> u32 {

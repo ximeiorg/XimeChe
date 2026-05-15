@@ -6784,14 +6784,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "xime-core"
+name = "xime-config"
 version = "0.1.0"
 dependencies = [
- "librime",
- "thiserror 2.0.18",
- "xime-ui",
- "xime-wayland",
- "xime-xkb",
+ "serde",
+ "serde_yaml",
 ]
 
 [[package]]
@@ -6806,6 +6803,7 @@ dependencies = [
  "serde_yaml",
  "thiserror 2.0.18",
  "tokio",
+ "xime-config",
  "xime-tray",
  "xime-ui",
  "xime-wayland",

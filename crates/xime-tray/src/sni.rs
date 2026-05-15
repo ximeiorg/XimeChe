@@ -126,6 +126,7 @@ fn render_text_icon(text: &str, bg_color: Color, size: i32) -> Vec<u8> {
 pub struct StatusNotifierItem {
     mode: Arc<Mutex<InputMode>>,
     visible: Arc<Mutex<bool>>,
+    primary_color: Arc<Mutex<(u8, u8, u8)>>,
     toggle_tx: Option<Sender<()>>,
 }
 
@@ -134,6 +135,7 @@ impl StatusNotifierItem {
         Self {
             mode: Arc::new(Mutex::new(InputMode::Chinese)),
             visible: Arc::new(Mutex::new(false)),
+            primary_color: Arc::new(Mutex::new((0x8F, 0x73, 0xE2))),
             toggle_tx: None,
         }
     }
@@ -142,6 +144,7 @@ impl StatusNotifierItem {
         Self {
             mode: Arc::new(Mutex::new(InputMode::Chinese)),
             visible: Arc::new(Mutex::new(false)),
+            primary_color: Arc::new(Mutex::new((0x8F, 0x73, 0xE2))),
             toggle_tx: Some(toggle_tx),
         }
     }
@@ -164,6 +167,16 @@ impl StatusNotifierItem {
     
     pub fn is_visible(&self) -> bool {
         self.visible.lock().map(|v| *v).unwrap_or(false)
+    }
+    
+    pub fn set_primary_color(&self, color: (u8, u8, u8)) {
+        if let Ok(mut c) = self.primary_color.lock() {
+            *c = color;
+        }
+    }
+    
+    pub fn get_primary_color(&self) -> (u8, u8, u8) {
+        self.primary_color.lock().map(|c| *c).unwrap_or((0x8F, 0x73, 0xE2))
     }
 }
 
@@ -227,8 +240,9 @@ impl StatusNotifierItem {
     #[zbus(property)]
     fn icon_pixmap(&self) -> Vec<(i32, i32, Vec<u8>)> {
         let mode = self.get_mode();
+        let primary_color = self.get_primary_color();
         let (text, bg_color) = match mode {
-            InputMode::Chinese => ("ZH", Color::from_rgba8(0x8F, 0x73, 0xE2, 255)),
+            InputMode::Chinese => ("ZH", Color::from_rgba8(primary_color.0, primary_color.1, primary_color.2, 255)),
             InputMode::English => ("EN", Color::from_rgba8(0x60, 0x60, 0x60, 255)),
         };
         
