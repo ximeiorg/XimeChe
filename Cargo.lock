@@ -6831,6 +6831,7 @@ dependencies = [
  "gpui",
  "librime",
  "librime-sys2",
+ "nix 0.29.0",
  "rust-embed",
  "serde",
  "serde_yaml",
