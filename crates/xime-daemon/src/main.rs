@@ -91,10 +91,9 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
     
     // Load Xime config for hotkeys and wubi roots
     let xime_config = XimeConfig::load();
-    let _root_table_binding = xime_config.get_root_table_binding();
-    let _single_root_binding = xime_config.get_single_root_binding();
-    log_msg!("DEBUG: Loaded hotkeys: show_root_table={}, show_single_root={}", 
-              xime_config.hotkeys.show_root_table, xime_config.hotkeys.show_single_root);
+    let _last_key_root_binding = xime_config.get_last_key_root_binding();
+    log_msg!("DEBUG: Loaded hotkeys: show_last_key_root={}", 
+              xime_config.hotkeys.show_last_key_root);
     
     let config_dir = get_config_dir();
     if !config_dir.exists() {
@@ -282,7 +281,8 @@ fn run_wayland_loop(rx: Receiver<DaemonCommand>, tray: Arc<TrayManager>, rt: tok
                                                 log_msg!("DEBUG: root for '{}' = {:?}", letter, root);
                                                 if let Some(root) = root {
                                                     log_msg!("DEBUG: Ctrl pressed, showing root for '{}': {}", letter, root);
-                                                    if let Err(e) = c.show_root_window(letter, &root) {
+                                                    let primary_color = xime_config.get_primary_color();
+                                                    if let Err(e) = c.show_root_window(letter, &root, primary_color) {
                                                         log_msg!("DEBUG: Failed to show root window: {}", e);
                                                     } else {
                                                         ctrl_root_visible = true;

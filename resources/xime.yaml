@@ -47,63 +47,43 @@ wubi_root:
   x: "弓匕纟幺弓𠤎"
 
 style:
-  inline_preedit: true
-  color_scheme: WhiteAqua  # 匹配正文的颜色方案，对应正文的颜色方案名
-  display_tray_icon: false
-  horizontal: true    # 横向排列候选
-  font_point: 12      # 字号
-  font_face: "Microsoft Yahei"                  # 字体 - 候选文字
-  layout:
-    min_width: 160
-    min_height: 30
-    border_width: 1       # 边框宽度
-    margin_x: 10          # 内容离边框的，左右边界
-    margin_y: 10          # 内容离边框的，上下边界
-    spacing: 0            # 候选词之间的间隔
-    candidate_spacing: 30
-    hilite_spacing: 5     # 候选词背景宽度
-    hilite_padding: 15    # 候选词背景的边界宽度
-    round_corner: 0       # 选中的候选词背景
+  font_family: "Microsoft YaHei UI"
+  font_size: 14
+  candidate_count: 5
+  show_code_hint: false
+  horizontal: true
+  corner_radius: 8.0
+  color_scheme: lavender_purple
 
-preset_color_schemes:   # 主题：颜色方案
-  MacRoseo: # 玫红字体
-    name: MacRoseo
-    author: "KyleBing <https://kylebing.cn>"
-    creat_time: "2021-07-26"
-    back_color: 0xFFFFFF
-    border_color: 0xD6D6D6
-    text_color: 0x000000
-    hilited_text_color: 0x000000
-    hilited_back_color: 0xFFFFFF
-    hilited_candidate_text_color: 0x4F11FA
-    hilited_candidate_back_color: 0xEDEDF9
-    candidate_text_color: 0x000000
-    comment_text_color: 0xBBCC27
-
-  MacRoseoAlt: # 玫红背景
-    name: MacRoseo
-    author: "KyleBing <https://kylebing.cn>"
-    creat_time: "2021-07-26"
-    back_color: 0xFFFFFF
-    border_color: 0xD6D6D6
-    text_color: 0x000000
-    hilited_text_color: 0x000000
-    hilited_back_color: 0xFFFFFF
-    hilited_candidate_text_color: 0xFFFFFF
-    hilited_candidate_back_color: 0x4F11FA
-    candidate_text_color: 0x000000
-    comment_text_color: 0xBBCC27
-
-  WhiteAqua: # 水绿背景
-    name: WhiteAqua
-    author: "KyleBing <https://kylebing.cn>"
-    creat_time: "2021-07-26"
-    back_color: 0xFFFFFF
-    border_color: 0xD6D6D6
-    text_color: 0x000000
-    hilited_text_color: 0x000000
-    hilited_back_color: 0xFFFFFF
-    hilited_candidate_text_color: 0xFFFFFF
-    hilited_candidate_back_color: 0x9BAD23
-    candidate_text_color: 0x000000
-    comment_text_color: 0xBBCC27
+color_schemes:
+  lavender_purple:
+    name: "薰衣草紫"
+    primary_color: 0x8F73E2
+  
+  ocean_blue:
+    name: "海洋蔚蓝"
+    primary_color: 0x1A73E8
+  
+  forest_green:
+    name: "森林翠绿"
+    primary_color: 0x2E7D32
+  
+  sunset_orange:
+    name: "落日橙光"
+    primary_color: 0xE65100
+  
+  coral_red:
+    name: "珊瑚绯红"
+    primary_color: 0xC62828
+  
+  slate_gray:
+    name: "沉稳石墨"
+    primary_color: 0x424242
+  
+  rose_pink:
+    name: "浪漫玫瑰"
+    primary_color: 0xAD1457
+  
+  teal_cyan:
+    name: "青碧如水"
+    primary_color: 0x00796B

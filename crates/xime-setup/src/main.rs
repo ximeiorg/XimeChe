@@ -41,8 +41,16 @@ impl AssetSource for Assets {
 }
 
 fn get_lock_file_path() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
-    PathBuf::from(home).join(".config/xime/xime-setup.lock")
+    std::env::var("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .ok()
+        .or_else(|| {
+            std::env::var("HOME")
+                .map(|home| PathBuf::from(home).join(".local/share/xime"))
+                .ok()
+        })
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .join("xime-setup.lock")
 }
 
 fn try_acquire_singleton_lock() -> bool {
