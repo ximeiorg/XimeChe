@@ -7,12 +7,12 @@ use crate::get_api;
 use std::ffi::CString;
 
 pub struct Session {
-    pub(crate) session_id: librime_sys::RimeSessionId,
+    pub(crate) session_id: librime_sys2::RimeSessionId,
     closed: bool,
 }
 
 impl Session {
-    pub(crate) fn new(session_id: librime_sys::RimeSessionId) -> Self {
+    pub(crate) fn new(session_id: librime_sys2::RimeSessionId) -> Self {
         Self {
             session_id,
             closed: false,
@@ -64,7 +64,7 @@ impl Session {
     }
 
     pub fn context(&self) -> Option<Context> {
-        librime_sys::rime_struct!(ctx: librime_sys::RimeContext);
+        librime_sys2::rime_struct!(ctx: librime_sys2::RimeContext);
         unsafe {
             let api = get_api();
             if api.is_null() {
@@ -82,7 +82,7 @@ impl Session {
     }
 
     pub fn commit(&self) -> Option<Commit> {
-        librime_sys::rime_struct!(commit: librime_sys::RimeCommit);
+        librime_sys2::rime_struct!(commit: librime_sys2::RimeCommit);
         unsafe {
             let api = get_api();
             if api.is_null() {
@@ -100,7 +100,7 @@ impl Session {
     }
 
     pub fn status(&self) -> Result<Status> {
-        librime_sys::rime_struct!(status: librime_sys::RimeStatus);
+        librime_sys2::rime_struct!(status: librime_sys2::RimeStatus);
         unsafe {
             let api = get_api();
             if api.is_null() {

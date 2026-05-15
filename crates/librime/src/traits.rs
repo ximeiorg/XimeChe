@@ -2,13 +2,13 @@ use std::ffi::{CStr, CString};
 use std::os::raw::c_int;
 
 pub struct Traits {
-    pub(crate) inner: librime_sys::RimeTraits,
+    pub(crate) inner: librime_sys2::RimeTraits,
     resources: Vec<CString>,
 }
 
 impl Traits {
     pub fn new() -> Self {
-        librime_sys::rime_struct!(traits: librime_sys::RimeTraits);
+        librime_sys2::rime_struct!(traits: librime_sys2::RimeTraits);
         Self {
             inner: traits,
             resources: Vec::new(),

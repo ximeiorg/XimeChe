@@ -11,9 +11,9 @@ pub use key::{KeyCode, Modifier, K_SHIFT_MASK, K_CONTROL_MASK, K_ALT_MASK, K_REL
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
 
-use librime_sys::rime_get_api;
+use librime_sys2::rime_get_api;
 
-struct RimeApiWrapper(*mut librime_sys::RimeApi);
+struct RimeApiWrapper(*mut librime_sys2::RimeApi);
 unsafe impl Send for RimeApiWrapper {}
 unsafe impl Sync for RimeApiWrapper {}
 
@@ -59,7 +59,7 @@ macro_rules! rime_api_call {
 }
 
 
-pub fn get_api() -> *mut librime_sys::RimeApi {
+pub fn get_api() -> *mut librime_sys2::RimeApi {
     RIME_API.0
 }
 
@@ -159,7 +159,7 @@ pub fn sync_user_data() -> error::Result<()> {
 
 extern "C" fn notification_handler(
     _context: *mut std::ffi::c_void,
-    _session_id: librime_sys::RimeSessionId,
+    _session_id: librime_sys2::RimeSessionId,
     message_type: *const std::ffi::c_char,
     message_value: *const std::ffi::c_char,
 ) {

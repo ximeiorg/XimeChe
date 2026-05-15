@@ -1,12 +1,15 @@
 [package]
-name = "librime-sys"
-version.workspace = true
-edition.workspace = true
-authors.workspace = true
-license.workspace = true
+name = "librime-sys2"
+version = "0.1.0"
+edition = "2021"
+authors = ["Kor1 <kingzcheung@gmail.com>"]
+license = "GPL-3.0-or-later"
+description = "Raw FFI bindings to librime"
+repository = "https://github.com/ximeiorg/xime-wayland"
+links = "rime"
 
 [lib]
-name = "librime_sys"
+name = "librime_sys2"
 
 [build-dependencies]
 bindgen = "0.70"

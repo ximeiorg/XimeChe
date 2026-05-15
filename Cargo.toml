@@ -22,7 +22,7 @@ license = "GPL-3.0-or-later"
 repository = "https://github.com/ximeiorg/xime-wayland"
 
 [workspace.dependencies]
-librime-sys = { path = "crates/librime-sys" }
+librime-sys2 = { path = "crates/librime-sys" }
 librime = { path = "crates/librime" }
 xime-wayland = { path = "crates/xime-wayland" }
 xime-xkb = { path = "crates/xime-xkb" }
