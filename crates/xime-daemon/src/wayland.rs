@@ -2,13 +2,14 @@ use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::thread;
 
+use tracing::{debug, error, warn, info};
 use xime_config::XimeConfig;
 use xime_tray::{InputMode, TrayManager};
 use xime_wayland::{InputMethodV1State, WaylandConnectionV1};
 use xime_xkb::XkbContext;
 use xime_xkb::{keysym_to_letter, Keysym, ModifierState};
 
-use crate::{log_msg, DaemonCommand, RimeEngine};
+use crate::{DaemonCommand, RimeEngine};
 
 pub struct WaylandLoop {
     command_rx: Receiver<DaemonCommand>,
@@ -30,7 +31,7 @@ impl WaylandLoop {
     }
     
     pub fn run(self) {
-        log_msg!("DEBUG: Wayland loop thread started");
+        info!("Wayland loop thread started");
         
         let mut conn: Option<WaylandConnectionV1> = None;
         let mut xkb: Option<XkbContext> = None;
@@ -42,7 +43,7 @@ impl WaylandLoop {
         self.rt_handle.block_on(async {
             self.tray.set_primary_color(primary_color).await;
         });
-        log_msg!("DEBUG: Loaded hotkeys: show_last_key_root={}, primary_color={:?}", 
+        debug!("Loaded hotkeys: show_last_key_root={}, primary_color={:?}", 
                   xime_config.hotkeys.show_last_key_root, primary_color);
         
         let mut candidate_window_visible = false;
@@ -55,27 +56,27 @@ impl WaylandLoop {
             use std::sync::mpsc::TryRecvError;
             
             match self.command_rx.try_recv() {
-                Ok(DaemonCommand::OpenWaylandSocket(fd, display)) => {
-                    log_msg!("DEBUG: Connecting from fd for display {}", display);
+                Ok(DaemonCommand::OpenWaylandSocket(fd, display_name)) => {
+                    debug!("Connecting from fd for display {}", display_name);
                     
                     xkb = XkbContext::new().ok();
                     
                     match WaylandConnectionV1::connect_from_fd(fd) {
                         Ok(c) => {
                             if c.get_input_method().is_ok() {
-                                log_msg!("DEBUG: zwp_input_method_v1 available");
+                                debug!("zwp_input_method_v1 available");
                             } else {
-                                log_msg!("WARNING: zwp_input_method_v1 not available");
+                                warn!("zwp_input_method_v1 not available");
                             }
                             conn = Some(c);
                         }
                         Err(e) => {
-                            log_msg!("ERROR: Failed to connect: {}", e);
+                            error!("Failed to connect: {}", e);
                         }
                     }
                 }
                 Ok(DaemonCommand::ToggleMode) => {
-                    log_msg!("DEBUG: ToggleMode command received");
+                    debug!("ToggleMode command received");
                     if let Some(_) = rime.session() {
                         let new_ascii = rime.toggle_ascii_mode();
                         last_ascii_mode = new_ascii;
@@ -87,37 +88,37 @@ impl WaylandLoop {
                         self.rt_handle.block_on(async {
                             self.tray.set_mode(tray_mode).await;
                         });
-                        log_msg!("DEBUG: Tray updated after toggle: ascii_mode={}", new_ascii);
+                        debug!("Tray updated after toggle: ascii_mode={}", new_ascii);
                     }
                 }
                 Ok(DaemonCommand::Deploy) => {
-                    log_msg!("DEBUG: Deploy command received, starting Rime deployment...");
+                    debug!("Deploy command received, starting Rime deployment...");
                     rime.redeploy();
                 }
                 Ok(DaemonCommand::ReloadStyle) => {
-                    log_msg!("DEBUG: ReloadStyle command received, reloading xime config...");
+                    debug!("ReloadStyle command received, reloading xime config...");
                     let new_config = XimeConfig::load();
                     let new_color = new_config.get_primary_color();
                     self.rt_handle.block_on(async {
                         self.tray.set_primary_color(new_color).await;
                     });
                     xime_config = new_config;
-                    log_msg!("DEBUG: Style config reloaded, new primary_color={:?}", new_color);
+                    debug!("Style config reloaded, new primary_color={:?}", new_color);
                 }
                 Ok(DaemonCommand::Shutdown) => {
-                    log_msg!("DEBUG: Shutdown requested");
+                    debug!("Shutdown requested");
                     break;
                 }
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => {
-                    log_msg!("DEBUG: Command channel disconnected");
+                    debug!("Command channel disconnected");
                     break;
                 }
             }
             
             if let Some(c) = conn.as_mut() {
                 if let Err(e) = c.dispatch_events() {
-                    log_msg!("DEBUG: Dispatch error: {}", e);
+                    debug!("Dispatch error: {}", e);
                     conn = None;
                     self.rt_handle.block_on(async {
                         self.tray.set_visible(false).await;
@@ -129,7 +130,7 @@ impl WaylandLoop {
                 let state = c.get_state();
                 
                 if state.state != last_state {
-                    log_msg!("DEBUG: State changed from {:?} to {:?}", last_state, state.state);
+                    debug!("State changed from {:?} to {:?}", last_state, state.state);
                     let is_active = state.state == InputMethodV1State::Active;
                     self.rt_handle.block_on(async {
                         self.tray.set_visible(is_active).await;
@@ -175,7 +176,7 @@ impl WaylandLoop {
         if let Some(ref mut x) = xkb {
             if let Some((fd, size)) = c.get_keymap_pending() {
                 if let Err(e) = x.set_keymap_from_owned_fd(fd, size) {
-                    log_msg!("DEBUG: Keymap error: {}", e);
+                    debug!("Keymap error: {}", e);
                 }
             }
             
@@ -185,7 +186,7 @@ impl WaylandLoop {
         
         let events = c.pop_key_events();
         for event in events {
-            log_msg!("DEBUG: Key event: keycode={}, pressed={}", event.key, event.pressed);
+            debug!("Key event: keycode={}, pressed={}", event.key, event.pressed);
             
             if let Some(ref mut x) = xkb {
                 let keysym = x.key_from_keycode(event.key + 8);
@@ -223,16 +224,16 @@ impl WaylandLoop {
         } else {
             0
         };
-        log_msg!(
-            "DEBUG: keysym={}, modifiers={}, release={}",
+        debug!(
+            "keysym={}, modifiers={}, release={}",
             sym.raw(),
             modifiers.effective,
             release_mask
         );
 
         let is_ctrl = sym.raw() == 0xFFE3 || sym.raw() == 0xFFE4;
-        log_msg!(
-            "DEBUG: is_ctrl={}, candidate_visible={}, last_key={:?}",
+        debug!(
+            "is_ctrl={}, candidate_visible={}, last_key={:?}",
             is_ctrl,
             candidate_window_visible,
             last_input_keysym
@@ -259,13 +260,13 @@ impl WaylandLoop {
                 sym.raw() as i32,
                 modifiers.effective as i32 | release_mask as i32,
             );
-            log_msg!("DEBUG: Rime result: {:?}", result);
+            debug!("Rime result: {:?}", result);
 
             if result && event.pressed {
                 let letter = keysym_to_letter(sym.raw());
                 if letter.is_some() {
                     *last_input_keysym = Some(sym.raw());
-                    log_msg!("DEBUG: Recorded last input keysym={}", sym.raw());
+                    debug!("Recorded last input keysym={}", sym.raw());
                 }
             }
 
@@ -281,10 +282,10 @@ impl WaylandLoop {
                     self.rt_handle.block_on(async {
                         self.tray.set_mode(tray_mode).await;
                     });
-                    log_msg!("DEBUG: Tray updated: ascii_mode={}", is_ascii);
+                    debug!("Tray updated: ascii_mode={}", is_ascii);
                 }
-                log_msg!(
-                    "DEBUG: ascii_mode={}, composing={}",
+                debug!(
+                    "ascii_mode={}, composing={}",
                     is_ascii,
                     status.is_composing
                 );
@@ -297,7 +298,7 @@ impl WaylandLoop {
             if let Some(commit) = session.commit() {
                 c.commit_string(commit.text());
                 let _ = c.flush();
-                log_msg!("DEBUG: Committed: {}", commit.text());
+                debug!("Committed: {}", commit.text());
             }
 
             if let Some(ctx) = session.context() {
@@ -316,8 +317,8 @@ impl WaylandLoop {
                         .enumerate()
                         .map(|(i, x)| {
                             let comment = x.comment.map(|c| c.to_string()).unwrap_or_default();
-                            log_msg!(
-                                "DEBUG: candidate {} text='{}' comment='{}'",
+                            debug!(
+                                "candidate {} text='{}' comment='{}'",
                                 i,
                                 x.text,
                                 comment
@@ -330,7 +331,7 @@ impl WaylandLoop {
                         })
                         .collect();
                     let highlighted_index = menu.highlighted_candidate_index;
-                    log_msg!("DEBUG: highlighted_index={}", highlighted_index);
+                    debug!("highlighted_index={}", highlighted_index);
                     let width = xime_ui::calculate_candidate_width(&candidate_items);
                     let height = 36;
                     let primary_color = xime_config.get_primary_color();
@@ -341,7 +342,7 @@ impl WaylandLoop {
                         highlighted_index,
                         primary_color,
                     ) {
-                        log_msg!("DEBUG: Candidate window error: {}", e);
+                        debug!("Candidate window error: {}", e);
                     }
                     *candidate_window_visible = true;
                 } else if *candidate_window_visible {
@@ -375,19 +376,19 @@ impl WaylandLoop {
             if ctrl_pressed && !alt_pressed && !shift_pressed && !super_pressed {
                 if let Some(last_key) = *last_input_keysym {
                     let letter = keysym_to_letter(last_key);
-                    log_msg!("DEBUG: last_key={}, letter={:?}", last_key, letter);
+                    debug!("last_key={}, letter={:?}", last_key, letter);
                     if let Some(letter) = letter {
                         let root = xime_config.get_root_for_key(letter);
-                        log_msg!("DEBUG: root for '{}' = {:?}", letter, root);
+                        debug!("root for '{}' = {:?}", letter, root);
                         if let Some(root) = root {
-                            log_msg!(
-                                "DEBUG: Ctrl pressed, showing root for '{}': {}",
+                            debug!(
+                                "Ctrl pressed, showing root for '{}': {}",
                                 letter,
                                 root
                             );
                             let primary_color = xime_config.get_primary_color();
                             if let Err(e) = c.show_root_window(letter, &root, primary_color) {
-                                log_msg!("DEBUG: Failed to show root window: {}", e);
+                                debug!("Failed to show root window: {}", e);
                             } else {
                                 *ctrl_root_visible = true;
                             }
@@ -396,7 +397,7 @@ impl WaylandLoop {
                 }
             }
         } else if *ctrl_root_visible {
-            log_msg!("DEBUG: Ctrl released, restoring candidate window");
+            debug!("Ctrl released, restoring candidate window");
             c.hide_root_window();
             *ctrl_root_visible = false;
 
@@ -428,10 +429,10 @@ impl WaylandLoop {
                             highlighted_index,
                             primary_color,
                         ) {
-                            log_msg!("DEBUG: Failed to restore candidate window: {}", e);
+                            debug!("Failed to restore candidate window: {}", e);
                         }
                         if let Err(e) = c.flush() {
-                            log_msg!("DEBUG: Failed to flush: {}", e);
+                            debug!("Failed to flush: {}", e);
                         }
                     }
                 }

@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::fs;
 use std::sync::Once;
+use tracing::error;
 
 static RIME_DEPLOYED: Once = Once::new();
 
@@ -65,7 +66,7 @@ fn init_rime_for_config() {
         
         librime::setup(&mut traits);
         if let Err(e) = librime::initialize(&mut traits) {
-            eprintln!("Failed to initialize Rime: {}", e);
+            error!("Failed to initialize Rime: {}", e);
         }
         
         librime::full_deploy_and_wait();

@@ -8,3 +8,4 @@ license.workspace = true
 [dependencies]
 xkbcommon = { version = "0.9", features = ["wayland"] }
 thiserror.workspace = true
+tracing.workspace = true

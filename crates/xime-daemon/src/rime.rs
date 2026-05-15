@@ -1,7 +1,8 @@
 use librime::traits::Traits;
 use librime::session::Session;
+use tracing::{debug, error, warn};
 
-use crate::{log_msg, get_config_dir};
+use crate::get_config_dir;
 
 pub struct RimeEngine {
     session: Option<Session>,
@@ -14,7 +15,7 @@ impl RimeEngine {
         if !config_dir.exists() {
             std::fs::create_dir_all(&config_dir)
                 .expect("Failed to create config directory");
-            log_msg!("DEBUG: Created config directory: {}", config_dir.display());
+            debug!("Created config directory: {}", config_dir.display());
         }
         let config_dir_str = config_dir.to_string_lossy().to_string();
         
@@ -25,7 +26,7 @@ impl RimeEngine {
         
         librime::setup(&mut traits);
         if let Err(e) = librime::initialize(&mut traits) {
-            log_msg!("ERROR: Failed to initialize Rime: {}", e);
+            error!("Failed to initialize Rime: {}", e);
             return Self {
                 session: None,
                 config_dir: config_dir_str,
@@ -33,8 +34,8 @@ impl RimeEngine {
         }
         
         match librime::full_deploy_and_wait() {
-            librime::DeployResult::Success => log_msg!("DEBUG: Rime deployed"),
-            librime::DeployResult::Failure => log_msg!("WARNING: Rime deploy failed"),
+            librime::DeployResult::Success => debug!("Rime deployed"),
+            librime::DeployResult::Failure => warn!("Rime deploy failed"),
         }
         
         if librime::is_maintenance_mode() {
@@ -61,7 +62,7 @@ impl RimeEngine {
             let current_ascii: bool = session.get_option("ascii_mode").unwrap_or(false);
             let new_ascii = !current_ascii;
             session.set_option("ascii_mode", new_ascii).ok();
-            log_msg!("DEBUG: Set ascii_mode to {}", new_ascii);
+            debug!("Set ascii_mode to {}", new_ascii);
             return new_ascii;
         }
         false
@@ -76,7 +77,7 @@ impl RimeEngine {
     }
     
     pub fn redeploy(&mut self) {
-        log_msg!("DEBUG: Redeploying Rime...");
+        debug!("Redeploying Rime...");
         librime::finalize();
         
         let mut traits = Traits::new();
@@ -86,11 +87,11 @@ impl RimeEngine {
         
         librime::setup(&mut traits);
         if let Err(e) = librime::initialize(&mut traits) {
-            log_msg!("ERROR: Failed to reinitialize Rime: {}", e);
+            error!("Failed to reinitialize Rime: {}", e);
         } else {
             match librime::full_deploy_and_wait() {
-                librime::DeployResult::Success => log_msg!("DEBUG: Rime redeployed successfully"),
-                librime::DeployResult::Failure => log_msg!("WARNING: Rime deploy failed"),
+                librime::DeployResult::Success => debug!("Rime redeployed successfully"),
+                librime::DeployResult::Failure => warn!("Rime deploy failed"),
             }
             
             if librime::is_maintenance_mode() {
@@ -98,7 +99,7 @@ impl RimeEngine {
             }
             
             self.session = librime::create_session().ok();
-            log_msg!("DEBUG: New Rime session created after deployment");
+            debug!("New Rime session created after deployment");
         }
     }
 }

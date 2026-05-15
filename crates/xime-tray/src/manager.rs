@@ -1,5 +1,6 @@
 use zbus::Connection;
 use zbus::object_server::InterfaceRef;
+use tracing::debug;
 use crate::{StatusNotifierItem, DBusMenu, InputMode, MenuAction};
 use crate::sni::StatusNotifierItemSignals;
 use tokio::sync::mpsc::{channel, Receiver};
@@ -33,7 +34,7 @@ impl TrayManager {
             &(connection.unique_name().map(|n| n.to_string()).unwrap_or_default()),
         ).await?;
         
-        eprintln!("DEBUG: SNI registered successfully (initially hidden)");
+        debug!("SNI registered successfully (initially hidden)");
         Ok((Self { sni_ref }, toggle_rx, action_rx))
     }
     
@@ -55,7 +56,7 @@ impl TrayManager {
             if visible {
                 self.sni_ref.new_icon().await.ok();
             }
-            eprintln!("DEBUG: Tray visibility changed to {}", status);
+            debug!("Tray visibility changed to {}", status);
         }
     }
     

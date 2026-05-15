@@ -10,6 +10,7 @@ use rust_embed::RustEmbed;
 use std::borrow::Cow;
 use std::fs::File;
 use std::path::PathBuf;
+use tracing::info;
 
 #[derive(RustEmbed)]
 #[folder = "$CARGO_MANIFEST_DIR/assets"]
@@ -81,7 +82,7 @@ fn try_acquire_singleton_lock() -> bool {
 
 fn main() {
     if !try_acquire_singleton_lock() {
-        println!("xime-setup is already running, exiting...");
+        info!("xime-setup is already running, exiting...");
         return;
     }
     

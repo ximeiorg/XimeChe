@@ -21,6 +21,7 @@ use std::sync::{Arc, Mutex};
 use std::os::unix::io::{OwnedFd, AsFd, FromRawFd};
 use std::os::unix::net::UnixStream;
 use std::slice;
+use tracing::debug;
 use xime_ui::draw_candidates_to_buffer;
 use xime_ui::draw_root_to_buffer;
 use xime_ui::calculate_root_width;
@@ -117,20 +118,20 @@ impl Dispatch<ZwpInputMethodV1, InputMethodV1Data> for InputMethodV1Data {
     ) {
         match event {
             ImV1Event::Activate { id } => {
-                eprintln!("DEBUG: zwp_input_method_v1 ACTIVATE event received");
+                debug!("zwp_input_method_v1 ACTIVATE event received");
                 state.state = InputMethodV1State::Active;
                 let keyboard = id.grab_keyboard(qhandle, state.clone());
                 if let Ok(mut kb) = state.keyboard.lock() {
                     *kb = Some(keyboard);
-                    eprintln!("DEBUG: Grabbed keyboard successfully");
+                    debug!("Grabbed keyboard successfully");
                 }
                 if let Ok(mut ctx) = state.context.lock() {
                     *ctx = Some(id);
-                    eprintln!("DEBUG: Stored context successfully");
+                    debug!("Stored context successfully");
                 }
             }
             ImV1Event::Deactivate { context: _ } => {
-                eprintln!("DEBUG: zwp_input_method_v1 DEACTIVATE event received");
+                debug!("zwp_input_method_v1 DEACTIVATE event received");
                 state.state = InputMethodV1State::Inactive;
                 if let Ok(mut ctx) = state.context.lock() {
                     *ctx = None;
@@ -198,14 +199,14 @@ impl Dispatch<WlKeyboard, InputMethodV1Data> for InputMethodV1Data {
     ) {
         match event {
             wl_keyboard::Event::Keymap { format: _, fd, size } => {
-                eprintln!("DEBUG: Keymap event received, size={}", size);
+                debug!("Keymap event received, size={}", size);
                 if let Ok(mut keymap) = state.keymap_pending.lock() {
                     *keymap = Some((fd, size as usize));
                 }
             }
             wl_keyboard::Event::Key { serial, time, key, state: key_state } => {
                 let pressed = matches!(key_state, wayland_client::WEnum::Value(wl_keyboard::KeyState::Pressed));
-                eprintln!("DEBUG: Key event: serial={}, key={}, pressed={}", serial, key, pressed);
+                debug!("Key event: serial={}, key={}, pressed={}", serial, key, pressed);
                 if let Ok(mut events) = state.key_events.lock() {
                     events.push(KeyEvent {
                         serial,
@@ -258,10 +259,10 @@ impl Dispatch<WlSurface, InputMethodV1Data> for InputMethodV1Data {
     ) {
         match event {
             wl_surface::Event::Enter { output: _ } => {
-                eprintln!("DEBUG: Surface enter output");
+                debug!("Surface enter output");
             }
             wl_surface::Event::Leave { output: _ } => {
-                eprintln!("DEBUG: Surface leave output");
+                debug!("Surface leave output");
             }
             _ => {}
         }

@@ -13,3 +13,4 @@ wayland-scanner = "0.31"
 thiserror.workspace = true
 nix = { version = "0.29", features = ["fs", "mman"] }
 xime-ui.workspace = true
+tracing.workspace = true
