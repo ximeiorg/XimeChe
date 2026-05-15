@@ -6798,7 +6798,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "librime",
- "nix 0.29.0",
+ "nix 0.31.3",
  "serde",
  "serde_yaml",
  "thiserror 2.0.18",

@@ -17,6 +17,6 @@ anyhow.workspace = true
 serde.workspace = true
 serde_yaml.workspace = true
 zbus = "5"
-nix = { version = "0.29", features = ["fs", "mman"] }
+nix = { version = "0.31.3", features = ["fs", "mman"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 chrono = "0.4"

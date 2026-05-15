@@ -1,0 +1,442 @@
+use std::sync::mpsc::Receiver;
+use std::sync::Arc;
+use std::thread;
+
+use xime_config::XimeConfig;
+use xime_tray::{InputMode, TrayManager};
+use xime_wayland::{InputMethodV1State, WaylandConnectionV1};
+use xime_xkb::XkbContext;
+use xime_xkb::{keysym_to_letter, Keysym, ModifierState};
+
+use crate::{log_msg, DaemonCommand, RimeEngine};
+
+pub struct WaylandLoop {
+    command_rx: Receiver<DaemonCommand>,
+    tray: Arc<TrayManager>,
+    rt_handle: tokio::runtime::Handle,
+}
+
+impl WaylandLoop {
+    pub fn new(
+        command_rx: Receiver<DaemonCommand>,
+        tray: Arc<TrayManager>,
+        rt_handle: tokio::runtime::Handle,
+    ) -> Self {
+        Self {
+            command_rx,
+            tray,
+            rt_handle,
+        }
+    }
+    
+    pub fn run(self) {
+        log_msg!("DEBUG: Wayland loop thread started");
+        
+        let mut conn: Option<WaylandConnectionV1> = None;
+        let mut xkb: Option<XkbContext> = None;
+        let mut rime = RimeEngine::new();
+        
+        let mut xime_config = XimeConfig::load();
+        let _last_key_root_binding = xime_config.get_last_key_root_binding();
+        let primary_color = xime_config.get_primary_color();
+        self.rt_handle.block_on(async {
+            self.tray.set_primary_color(primary_color).await;
+        });
+        log_msg!("DEBUG: Loaded hotkeys: show_last_key_root={}, primary_color={:?}", 
+                  xime_config.hotkeys.show_last_key_root, primary_color);
+        
+        let mut candidate_window_visible = false;
+        let mut last_input_keysym: Option<u32> = None;
+        let mut ctrl_root_visible = false;
+        let mut last_ascii_mode = false;
+        let mut last_state = InputMethodV1State::Inactive;
+        
+        loop {
+            use std::sync::mpsc::TryRecvError;
+            
+            match self.command_rx.try_recv() {
+                Ok(DaemonCommand::OpenWaylandSocket(fd, display)) => {
+                    log_msg!("DEBUG: Connecting from fd for display {}", display);
+                    
+                    xkb = XkbContext::new().ok();
+                    
+                    match WaylandConnectionV1::connect_from_fd(fd) {
+                        Ok(c) => {
+                            if c.get_input_method().is_ok() {
+                                log_msg!("DEBUG: zwp_input_method_v1 available");
+                            } else {
+                                log_msg!("WARNING: zwp_input_method_v1 not available");
+                            }
+                            conn = Some(c);
+                        }
+                        Err(e) => {
+                            log_msg!("ERROR: Failed to connect: {}", e);
+                        }
+                    }
+                }
+                Ok(DaemonCommand::ToggleMode) => {
+                    log_msg!("DEBUG: ToggleMode command received");
+                    if let Some(_) = rime.session() {
+                        let new_ascii = rime.toggle_ascii_mode();
+                        last_ascii_mode = new_ascii;
+                        let tray_mode = if new_ascii {
+                            InputMode::English
+                        } else {
+                            InputMode::Chinese
+                        };
+                        self.rt_handle.block_on(async {
+                            self.tray.set_mode(tray_mode).await;
+                        });
+                        log_msg!("DEBUG: Tray updated after toggle: ascii_mode={}", new_ascii);
+                    }
+                }
+                Ok(DaemonCommand::Deploy) => {
+                    log_msg!("DEBUG: Deploy command received, starting Rime deployment...");
+                    rime.redeploy();
+                }
+                Ok(DaemonCommand::ReloadStyle) => {
+                    log_msg!("DEBUG: ReloadStyle command received, reloading xime config...");
+                    let new_config = XimeConfig::load();
+                    let new_color = new_config.get_primary_color();
+                    self.rt_handle.block_on(async {
+                        self.tray.set_primary_color(new_color).await;
+                    });
+                    xime_config = new_config;
+                    log_msg!("DEBUG: Style config reloaded, new primary_color={:?}", new_color);
+                }
+                Ok(DaemonCommand::Shutdown) => {
+                    log_msg!("DEBUG: Shutdown requested");
+                    break;
+                }
+                Err(TryRecvError::Empty) => {}
+                Err(TryRecvError::Disconnected) => {
+                    log_msg!("DEBUG: Command channel disconnected");
+                    break;
+                }
+            }
+            
+            if let Some(c) = conn.as_mut() {
+                if let Err(e) = c.dispatch_events() {
+                    log_msg!("DEBUG: Dispatch error: {}", e);
+                    conn = None;
+                    self.rt_handle.block_on(async {
+                        self.tray.set_visible(false).await;
+                    });
+                    last_state = InputMethodV1State::Inactive;
+                    continue;
+                }
+                
+                let state = c.get_state();
+                
+                if state.state != last_state {
+                    log_msg!("DEBUG: State changed from {:?} to {:?}", last_state, state.state);
+                    let is_active = state.state == InputMethodV1State::Active;
+                    self.rt_handle.block_on(async {
+                        self.tray.set_visible(is_active).await;
+                    });
+                    last_state = state.state;
+                    
+                    if !is_active {
+                        candidate_window_visible = false;
+                        continue;
+                    }
+                }
+                
+                if state.state == InputMethodV1State::Active {
+                    self.handle_active_state(
+                        c,
+                        &mut xkb,
+                        &mut rime,
+                        &xime_config,
+                        &mut candidate_window_visible,
+                        &mut last_input_keysym,
+                        &mut ctrl_root_visible,
+                        &mut last_ascii_mode,
+                    );
+                }
+            }
+            
+            thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }
+    
+    #[allow(clippy::too_many_arguments)]
+    fn handle_active_state(
+        &self,
+        c: &mut WaylandConnectionV1,
+        xkb: &mut Option<XkbContext>,
+        rime: &mut RimeEngine,
+        xime_config: &XimeConfig,
+        candidate_window_visible: &mut bool,
+        last_input_keysym: &mut Option<u32>,
+        ctrl_root_visible: &mut bool,
+        last_ascii_mode: &mut bool,
+    ) {
+        if let Some(ref mut x) = xkb {
+            if let Some((fd, size)) = c.get_keymap_pending() {
+                if let Err(e) = x.set_keymap_from_owned_fd(fd, size) {
+                    log_msg!("DEBUG: Keymap error: {}", e);
+                }
+            }
+            
+            let (depressed, latched, locked, group) = c.get_modifiers();
+            x.update_modifiers(depressed, latched, locked, group);
+        }
+        
+        let events = c.pop_key_events();
+        for event in events {
+            log_msg!("DEBUG: Key event: keycode={}, pressed={}", event.key, event.pressed);
+            
+            if let Some(ref mut x) = xkb {
+                let keysym = x.key_from_keycode(event.key + 8);
+                if let Some(sym) = keysym {
+                    self.handle_key_event(
+                        c, x, rime, xime_config,
+                        event, sym,
+                        candidate_window_visible,
+                        last_input_keysym,
+                        ctrl_root_visible,
+                        last_ascii_mode,
+                    );
+                }
+            }
+        }
+    }
+    
+    #[allow(clippy::too_many_arguments)]
+    fn handle_key_event(
+        &self,
+        c: &mut WaylandConnectionV1,
+        xkb: &XkbContext,
+        rime: &mut RimeEngine,
+        xime_config: &XimeConfig,
+        event: xime_wayland::KeyEvent,
+        sym: Keysym,
+        candidate_window_visible: &mut bool,
+        last_input_keysym: &mut Option<u32>,
+        ctrl_root_visible: &mut bool,
+        last_ascii_mode: &mut bool,
+    ) {
+        let modifiers = xkb.get_modifiers();
+        let release_mask = if !event.pressed {
+            librime::K_RELEASE_MASK
+        } else {
+            0
+        };
+        log_msg!(
+            "DEBUG: keysym={}, modifiers={}, release={}",
+            sym.raw(),
+            modifiers.effective,
+            release_mask
+        );
+
+        let is_ctrl = sym.raw() == 0xFFE3 || sym.raw() == 0xFFE4;
+        log_msg!(
+            "DEBUG: is_ctrl={}, candidate_visible={}, last_key={:?}",
+            is_ctrl,
+            candidate_window_visible,
+            last_input_keysym
+        );
+
+        if *candidate_window_visible && is_ctrl {
+            if self.handle_ctrl_key(
+                c,
+                xime_config,
+                &event,
+                sym,
+                modifiers,
+                candidate_window_visible,
+                last_input_keysym,
+                ctrl_root_visible,
+                rime,
+            ) {
+                return;
+            }
+        }
+
+        if let Some(session) = rime.session() {
+            let result = session.process_key(
+                sym.raw() as i32,
+                modifiers.effective as i32 | release_mask as i32,
+            );
+            log_msg!("DEBUG: Rime result: {:?}", result);
+
+            if result && event.pressed {
+                let letter = keysym_to_letter(sym.raw());
+                if letter.is_some() {
+                    *last_input_keysym = Some(sym.raw());
+                    log_msg!("DEBUG: Recorded last input keysym={}", sym.raw());
+                }
+            }
+
+            if let Ok(status) = session.status() {
+                let is_ascii = status.is_ascii_mode;
+                if is_ascii != *last_ascii_mode {
+                    *last_ascii_mode = is_ascii;
+                    let tray_mode = if is_ascii {
+                        InputMode::English
+                    } else {
+                        InputMode::Chinese
+                    };
+                    self.rt_handle.block_on(async {
+                        self.tray.set_mode(tray_mode).await;
+                    });
+                    log_msg!("DEBUG: Tray updated: ascii_mode={}", is_ascii);
+                }
+                log_msg!(
+                    "DEBUG: ascii_mode={}, composing={}",
+                    is_ascii,
+                    status.is_composing
+                );
+            }
+
+            if !result {
+                c.forward_key(event.serial, event.time, event.key, event.pressed);
+            }
+
+            if let Some(commit) = session.commit() {
+                c.commit_string(commit.text());
+                let _ = c.flush();
+                log_msg!("DEBUG: Committed: {}", commit.text());
+            }
+
+            if let Some(ctx) = session.context() {
+                if let Some(p) = ctx.composition().preedit {
+                    c.set_preedit(p, p.len() as i32);
+                } else {
+                    c.clear_preedit();
+                }
+                let _ = c.flush();
+
+                let menu = ctx.menu();
+                if menu.num_candidates > 0 {
+                    let candidate_items: Vec<xime_ui::CandidateItem> = menu
+                        .candidates
+                        .iter()
+                        .enumerate()
+                        .map(|(i, x)| {
+                            let comment = x.comment.map(|c| c.to_string()).unwrap_or_default();
+                            log_msg!(
+                                "DEBUG: candidate {} text='{}' comment='{}'",
+                                i,
+                                x.text,
+                                comment
+                            );
+                            xime_ui::CandidateItem {
+                                text: x.text.to_string(),
+                                comment,
+                                index: i,
+                            }
+                        })
+                        .collect();
+                    let highlighted_index = menu.highlighted_candidate_index;
+                    log_msg!("DEBUG: highlighted_index={}", highlighted_index);
+                    let width = xime_ui::calculate_candidate_width(&candidate_items);
+                    let height = 36;
+                    let primary_color = xime_config.get_primary_color();
+                    if let Err(e) = c.show_candidate_window(
+                        width,
+                        height,
+                        &candidate_items,
+                        highlighted_index,
+                        primary_color,
+                    ) {
+                        log_msg!("DEBUG: Candidate window error: {}", e);
+                    }
+                    *candidate_window_visible = true;
+                } else if *candidate_window_visible {
+                    c.hide_candidate_window();
+                    let _ = c.flush();
+                    *candidate_window_visible = false;
+                }
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn handle_ctrl_key(
+        &self,
+        c: &mut WaylandConnectionV1,
+        xime_config: &XimeConfig,
+        event: &xime_wayland::KeyEvent,
+        _sym: Keysym,
+        modifiers: ModifierState,
+        _candidate_window_visible: &mut bool,
+        last_input_keysym: &mut Option<u32>,
+        ctrl_root_visible: &mut bool,
+        rime: &mut RimeEngine,
+    ) -> bool {
+        if event.pressed {
+            let ctrl_pressed = modifiers.ctrl;
+            let alt_pressed = modifiers.alt;
+            let shift_pressed = modifiers.shift;
+            let super_pressed = modifiers.super_key;
+
+            if ctrl_pressed && !alt_pressed && !shift_pressed && !super_pressed {
+                if let Some(last_key) = *last_input_keysym {
+                    let letter = keysym_to_letter(last_key);
+                    log_msg!("DEBUG: last_key={}, letter={:?}", last_key, letter);
+                    if let Some(letter) = letter {
+                        let root = xime_config.get_root_for_key(letter);
+                        log_msg!("DEBUG: root for '{}' = {:?}", letter, root);
+                        if let Some(root) = root {
+                            log_msg!(
+                                "DEBUG: Ctrl pressed, showing root for '{}': {}",
+                                letter,
+                                root
+                            );
+                            let primary_color = xime_config.get_primary_color();
+                            if let Err(e) = c.show_root_window(letter, &root, primary_color) {
+                                log_msg!("DEBUG: Failed to show root window: {}", e);
+                            } else {
+                                *ctrl_root_visible = true;
+                            }
+                        }
+                    }
+                }
+            }
+        } else if *ctrl_root_visible {
+            log_msg!("DEBUG: Ctrl released, restoring candidate window");
+            c.hide_root_window();
+            *ctrl_root_visible = false;
+
+            if let Some(session) = rime.session() {
+                if let Some(ctx) = session.context() {
+                    let menu = ctx.menu();
+                    if menu.num_candidates > 0 {
+                        let candidate_items: Vec<xime_ui::CandidateItem> = menu
+                            .candidates
+                            .iter()
+                            .enumerate()
+                            .map(|(i, x)| {
+                                let comment = x.comment.map(|c| c.to_string()).unwrap_or_default();
+                                xime_ui::CandidateItem {
+                                    text: x.text.to_string(),
+                                    comment,
+                                    index: i,
+                                }
+                            })
+                            .collect();
+                        let highlighted_index = menu.highlighted_candidate_index;
+                        let width = xime_ui::calculate_candidate_width(&candidate_items);
+                        let height = 36;
+                        let primary_color = xime_config.get_primary_color();
+                        if let Err(e) = c.show_candidate_window(
+                            width,
+                            height,
+                            &candidate_items,
+                            highlighted_index,
+                            primary_color,
+                        ) {
+                            log_msg!("DEBUG: Failed to restore candidate window: {}", e);
+                        }
+                        if let Err(e) = c.flush() {
+                            log_msg!("DEBUG: Failed to flush: {}", e);
+                        }
+                    }
+                }
+            }
+        }
+        true
+    }
+}
