@@ -788,9 +788,46 @@ where S: serde::Serializer {
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct XimeConfigFile {
     #[serde(default)]
+    pub customization: CustomizationConfig,
+    #[serde(default)]
+    pub wubi_radicals: WubiRadicalsConfig,
+    #[serde(default)]
     pub style: XimeStyleConfig,
     #[serde(default)]
     pub color_schemes: std::collections::HashMap<String, ColorSchemeEntry>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct CustomizationConfig {
+    #[serde(default = "default_distribution_code_name")]
+    pub distribution_code_name: String,
+    #[serde(default = "default_distribution_version")]
+    pub distribution_version: String,
+    #[serde(default)]
+    pub generator: String,
+    #[serde(default)]
+    pub modified_time: String,
+    #[serde(default)]
+    pub rime_version: String,
+}
+
+fn default_distribution_code_name() -> String { "Xime".to_string() }
+fn default_distribution_version() -> String { "0.13.3".to_string() }
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct WubiRadicalsConfig {
+    #[serde(default)]
+    pub hotkeys: WubiHotkeysConfig,
+    #[serde(default)]
+    pub key_radicals: std::collections::HashMap<char, String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct WubiHotkeysConfig {
+    #[serde(default)]
+    pub show_last_key: String,
+    #[serde(default)]
+    pub show_all_key: String,
 }
 
 pub struct XimeStyleManager {
