@@ -397,14 +397,14 @@ pub struct TraditionConfig {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct SchemaConfig {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub speller: Option<SpellerConfig>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub translator: Option<TranslatorConfig>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub reverse_lookup: Option<ReverseLookupConfig>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tradition: Option<TraditionConfig>,
+    #[serde(default)]
+    pub speller: SpellerConfig,
+    #[serde(default)]
+    pub translator: TranslatorConfig,
+    #[serde(default)]
+    pub reverse_lookup: ReverseLookupConfig,
+    #[serde(default)]
+    pub tradition: TraditionConfig,
 }
 
 pub struct SchemaConfigManager {
@@ -510,10 +510,18 @@ fn parse_schema_config(content: &str) -> Option<SchemaConfig> {
     let yaml: serde_yaml::Value = serde_yaml::from_str(content).ok()?;
     
     Some(SchemaConfig {
-        speller: yaml.get("speller").and_then(|v| serde_yaml::from_value(v.clone()).ok()),
-        translator: yaml.get("translator").and_then(|v| serde_yaml::from_value(v.clone()).ok()),
-        reverse_lookup: yaml.get("reverse_lookup").and_then(|v| serde_yaml::from_value(v.clone()).ok()),
-        tradition: yaml.get("tradition").and_then(|v| serde_yaml::from_value(v.clone()).ok()),
+        speller: yaml.get("speller")
+            .and_then(|v| serde_yaml::from_value(v.clone()).ok())
+            .unwrap_or_default(),
+        translator: yaml.get("translator")
+            .and_then(|v| serde_yaml::from_value(v.clone()).ok())
+            .unwrap_or_default(),
+        reverse_lookup: yaml.get("reverse_lookup")
+            .and_then(|v| serde_yaml::from_value(v.clone()).ok())
+            .unwrap_or_default(),
+        tradition: yaml.get("tradition")
+            .and_then(|v| serde_yaml::from_value(v.clone()).ok())
+            .unwrap_or_default(),
     })
 }
 
@@ -527,18 +535,10 @@ fn merge_configs(base: Option<SchemaConfig>, custom: Option<SchemaConfig>) -> Sc
     let mut result = base.unwrap_or_default();
     
     if let Some(c) = custom {
-        if let Some(s) = c.speller {
-            result.speller = Some(merge_speller(result.speller.unwrap_or_default(), s));
-        }
-        if let Some(t) = c.translator {
-            result.translator = Some(merge_translator(result.translator.unwrap_or_default(), t));
-        }
-        if let Some(r) = c.reverse_lookup {
-            result.reverse_lookup = Some(merge_reverse_lookup(result.reverse_lookup.unwrap_or_default(), r));
-        }
-        if let Some(tr) = c.tradition {
-            result.tradition = Some(tr);
-        }
+        result.speller = merge_speller(result.speller, c.speller);
+        result.translator = merge_translator(result.translator, c.translator);
+        result.reverse_lookup = merge_reverse_lookup(result.reverse_lookup, c.reverse_lookup);
+        result.tradition = c.tradition;
     }
     
     result

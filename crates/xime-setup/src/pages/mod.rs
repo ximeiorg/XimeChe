@@ -54,9 +54,8 @@ impl Render for SettingsApp {
         
         let sidebar = div()
             .w(px(213.0))
-            .flex_none()
             .h_full()
-            .bg(colors.surface_variant)
+            .bg(colors.sidebar_bg)
             .flex()
             .flex_col()
             .gap(px(2.0))
@@ -80,10 +79,10 @@ impl Render for SettingsApp {
                             .when(is_current, |this: Stateful<Div>| this.bg(colors.primary))
                             .when(!is_current, |this: Stateful<Div>| {
                                 this.cursor_pointer()
-                                    .hover(|style: StyleRefinement| style.bg(if colors.foreground.l > 0.5 { hsla(0.0, 0.0, 0.0, 0.05) } else { hsla(0.0, 0.0, 1.0, 0.05) }))
+                                    .hover(|style: StyleRefinement| style.bg(hsla(0.0, 0.0, 1.0, 0.15)))
                             })
                             .text_size(px(15.0))
-                            .text_color(if is_current { colors.on_primary } else { colors.foreground_muted })
+                            .text_color(colors.on_primary)
                             .on_click(move |_, _window: &mut Window, cx: &mut App| {
                                 cx.update_entity(&view, |app: &mut SettingsApp, cx: &mut Context<SettingsApp>| {
                                     app.current_page = i;
@@ -98,7 +97,7 @@ impl Render for SettingsApp {
                             .child(
                                 div()
                                     .text_size(px(15.0))
-                                    .text_color(if is_current { colors.on_primary } else { colors.foreground_muted })
+                                    .text_color(colors.on_primary)
                                     .child(name.to_string())
                             )
                     })
