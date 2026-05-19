@@ -378,8 +378,9 @@ impl WaylandLoop {
                     let letter = keysym_to_letter(last_key);
                     debug!("last_key={}, letter={:?}", last_key, letter);
                     if let Some(letter) = letter {
-                        let root = xime_config.get_root_for_key(letter);
-                        debug!("root for '{}' = {:?}", letter, root);
+                        let schema = rime.get_current_schema().unwrap_or_default();
+                        let root = xime_config.get_root_for_key(&schema, letter);
+                        debug!("root for '{}' (schema={}) = {:?}", letter, schema, root);
                         if let Some(root) = root {
                             debug!(
                                 "Ctrl pressed, showing root for '{}': {}",

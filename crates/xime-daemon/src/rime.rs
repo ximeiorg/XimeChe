@@ -76,6 +76,14 @@ impl RimeEngine {
         }
     }
     
+    pub fn get_current_schema(&self) -> Option<String> {
+        if let Some(session) = self.session.as_ref() {
+            session.status().ok().map(|s| s.schema_id().to_string())
+        } else {
+            None
+        }
+    }
+    
     pub fn redeploy(&mut self) {
         debug!("Redeploying Rime...");
         librime::finalize();
