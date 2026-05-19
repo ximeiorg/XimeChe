@@ -9,8 +9,8 @@ wubi_radicals:
   # 字根快捷键配置
   hotkeys:
     # 在候选框可见时，单独按 Ctrl 显示最后按键的字根，松开隐藏
-    show_last_key: Ctrl
-    show_all_key: None
+    show_key: Ctrl
+    show_all_keys: None
   # 字根显示在以下 schema 方案中
   schema: ["wubi86_pinyin", "wubi86"]
   key_radicals:

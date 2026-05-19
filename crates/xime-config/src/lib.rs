@@ -118,22 +118,22 @@ pub struct WubiRadicalsConfig {
 
 #[derive(Debug, Deserialize)]
 pub struct WubiRadicalsHotkeyConfig {
-    #[serde(default = "default_show_last_key")]
-    pub show_last_key: String,
+    #[serde(default = "default_show_key")]
+    pub show_key: String,
     #[serde(default)]
-    pub show_all_key: String,
+    pub show_all_keys: String,
 }
 
 impl Default for WubiRadicalsHotkeyConfig {
     fn default() -> Self {
         Self {
-            show_last_key: default_show_last_key(),
-            show_all_key: String::new(),
+            show_key: default_show_key(),
+            show_all_keys: String::new(),
         }
     }
 }
 
-fn default_show_last_key() -> String {
+fn default_show_key() -> String {
     "Ctrl".to_string()
 }
 
@@ -266,7 +266,7 @@ fn load_system_config() -> Self {
     }
 
     pub fn get_last_key_root_binding(&self) -> String {
-        self.wubi_radicals.hotkeys.show_last_key.clone()
+        self.wubi_radicals.hotkeys.show_key.clone()
     }
 
     pub fn is_schema_enabled_for_radicals(&self, current_schema: &str) -> bool {
@@ -330,7 +330,7 @@ mod tests {
     fn test_builtin_default() {
         let config = XimeConfig::builtin_default();
         
-        assert_eq!(config.wubi_radicals.hotkeys.show_last_key, "Ctrl");
+        assert_eq!(config.wubi_radicals.hotkeys.show_key, "Ctrl");
         assert!(!config.wubi_radicals.key_radicals.g.is_empty());
         assert_eq!(config.wubi_radicals.key_radicals.g, "王龶五一戋");
         assert_eq!(config.style.font_size, 14.0);
@@ -405,7 +405,7 @@ color_schemes:
         let empty_yaml = "{}";
         let config: XimeConfig = serde_yaml::from_str(empty_yaml).unwrap();
         
-        assert_eq!(config.wubi_radicals.hotkeys.show_last_key, "Ctrl");
+        assert_eq!(config.wubi_radicals.hotkeys.show_key, "Ctrl");
         assert_eq!(config.style.font_size, 14.0);
         assert_eq!(config.style.candidate_count, 5);
         assert!(config.style.horizontal);
@@ -429,15 +429,15 @@ style:
     fn test_hotkey_config_default() {
         let yaml = "{}";
         let config: XimeConfig = serde_yaml::from_str(yaml).unwrap();
-        assert_eq!(config.wubi_radicals.hotkeys.show_last_key, "Ctrl");
+        assert_eq!(config.wubi_radicals.hotkeys.show_key, "Ctrl");
         
         let yaml_with_hotkey = "
 wubi_radicals:
   hotkeys:
-    show_last_key: Alt
+    show_key: Alt
 ";
         let config: XimeConfig = serde_yaml::from_str(yaml_with_hotkey).unwrap();
-        assert_eq!(config.wubi_radicals.hotkeys.show_last_key, "Alt");
+        assert_eq!(config.wubi_radicals.hotkeys.show_key, "Alt");
     }
 
     #[test]
@@ -464,7 +464,7 @@ wubi_radicals:
         let user_yaml = "
 wubi_radicals:
   hotkeys:
-    show_last_key: Shift
+    show_key: Shift
   key_radicals:
     g: \"用户字根\"
 
@@ -480,7 +480,7 @@ color_schemes:
         let user: XimeConfig = serde_yaml::from_str(user_yaml).unwrap();
         let merged = XimeConfig::merge_configs(system, Some(user));
         
-        assert_eq!(merged.wubi_radicals.hotkeys.show_last_key, "Shift");
+        assert_eq!(merged.wubi_radicals.hotkeys.show_key, "Shift");
         assert_eq!(merged.wubi_radicals.key_radicals.g, "用户字根");
         assert_eq!(merged.style.color_scheme, "ocean_blue");
         assert_eq!(merged.style.font_size, 18.0);
@@ -554,7 +554,7 @@ style:
         let yaml = "
 wubi_radicals:
   hotkeys:
-    show_last_key: Super
+    show_key: Super
 ";
         let config: XimeConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.get_last_key_root_binding(), "Super");
@@ -594,7 +594,7 @@ wubi_radicals:
     #[test]
     fn test_load_returns_valid_config() {
         let config = XimeConfig::load();
-        assert_eq!(config.wubi_radicals.hotkeys.show_last_key, "Ctrl");
+        assert_eq!(config.wubi_radicals.hotkeys.show_key, "Ctrl");
         assert!(!config.color_schemes.is_empty());
     }
 }
