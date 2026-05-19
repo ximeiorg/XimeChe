@@ -60,6 +60,7 @@ pub struct ThemeColors {
     pub primary: Hsla,
     pub primary_hover: Hsla,
     pub on_primary: Hsla,
+    pub sidebar_bg: Hsla,
     pub foreground: Hsla,
     pub foreground_muted: Hsla,
     pub border: Hsla,
@@ -78,6 +79,21 @@ impl ThemeColors {
         let hover_b = (b as f32 * 0.9) as u8;
         let primary_hover = ((hover_r as u32) << 16) | ((hover_g as u32) << 8) | hover_b as u32;
         
+        let sidebar_r = (r as f32 * 0.35) as u8;
+        let sidebar_g = (g as f32 * 0.35) as u8;
+        let sidebar_b = (b as f32 * 0.35) as u8;
+        let sidebar_bg = ((sidebar_r as u32) << 16) | ((sidebar_g as u32) << 8) | sidebar_b as u32;
+        
+        let selection_r = (r as f32 * 0.15 + 255.0 * 0.85) as u8;
+        let selection_g = (g as f32 * 0.15 + 255.0 * 0.85) as u8;
+        let selection_b = (b as f32 * 0.15 + 255.0 * 0.85) as u8;
+        let selection_light = ((selection_r as u32) << 16) | ((selection_g as u32) << 8) | selection_b as u32;
+        
+        let selection_dark_r = (r as f32 * 0.3) as u8;
+        let selection_dark_g = (g as f32 * 0.3) as u8;
+        let selection_dark_b = (b as f32 * 0.3) as u8;
+        let selection_dark = ((selection_dark_r as u32) << 16) | ((selection_dark_g as u32) << 8) | selection_dark_b as u32;
+        
         if theme.is_dark() {
             Self {
                 background: hsla(0.0, 0.0, 0.05, 0.85),
@@ -86,6 +102,7 @@ impl ThemeColors {
                 primary: rgb(primary_color).into(),
                 primary_hover: rgb(primary_hover).into(),
                 on_primary: rgb(0xffffff).into(),
+                sidebar_bg: rgb(sidebar_bg).into(),
                 foreground: rgb(0xe0e0e0).into(),
                 foreground_muted: rgb(0x808080).into(),
                 border: rgb(0x303030).into(),
@@ -93,7 +110,7 @@ impl ThemeColors {
                 disabled: rgb(0x4d4d4d).into(),
                 error: rgb(0xc42b1c).into(),
                 on_error: rgb(0xffffff).into(),
-                selection: rgb(0x3a2a5a).into(),
+                selection: rgb(selection_dark).into(),
             }
         } else {
             Self {
@@ -103,6 +120,7 @@ impl ThemeColors {
                 primary: rgb(primary_color).into(),
                 primary_hover: rgb(primary_hover).into(),
                 on_primary: rgb(0xffffff).into(),
+                sidebar_bg: rgb(sidebar_bg).into(),
                 foreground: rgb(0x1a1a1a).into(),
                 foreground_muted: rgb(0x666666).into(),
                 border: rgb(0xe0e0e0).into(),
@@ -110,7 +128,7 @@ impl ThemeColors {
                 disabled: rgb(0xaaaaaa).into(),
                 error: rgb(0xc42b1c).into(),
                 on_error: rgb(0xffffff).into(),
-                selection: rgb(0xe8e0f8).into(),
+                selection: rgb(selection_light).into(),
             }
         }
     }

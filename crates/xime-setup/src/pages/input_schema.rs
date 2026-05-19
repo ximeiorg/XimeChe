@@ -56,13 +56,12 @@ pub fn render(settings: Entity<SettingsState>, cx: &mut Context<SettingsApp>) ->
             let primary = colors.primary.clone();
             let surface_variant = colors.surface_variant.clone();
             let radio_colors = colors.clone();
-            
+
             div()
                 .id(("schema", i))
-                .w_full()
                 .flex()
-                .flex_col()
-                .gap(px(4.0))
+                .items_center()
+                .gap(px(12.0))
                 .py(px(8.0))
                 .px(px(12.0))
                 .rounded(px(8.0))
@@ -85,52 +84,23 @@ pub fn render(settings: Entity<SettingsState>, cx: &mut Context<SettingsApp>) ->
                         }
                     });
                 })
+                .child(Radio::new(is_selected).theme(radio_colors))
                 .child(
                     div()
-                        .flex()
-                        .items_center()
-                        .gap(px(8.0))
-                        .child(Radio::new(is_selected).theme(radio_colors))
-                        .child(
-                            div()
-                                .text_size(px(15.0))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(if is_selected { primary.clone() } else { colors.foreground })
-                                .child(schema.name.clone())
-                        )
-                        .child(
-                            div()
-                                .text_size(px(12.0))
-                                .text_color(colors.foreground_muted)
-                                .child(format!("v{}", schema.version))
-                        )
+                        .text_size(px(14.0))
+                        .text_color(if is_selected {
+                            primary
+                        } else {
+                            colors.foreground
+                        })
+                        .child(schema.name.clone()),
                 )
-                .when(!schema.author.is_empty() && schema.author != "未知", |this| {
-                    this.child(
-                        div()
-                            .text_size(px(12.0))
-                            .text_color(colors.foreground_muted)
-                            .px(px(28.0))
-                            .child(format!("作者: {}", schema.author))
-                    )
-                })
-                .when(!schema.description.is_empty(), |this| {
-                    this.child(
-                        div()
-                            .text_size(px(12.0))
-                            .text_color(colors.foreground_muted)
-                            .px(px(28.0))
-                            .w_full()
-                            .overflow_x_hidden()
-                            .child(schema.description.clone())
-                    )
-                })
                 .into_any_element()
         })
         .collect();
     
-    let config_section = if let Some(config) = schema_config {
-        render_schema_config(settings.clone(), &config, &colors, &schema_name, cx)
+    let config_section = if config_loaded {
+        render_schema_config(settings.clone(), &schema_config, &colors, &schema_name, cx)
     } else {
         div()
             .text_size(px(14.0))
@@ -178,7 +148,7 @@ pub fn render(settings: Entity<SettingsState>, cx: &mut Context<SettingsApp>) ->
                 })
                 .when(!schemas.is_empty(), |this| this.children(schema_items))
         )
-        .when(!schemas.is_empty() && selected < schemas.len(), |this| {
+        .when(!schemas.is_empty() && selected < schemas.len() && config_loaded, |this| {
             this.child(config_section)
         })
         .into_any_element()
@@ -193,256 +163,189 @@ fn render_schema_config(
 ) -> AnyElement {
     let settings_for_switch = settings.clone();
     let settings_for_int = settings.clone();
-    
-    let speller_config = config.speller.as_ref();
-    let translator_config = config.translator.as_ref();
-    let reverse_lookup_config = config.reverse_lookup.as_ref();
-    let tradition_config = config.tradition.as_ref();
-    
-    let speller_items: Vec<SettingsItem> = if let Some(speller) = speller_config {
-        vec![
+
+    let speller_group = SettingsGroup::new("编码设置", colors.clone())
+        .description(format!("{} - 拼写/编码相关设置", schema_name))
+        .items(vec![
             SettingsItem::new(
                 "最大编码长度",
                 SettingsControl::number_input_with(
-                    speller.max_code_length.map(|v| v as f64).unwrap_or(4.0),
+                    config.speller.max_code_length.map(|v| v as f64).unwrap_or(4.0),
                     {
                         let s = settings_for_int.clone();
                         move |v, _window, cx| {
                             s.update(cx, |state: &mut SettingsState, cx| {
-                                if let Some(c) = &mut state.input_schema.schema_config {
-                                    if let Some(s) = &mut c.speller {
-                                        s.max_code_length = Some(v as i32);
-                                    }
-                                }
+                                state.input_schema.schema_config.speller.max_code_length = Some(v as i32);
                                 if let Err(e) = state.save_schema_config() {
                                     eprintln!("Save failed: {}", e);
                                 }
                                 cx.notify();
                             });
                         }
-                    }
-                )
+                    },
+                ),
             )
             .description("如五笔为4码上屏"),
             SettingsItem::new(
                 "四码唯一自动上屏",
-                SettingsControl::switch_with(
-                    speller.auto_select.unwrap_or(true),
-                    {
-                        let s = settings_for_switch.clone();
-                        move |v, _window, cx| {
-                            s.update(cx, |state: &mut SettingsState, cx| {
-                                if let Some(c) = &mut state.input_schema.schema_config {
-                                    if let Some(s) = &mut c.speller {
-                                        s.auto_select = Some(v);
-                                    }
-                                }
-                                if let Err(e) = state.save_schema_config() {
-                                    eprintln!("Save failed: {}", e);
-                                }
-                                cx.notify();
-                            });
-                        }
+                SettingsControl::switch_with(config.speller.auto_select.unwrap_or(true), {
+                    let s = settings_for_switch.clone();
+                    move |v, _window, cx| {
+                        s.update(cx, |state: &mut SettingsState, cx| {
+                            state.input_schema.schema_config.speller.auto_select = Some(v);
+                            if let Err(e) = state.save_schema_config() {
+                                eprintln!("Save failed: {}", e);
+                            }
+                            cx.notify();
+                        });
                     }
-                )
+                }),
             )
             .description("编码唯一时自动上屏"),
-        ]
-    } else {
-        vec![]
-    };
-    
-    let speller_group = if speller_items.is_empty() {
-        None
-    } else {
-        Some(SettingsGroup::new("编码设置", colors.clone())
-            .description(format!("{} - 拼写/编码相关设置", schema_name))
-            .items(speller_items))
-    };
-    
-    let translator_items: Vec<SettingsItem> = if let Some(translator) = translator_config {
-        vec![
+        ]);
+
+    let translator_group = SettingsGroup::new("翻译器设置", colors.clone())
+        .description("候选词生成和显示设置")
+        .items(vec![
             SettingsItem::new(
                 "显示未完成编码词条",
                 SettingsControl::switch_with(
-                    translator.enable_completion.unwrap_or(true),
+                    config.translator.enable_completion.unwrap_or(true),
                     {
                         let s = settings_for_switch.clone();
                         move |v, _window, cx| {
                             s.update(cx, |state: &mut SettingsState, cx| {
-                                if let Some(c) = &mut state.input_schema.schema_config {
-                                    if let Some(t) = &mut c.translator {
-                                        t.enable_completion = Some(v);
-                                    }
-                                }
+                                state.input_schema.schema_config.translator.enable_completion = Some(v);
                                 if let Err(e) = state.save_schema_config() {
                                     eprintln!("Save failed: {}", e);
                                 }
                                 cx.notify();
                             });
                         }
-                    }
-                )
+                    },
+                ),
             )
             .description("提前显示编码未输入完整的词条"),
             SettingsItem::new(
                 "启用字符集过滤",
                 SettingsControl::switch_with(
-                    translator.enable_charset_filter.unwrap_or(true),
+                    config.translator.enable_charset_filter.unwrap_or(true),
                     {
                         let s = settings_for_switch.clone();
                         move |v, _window, cx| {
                             s.update(cx, |state: &mut SettingsState, cx| {
-                                if let Some(c) = &mut state.input_schema.schema_config {
-                                    if let Some(t) = &mut c.translator {
-                                        t.enable_charset_filter = Some(v);
-                                    }
-                                }
+                                state.input_schema.schema_config.translator.enable_charset_filter = Some(v);
                                 if let Err(e) = state.save_schema_config() {
                                     eprintln!("Save failed: {}", e);
                                 }
                                 cx.notify();
                             });
                         }
-                    }
-                )
+                    },
+                ),
             )
             .description("根据字符集过滤候选词"),
             SettingsItem::new(
                 "启用用户词典",
                 SettingsControl::switch_with(
-                    translator.enable_user_dict.unwrap_or(false),
+                    config.translator.enable_user_dict.unwrap_or(false),
                     {
                         let s = settings_for_switch.clone();
                         move |v, _window, cx| {
                             s.update(cx, |state: &mut SettingsState, cx| {
-                                if let Some(c) = &mut state.input_schema.schema_config {
-                                    if let Some(t) = &mut c.translator {
-                                        t.enable_user_dict = Some(v);
-                                    }
-                                }
+                                state.input_schema.schema_config.translator.enable_user_dict = Some(v);
                                 if let Err(e) = state.save_schema_config() {
                                     eprintln!("Save failed: {}", e);
                                 }
                                 cx.notify();
                             });
                         }
-                    }
-                )
+                    },
+                ),
             )
             .description("记录用户词频和动态词"),
             SettingsItem::new(
                 "启用自动造词",
-                SettingsControl::switch_with(
-                    translator.enable_encoder.unwrap_or(false),
-                    {
-                        let s = settings_for_switch.clone();
-                        move |v, _window, cx| {
-                            s.update(cx, |state: &mut SettingsState, cx| {
-                                if let Some(c) = &mut state.input_schema.schema_config {
-                                    if let Some(t) = &mut c.translator {
-                                        t.enable_encoder = Some(v);
-                                    }
-                                }
-                                if let Err(e) = state.save_schema_config() {
-                                    eprintln!("Save failed: {}", e);
-                                }
-                                cx.notify();
-                            });
-                        }
+                SettingsControl::switch_with(config.translator.enable_encoder.unwrap_or(false), {
+                    let s = settings_for_switch.clone();
+                    move |v, _window, cx| {
+                        s.update(cx, |state: &mut SettingsState, cx| {
+                            state.input_schema.schema_config.translator.enable_encoder = Some(v);
+                            if let Err(e) = state.save_schema_config() {
+                                eprintln!("Save failed: {}", e);
+                            }
+                            cx.notify();
+                        });
                     }
-                )
+                }),
             )
             .description("根据输入自动生成新词"),
             SettingsItem::new(
                 "最大自动造词长度",
                 SettingsControl::number_input_with(
-                    translator.max_phrase_length.map(|v| v as f64).unwrap_or(10.0),
+                    config.translator.max_phrase_length.map(|v| v as f64).unwrap_or(10.0),
                     {
                         let s = settings_for_int.clone();
                         move |v, _window, cx| {
                             s.update(cx, |state: &mut SettingsState, cx| {
-                                if let Some(c) = &mut state.input_schema.schema_config {
-                                    if let Some(t) = &mut c.translator {
-                                        t.max_phrase_length = Some(v as i32);
-                                    }
-                                }
+                                state.input_schema.schema_config.translator.max_phrase_length = Some(v as i32);
                                 if let Err(e) = state.save_schema_config() {
                                     eprintln!("Save failed: {}", e);
                                 }
                                 cx.notify();
                             });
                         }
-                    }
-                )
+                    },
+                ),
             )
             .description("自动生成词的最大字数"),
-        ]
-    } else {
-        vec![]
-    };
-    
-    let translator_group = if translator_items.is_empty() {
-        None
-    } else {
-        Some(SettingsGroup::new("翻译器设置", colors.clone())
-            .description("候选词生成和显示设置")
-            .items(translator_items))
-    };
-    
-    let reverse_lookup_items: Vec<SettingsItem> = if let Some(reverse_lookup) = reverse_lookup_config {
-        vec![
+        ]);
+
+    let reverse_lookup_group = SettingsGroup::new("反查设置", colors.clone())
+        .description("通过拼音等反查编码")
+        .items(vec![
             SettingsItem::new(
                 "反查前缀",
-                SettingsControl::label(reverse_lookup.prefix.clone().unwrap_or_else(|| "z".to_string()))
+                SettingsControl::label(
+                    config.reverse_lookup.prefix.clone().unwrap_or_else(|| "z".to_string()),
+                ),
             )
             .description("输入此字符后开始反查"),
             SettingsItem::new(
                 "反查后缀",
-                SettingsControl::label(reverse_lookup.suffix.clone().unwrap_or_else(|| "'".to_string()))
+                SettingsControl::label(
+                    config.reverse_lookup.suffix.clone().unwrap_or_else(|| "'".to_string()),
+                ),
             )
             .description("输入此字符结束反查"),
-        ]
+        ]);
+
+    let tradition_items: Vec<SettingsItem> = if config.tradition.opencc_config.is_some() {
+        vec![SettingsItem::new(
+            "简繁转换配置",
+            SettingsControl::label(
+                config.tradition.opencc_config.clone().unwrap_or_else(|| "s2hk.json".to_string()),
+            ),
+        )
+        .description("可选: s2t(繁体), s2hk(香港), s2tw(台湾)")]
     } else {
         vec![]
     };
-    
-    let reverse_lookup_group = if reverse_lookup_items.is_empty() {
-        None
-    } else {
-        Some(SettingsGroup::new("反查设置", colors.clone())
-            .description("通过拼音等反查编码")
-            .items(reverse_lookup_items))
-    };
-    
-    let tradition_items: Vec<SettingsItem> = if let Some(tradition) = tradition_config {
-        if tradition.opencc_config.is_some() {
-            vec![
-                SettingsItem::new(
-                    "简繁转换配置",
-                    SettingsControl::label(tradition.opencc_config.clone().unwrap_or_else(|| "s2hk.json".to_string()))
-                )
-                .description("可选: s2t(繁体), s2hk(香港), s2tw(台湾)"),
-            ]
-        } else {
-            vec![]
-        }
-    } else {
-        vec![]
-    };
-    
+
     let tradition_group = if tradition_items.is_empty() {
         None
     } else {
-        Some(SettingsGroup::new("简繁转换", colors.clone())
-            .description("OpenCC 简入繁出设置")
-            .items(tradition_items))
+        Some(
+            SettingsGroup::new("简繁转换", colors.clone())
+                .description("OpenCC 简入繁出设置")
+                .items(tradition_items),
+        )
     };
-    
+
     SettingsPage::new("方案详细设置", colors.clone())
-        .when_some(speller_group, |this, g| this.group(g))
-        .when_some(translator_group, |this, g| this.group(g))
-        .when_some(reverse_lookup_group, |this, g| this.group(g))
+        .group(speller_group)
+        .group(translator_group)
+        .group(reverse_lookup_group)
         .when_some(tradition_group, |this, g| this.group(g))
         .into_any_element()
 }

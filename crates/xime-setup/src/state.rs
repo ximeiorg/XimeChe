@@ -46,7 +46,7 @@ impl SettingsState {
         }
         let schema_id = &self.input_schema.available_schemas[self.input_schema.selected_schema].schema_id;
         if let Ok(manager) = SchemaConfigManager::new(schema_id) {
-            self.input_schema.schema_config = Some(manager.get_config());
+            self.input_schema.schema_config = manager.get_config();
             self.input_schema.config_loaded = true;
             cx.notify();
         }
@@ -128,62 +128,54 @@ pub fn save_color_scheme(&self) -> Result<(), String> {
         let schema_id = &self.input_schema.available_schemas[self.input_schema.selected_schema].schema_id;
         let manager = SchemaConfigManager::new(schema_id)?;
         
-        if let Some(config) = &self.input_schema.schema_config {
-            if let Some(speller) = &config.speller {
-                if let Some(v) = speller.max_code_length {
-                    manager.set_int("speller/max_code_length", v)?;
-                }
-                if let Some(v) = speller.auto_select {
-                    manager.set_bool("speller/auto_select", v)?;
-                }
-                if let Some(v) = &speller.auto_clear {
-                    if !v.is_empty() {
-                        manager.set_string("speller/auto_clear", v)?;
-                    }
-                }
-            }
-            
-            if let Some(translator) = &config.translator {
-                if let Some(v) = translator.enable_charset_filter {
-                    manager.set_bool("translator/enable_charset_filter", v)?;
-                }
-                if let Some(v) = translator.enable_completion {
-                    manager.set_bool("translator/enable_completion", v)?;
-                }
-                if let Some(v) = translator.enable_sentence {
-                    manager.set_bool("translator/enable_sentence", v)?;
-                }
-                if let Some(v) = translator.enable_user_dict {
-                    manager.set_bool("translator/enable_user_dict", v)?;
-                }
-                if let Some(v) = translator.enable_encoder {
-                    manager.set_bool("translator/enable_encoder", v)?;
-                }
-                if let Some(v) = translator.encode_commit_history {
-                    manager.set_bool("translator/encode_commit_history", v)?;
-                }
-                if let Some(v) = translator.max_phrase_length {
-                    manager.set_int("translator/max_phrase_length", v)?;
-                }
-            }
-            
-            if let Some(reverse_lookup) = &config.reverse_lookup {
-                if let Some(v) = &reverse_lookup.prefix {
-                    manager.set_string("reverse_lookup/prefix", v)?;
-                }
-                if let Some(v) = &reverse_lookup.suffix {
-                    manager.set_string("reverse_lookup/suffix", v)?;
-                }
-            }
-            
-            if let Some(tradition) = &config.tradition {
-                if let Some(v) = &tradition.opencc_config {
-                    manager.set_string("tradition/opencc_config", v)?;
-                }
-            }
-            
-            manager.save()?;
+        let config = &self.input_schema.schema_config;
+        
+        if let Some(v) = config.speller.max_code_length {
+            manager.set_int("speller/max_code_length", v)?;
         }
+        if let Some(v) = config.speller.auto_select {
+            manager.set_bool("speller/auto_select", v)?;
+        }
+        if let Some(v) = &config.speller.auto_clear {
+            if !v.is_empty() {
+                manager.set_string("speller/auto_clear", v)?;
+            }
+        }
+        
+        if let Some(v) = config.translator.enable_charset_filter {
+            manager.set_bool("translator/enable_charset_filter", v)?;
+        }
+        if let Some(v) = config.translator.enable_completion {
+            manager.set_bool("translator/enable_completion", v)?;
+        }
+        if let Some(v) = config.translator.enable_sentence {
+            manager.set_bool("translator/enable_sentence", v)?;
+        }
+        if let Some(v) = config.translator.enable_user_dict {
+            manager.set_bool("translator/enable_user_dict", v)?;
+        }
+        if let Some(v) = config.translator.enable_encoder {
+            manager.set_bool("translator/enable_encoder", v)?;
+        }
+        if let Some(v) = config.translator.encode_commit_history {
+            manager.set_bool("translator/encode_commit_history", v)?;
+        }
+        if let Some(v) = config.translator.max_phrase_length {
+            manager.set_int("translator/max_phrase_length", v)?;
+        }
+        
+        if let Some(v) = &config.reverse_lookup.prefix {
+            manager.set_string("reverse_lookup/prefix", v)?;
+        }
+        if let Some(v) = &config.reverse_lookup.suffix {
+            manager.set_string("reverse_lookup/suffix", v)?;
+        }
+        
+        if let Some(v) = &config.tradition.opencc_config {
+            manager.set_string("tradition/opencc_config", v)?;
+        }
+        
+        manager.save()?;
         
         Ok(())
 }
@@ -267,7 +259,7 @@ pub struct AppearanceState {
 pub struct InputSchemaState {
     pub selected_schema: usize,
     pub available_schemas: Vec<SchemaInfo>,
-    pub schema_config: Option<SchemaConfig>,
+    pub schema_config: SchemaConfig,
     pub config_loaded: bool,
 }
 

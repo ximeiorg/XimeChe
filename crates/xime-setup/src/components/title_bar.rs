@@ -2,34 +2,23 @@ use gpui::*;
 use crate::theme::ThemeColors;
 use crate::state::SettingsState;
 
-#[cfg(target_os = "linux")]
-fn make_draggable(el: Stateful<Div>) -> Stateful<Div> {
-    el.on_mouse_down(MouseButton::Left, |_event, window, _cx| {
-        window.start_window_move();
-    })
-}
-
-#[cfg(not(target_os = "linux"))]
-fn make_draggable(el: Stateful<Div>) -> Stateful<Div> {
-    el.window_control_area(WindowControlArea::Drag)
-}
-
 pub struct TitleBar;
 
 impl TitleBar {
     pub fn render(settings: Entity<SettingsState>, colors: &ThemeColors, cx: &mut App) -> impl IntoElement {
         let deploy_message = cx.read_entity(&settings, |state, _| state.deploy_message.clone());
         
-        let drag_region = make_draggable(
-            div()
-                .id("drag-region")
-                .flex_1()
-                .h(px(40.0))
-                .bg(colors.background)
-                .flex()
-                .items_center()
-                .justify_center()
-        );
+        let drag_region = div()
+            .id("drag-region")
+            .flex_1()
+            .h(px(40.0))
+            .bg(colors.background)
+            .flex()
+            .items_center()
+            .justify_center()
+            .on_mouse_down(MouseButton::Left, |_event, window, _cx| {
+                window.start_window_move();
+            });
         
         let drag_region_with_msg = if let Some(msg) = deploy_message {
             drag_region.child(
@@ -42,28 +31,29 @@ impl TitleBar {
             drag_region
         };
         
+        let logo_region = div()
+            .id("logo-title")
+            .w(px(213.0))
+            .h(px(40.0))
+            .bg(colors.sidebar_bg)
+            .flex()
+            .items_center()
+            .pl(px(12.0))
+            .on_mouse_down(MouseButton::Left, |_event, window, _cx| {
+                window.start_window_move();
+            })
+            .child(Self::logo())
+            .child(Self::title_text(colors));
+        
         div()
             .flex()
             .w_full()
             .h(px(40.0))
-            .child(
-                make_draggable(
-                    div()
-                        .id("logo-title")
-                        .w(px(213.0))
-                        .h(px(40.0))
-                        .bg(colors.surface_variant)
-                        .flex()
-                        .items_center()
-                        .pl(px(12.0))
-                        .child(Self::logo())
-                        .child(Self::title_text(&colors))
-                )
-            )
+            .child(logo_region)
             .child(drag_region_with_msg)
             .child(Self::deploy_button(colors, settings))
             .child(Self::separator(colors))
-            .child(Self::close_button(colors.foreground, colors.background, colors.error))
+            .child(Self::close_button(colors.foreground, colors.background))
     }
 
     fn logo() -> impl IntoElement {
@@ -83,13 +73,13 @@ impl TitleBar {
                 div()
                     .text_size(px(14.0))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(colors.foreground)
+                    .text_color(colors.on_primary)
                     .child("Xime")
             )
             .child(
                 div()
                     .text_size(px(12.0))
-                    .text_color(colors.foreground_muted)
+                    .text_color(hsla(0.0, 0.0, 1.0, 0.7))
                     .child("曦码输入法")
             )
     }
@@ -134,7 +124,7 @@ impl TitleBar {
             .bg(colors.border)
     }
 
-    fn close_button(text_color: Hsla, bg: Hsla, error_color: Hsla) -> impl IntoElement {
+    fn close_button(text_color: Hsla, bg: Hsla) -> impl IntoElement {
         div()
             .id("close-btn")
             .flex()
@@ -146,7 +136,7 @@ impl TitleBar {
             .text_size(px(14.0))
             .text_color(text_color)
             .cursor_pointer()
-            .hover(|style| style.bg(error_color))
+            .hover(|style| style.bg(rgb(0xc42b1c)))
             .on_click(|_event, window, _cx| {
                 window.remove_window();
             })
