@@ -11,7 +11,8 @@ wubi_radicals:
     # 在候选框可见时，单独按 Ctrl 显示最后按键的字根，松开隐藏
     show_last_key: Ctrl
     show_all_key: None
-  # 86 版本的字根
+  # 字根显示在以下 schema 方案中
+  schema: ["wubi86_pinyin", "wubi86"]
   key_radicals:
     # 第一区：横起笔 (1)
     g: "王龶五一戋"

@@ -6,9 +6,7 @@ use std::collections::HashMap;
 #[derive(Debug, Deserialize, Default)]
 pub struct XimeConfig {
     #[serde(default)]
-    pub hotkeys: HotkeyConfig,
-    #[serde(default)]
-    pub wubi_root: WubiRootConfig,
+    pub wubi_radicals: WubiRadicalsConfig,
     #[serde(default)]
     pub style: StyleConfig,
     #[serde(default)]
@@ -108,26 +106,39 @@ where
     }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct HotkeyConfig {
-    #[serde(default = "default_show_last_key_root")]
-    pub show_last_key_root: String,
+#[derive(Debug, Deserialize, Default)]
+pub struct WubiRadicalsConfig {
+    #[serde(default)]
+    pub hotkeys: WubiRadicalsHotkeyConfig,
+    #[serde(default)]
+    pub schema: Vec<String>,
+    #[serde(default)]
+    pub key_radicals: KeyRadicalsConfig,
 }
 
-impl Default for HotkeyConfig {
+#[derive(Debug, Deserialize)]
+pub struct WubiRadicalsHotkeyConfig {
+    #[serde(default = "default_show_last_key")]
+    pub show_last_key: String,
+    #[serde(default)]
+    pub show_all_key: String,
+}
+
+impl Default for WubiRadicalsHotkeyConfig {
     fn default() -> Self {
         Self {
-            show_last_key_root: default_show_last_key_root(),
+            show_last_key: default_show_last_key(),
+            show_all_key: String::new(),
         }
     }
 }
 
-fn default_show_last_key_root() -> String {
+fn default_show_last_key() -> String {
     "Ctrl".to_string()
 }
 
 #[derive(Debug, Deserialize, Default)]
-pub struct WubiRootConfig {
+pub struct KeyRadicalsConfig {
     #[serde(default)]
     pub g: String,
     #[serde(default)]
@@ -219,11 +230,10 @@ fn load_system_config() -> Self {
     fn merge_configs(system: Self, user: Option<Self>) -> Self {
         match user {
             Some(user) => Self {
-                hotkeys: user.hotkeys,
-                wubi_root: if user.wubi_root.g.is_empty() {
-                    system.wubi_root
+                wubi_radicals: if user.wubi_radicals.key_radicals.g.is_empty() {
+                    system.wubi_radicals
                 } else {
-                    user.wubi_root
+                    user.wubi_radicals
                 },
                 style: user.style,
                 color_schemes: if user.color_schemes.is_empty() {
@@ -256,7 +266,11 @@ fn load_system_config() -> Self {
     }
 
     pub fn get_last_key_root_binding(&self) -> String {
-        self.hotkeys.show_last_key_root.clone()
+        self.wubi_radicals.hotkeys.show_last_key.clone()
+    }
+
+    pub fn is_schema_enabled_for_radicals(&self, current_schema: &str) -> bool {
+        self.wubi_radicals.schema.iter().any(|s| s == current_schema)
     }
 
     pub fn get_primary_color(&self) -> (u8, u8, u8) {
@@ -273,31 +287,31 @@ fn load_system_config() -> Self {
 
     pub fn get_root_for_key(&self, key: char) -> Option<String> {
         let root = match key.to_lowercase().next()? {
-            'g' => &self.wubi_root.g,
-            'f' => &self.wubi_root.f,
-            'd' => &self.wubi_root.d,
-            's' => &self.wubi_root.s,
-            'a' => &self.wubi_root.a,
-            'h' => &self.wubi_root.h,
-            'j' => &self.wubi_root.j,
-            'k' => &self.wubi_root.k,
-            'l' => &self.wubi_root.l,
-            'm' => &self.wubi_root.m,
-            't' => &self.wubi_root.t,
-            'r' => &self.wubi_root.r,
-            'e' => &self.wubi_root.e,
-            'w' => &self.wubi_root.w,
-            'q' => &self.wubi_root.q,
-            'y' => &self.wubi_root.y,
-            'u' => &self.wubi_root.u,
-            'i' => &self.wubi_root.i,
-            'o' => &self.wubi_root.o,
-            'p' => &self.wubi_root.p,
-            'n' => &self.wubi_root.n,
-            'b' => &self.wubi_root.b,
-            'v' => &self.wubi_root.v,
-            'c' => &self.wubi_root.c,
-            'x' => &self.wubi_root.x,
+            'g' => &self.wubi_radicals.key_radicals.g,
+            'f' => &self.wubi_radicals.key_radicals.f,
+            'd' => &self.wubi_radicals.key_radicals.d,
+            's' => &self.wubi_radicals.key_radicals.s,
+            'a' => &self.wubi_radicals.key_radicals.a,
+            'h' => &self.wubi_radicals.key_radicals.h,
+            'j' => &self.wubi_radicals.key_radicals.j,
+            'k' => &self.wubi_radicals.key_radicals.k,
+            'l' => &self.wubi_radicals.key_radicals.l,
+            'm' => &self.wubi_radicals.key_radicals.m,
+            't' => &self.wubi_radicals.key_radicals.t,
+            'r' => &self.wubi_radicals.key_radicals.r,
+            'e' => &self.wubi_radicals.key_radicals.e,
+            'w' => &self.wubi_radicals.key_radicals.w,
+            'q' => &self.wubi_radicals.key_radicals.q,
+            'y' => &self.wubi_radicals.key_radicals.y,
+            'u' => &self.wubi_radicals.key_radicals.u,
+            'i' => &self.wubi_radicals.key_radicals.i,
+            'o' => &self.wubi_radicals.key_radicals.o,
+            'p' => &self.wubi_radicals.key_radicals.p,
+            'n' => &self.wubi_radicals.key_radicals.n,
+            'b' => &self.wubi_radicals.key_radicals.b,
+            'v' => &self.wubi_radicals.key_radicals.v,
+            'c' => &self.wubi_radicals.key_radicals.c,
+            'x' => &self.wubi_radicals.key_radicals.x,
             _ => return None,
         };
         if root.is_empty() {
@@ -316,9 +330,9 @@ mod tests {
     fn test_builtin_default() {
         let config = XimeConfig::builtin_default();
         
-        assert_eq!(config.hotkeys.show_last_key_root, "Ctrl");
-        assert!(!config.wubi_root.g.is_empty());
-        assert_eq!(config.wubi_root.g, "王龶五一戋");
+        assert_eq!(config.wubi_radicals.hotkeys.show_last_key, "Ctrl");
+        assert!(!config.wubi_radicals.key_radicals.g.is_empty());
+        assert_eq!(config.wubi_radicals.key_radicals.g, "王龶五一戋");
         assert_eq!(config.style.font_size, 14.0);
         assert_eq!(config.style.candidate_count, 5);
         assert_eq!(config.style.color_scheme, "lavender_purple");
@@ -391,7 +405,7 @@ color_schemes:
         let empty_yaml = "{}";
         let config: XimeConfig = serde_yaml::from_str(empty_yaml).unwrap();
         
-        assert_eq!(config.hotkeys.show_last_key_root, "Ctrl");
+        assert_eq!(config.wubi_radicals.hotkeys.show_last_key, "Ctrl");
         assert_eq!(config.style.font_size, 14.0);
         assert_eq!(config.style.candidate_count, 5);
         assert!(config.style.horizontal);
@@ -415,42 +429,44 @@ style:
     fn test_hotkey_config_default() {
         let yaml = "{}";
         let config: XimeConfig = serde_yaml::from_str(yaml).unwrap();
-        assert_eq!(config.hotkeys.show_last_key_root, "Ctrl");
+        assert_eq!(config.wubi_radicals.hotkeys.show_last_key, "Ctrl");
         
         let yaml_with_hotkey = "
-hotkeys:
-  show_last_key_root: Alt
+wubi_radicals:
+  hotkeys:
+    show_last_key: Alt
 ";
         let config: XimeConfig = serde_yaml::from_str(yaml_with_hotkey).unwrap();
-        assert_eq!(config.hotkeys.show_last_key_root, "Alt");
+        assert_eq!(config.wubi_radicals.hotkeys.show_last_key, "Alt");
     }
 
     #[test]
     fn test_wubi_root_config() {
         let config = XimeConfig::builtin_default();
         
-        assert!(!config.wubi_root.g.is_empty());
-        assert!(!config.wubi_root.f.is_empty());
-        assert!(!config.wubi_root.d.is_empty());
+        assert!(!config.wubi_radicals.key_radicals.g.is_empty());
+        assert!(!config.wubi_radicals.key_radicals.f.is_empty());
+        assert!(!config.wubi_radicals.key_radicals.d.is_empty());
         
         let yaml_partial = "
-wubi_root:
-  g: \"测试字根\"
+wubi_radicals:
+  key_radicals:
+    g: \"测试字根\"
 ";
         let config: XimeConfig = serde_yaml::from_str(yaml_partial).unwrap();
-        assert_eq!(config.wubi_root.g, "测试字根");
-        assert!(config.wubi_root.f.is_empty());
+        assert_eq!(config.wubi_radicals.key_radicals.g, "测试字根");
+        assert!(config.wubi_radicals.key_radicals.f.is_empty());
     }
 
     #[test]
     fn test_merge_configs_full_user() {
         let system = XimeConfig::builtin_default();
         let user_yaml = "
-hotkeys:
-  show_last_key_root: Shift
-
-wubi_root:
-  g: \"用户字根\"
+wubi_radicals:
+  hotkeys:
+    show_last_key: Shift
+  key_radicals:
+    g: \"用户字根\"
 
 style:
   color_scheme: ocean_blue
@@ -464,8 +480,8 @@ color_schemes:
         let user: XimeConfig = serde_yaml::from_str(user_yaml).unwrap();
         let merged = XimeConfig::merge_configs(system, Some(user));
         
-        assert_eq!(merged.hotkeys.show_last_key_root, "Shift");
-        assert_eq!(merged.wubi_root.g, "用户字根");
+        assert_eq!(merged.wubi_radicals.hotkeys.show_last_key, "Shift");
+        assert_eq!(merged.wubi_radicals.key_radicals.g, "用户字根");
         assert_eq!(merged.style.color_scheme, "ocean_blue");
         assert_eq!(merged.style.font_size, 18.0);
         assert!(!merged.color_schemes.is_empty());
@@ -481,7 +497,7 @@ style:
         let user: XimeConfig = serde_yaml::from_str(user_yaml).unwrap();
         let merged = XimeConfig::merge_configs(system, Some(user));
         
-        assert_eq!(merged.wubi_root.g, "王龶五一戋");
+        assert_eq!(merged.wubi_radicals.key_radicals.g, "王龶五一戋");
         assert_eq!(merged.style.color_scheme, "coral_red");
     }
 
@@ -504,8 +520,8 @@ style:
         let system = XimeConfig::builtin_default();
         let merged = XimeConfig::merge_configs(system, None);
         
-        assert_eq!(merged.hotkeys.show_last_key_root, "Ctrl");
-        assert_eq!(merged.wubi_root.g, "王龶五一戋");
+        assert_eq!(merged.wubi_radicals.hotkeys.show_last_key, "Ctrl");
+        assert_eq!(merged.wubi_radicals.key_radicals.g, "王龶五一戋");
         assert_eq!(merged.style.color_scheme, "lavender_purple");
     }
 
@@ -536,11 +552,29 @@ style:
         assert_eq!(config.get_last_key_root_binding(), "Ctrl");
         
         let yaml = "
-hotkeys:
-  show_last_key_root: Super
+wubi_radicals:
+  hotkeys:
+    show_last_key: Super
 ";
         let config: XimeConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.get_last_key_root_binding(), "Super");
+    }
+
+    #[test]
+    fn test_is_schema_enabled_for_radicals() {
+        let config = XimeConfig::builtin_default();
+        assert!(config.is_schema_enabled_for_radicals("wubi86_pinyin"));
+        assert!(config.is_schema_enabled_for_radicals("wubi86"));
+        assert!(!config.is_schema_enabled_for_radicals("luna_pinyin"));
+        
+        let yaml = "
+wubi_radicals:
+  schema: [\"wubi86\", \"wubi86_pinyin\"]
+";
+        let config: XimeConfig = serde_yaml::from_str(yaml).unwrap();
+        assert!(config.is_schema_enabled_for_radicals("wubi86"));
+        assert!(config.is_schema_enabled_for_radicals("wubi86_pinyin"));
+        assert!(!config.is_schema_enabled_for_radicals("double_pinyin"));
     }
 
     #[test]
@@ -560,7 +594,7 @@ hotkeys:
     #[test]
     fn test_load_returns_valid_config() {
         let config = XimeConfig::load();
-        assert_eq!(config.hotkeys.show_last_key_root, "Ctrl");
+        assert_eq!(config.wubi_radicals.hotkeys.show_last_key, "Ctrl");
         assert!(!config.color_schemes.is_empty());
     }
 }
