@@ -819,7 +819,7 @@ pub struct WubiRadicalsConfig {
     #[serde(default)]
     pub hotkeys: WubiHotkeysConfig,
     #[serde(default)]
-    pub key_radicals: std::collections::HashMap<char, String>,
+    pub schema_radicals: std::collections::HashMap<String, std::collections::HashMap<char, String>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
