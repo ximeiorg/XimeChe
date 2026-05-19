@@ -43,8 +43,8 @@ impl WaylandLoop {
         self.rt_handle.block_on(async {
             self.tray.set_primary_color(primary_color).await;
         });
-        debug!("Loaded hotkeys: show_last_key_root={}, primary_color={:?}", 
-                  xime_config.hotkeys.show_last_key_root, primary_color);
+        debug!("Loaded hotkeys: show_last_key={}, primary_color={:?}", 
+                  xime_config.wubi_radicals.hotkeys.show_last_key, primary_color);
         
         let mut candidate_window_visible = false;
         let mut last_input_keysym: Option<u32> = None;
