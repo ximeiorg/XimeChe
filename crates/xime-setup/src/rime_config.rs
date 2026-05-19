@@ -825,9 +825,9 @@ pub struct WubiRadicalsConfig {
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct WubiHotkeysConfig {
     #[serde(default)]
-    pub show_last_key: String,
+    pub show_key: String,
     #[serde(default)]
-    pub show_all_key: String,
+    pub show_all_keys: String,
 }
 
 pub struct XimeStyleManager {
