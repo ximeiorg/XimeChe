@@ -190,6 +190,12 @@ pub fn save_smart_suggestion(&self) -> Result<(), String> {
         manager.set_bool("smart_suggestion/auto_adjust_frequency", self.smart_suggestion.auto_adjust_frequency)?;
         manager.set_int("smart_suggestion/learning_threshold", self.smart_suggestion.learning_threshold)?;
         
+        manager.set_string("smart_suggestion/model/provider", &self.smart_suggestion.model_provider)?;
+        manager.set_string("smart_suggestion/model/name", &self.smart_suggestion.model_name)?;
+        manager.set_bool("smart_suggestion/model/auto_download", self.smart_suggestion.auto_download)?;
+        manager.set_string("smart_suggestion/model/files/vocab/url", &self.smart_suggestion.vocab_url)?;
+        manager.set_string("smart_suggestion/model/files/onnx/url", &self.smart_suggestion.onnx_url)?;
+        
         manager.save()?;
         
         Ok(())
@@ -263,7 +269,7 @@ pub struct InputSchemaState {
     pub config_loaded: bool,
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct SmartSuggestionState {
     pub enabled: bool,
     pub suggestion_count: i32,
@@ -271,4 +277,29 @@ pub struct SmartSuggestionState {
     pub record_user_frequency: bool,
     pub auto_adjust_frequency: bool,
     pub learning_threshold: i32,
+    pub model_provider: String,
+    pub model_name: String,
+    pub auto_download: bool,
+    pub vocab_url: String,
+    pub onnx_url: String,
+    pub model_downloaded: bool,
+}
+
+impl Default for SmartSuggestionState {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            suggestion_count: 5,
+            prefer_common_words: true,
+            record_user_frequency: true,
+            auto_adjust_frequency: true,
+            learning_threshold: 3,
+            model_provider: "modelscope".to_string(),
+            model_name: "predictive-text-small".to_string(),
+            auto_download: true,
+            vocab_url: "https://modelscope.cn/models/bikeand/predictive-text-small/resolve/master/vocab.json".to_string(),
+            onnx_url: "https://modelscope.cn/models/bikeand/predictive-text-small/resolve/master/model_int8_dynamic.onnx".to_string(),
+            model_downloaded: false,
+        }
+    }
 }

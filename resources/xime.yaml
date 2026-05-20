@@ -89,3 +89,23 @@ color_schemes:
   teal_cyan:
     name: "青碧如水"
     primary_color: 0x00796B
+
+smart_suggestion:
+  enabled: true
+  suggestion_count: 5
+  prefer_common_words: true
+  record_user_frequency: true
+  auto_adjust_frequency: true
+  learning_threshold: 3
+  
+  model:
+    provider: "modelscope"
+    name: "predictive-text"
+    auto_download: true
+    files:
+      - url: "https://modelscope.cn/models/bikeand/predictive-text/resolve/master/vocab.json"
+        filename: "vocab.json"
+      - url: "https://modelscope.cn/models/bikeand/predictive-text/resolve/master/model.onnx"
+        filename: "model.onnx"
+      - url: "https://modelscope.cn/models/bikeand/predictive-text/resolve/master/model.onnx.data"
+        filename: "model.onnx.data"

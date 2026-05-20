@@ -786,6 +786,62 @@ where S: serde::Serializer {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct SmartSuggestionConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_suggestion_count")]
+    pub suggestion_count: i32,
+    #[serde(default)]
+    pub prefer_common_words: bool,
+    #[serde(default)]
+    pub record_user_frequency: bool,
+    #[serde(default)]
+    pub auto_adjust_frequency: bool,
+    #[serde(default = "default_learning_threshold")]
+    pub learning_threshold: i32,
+    #[serde(default)]
+    pub model: SmartSuggestionModelConfig,
+}
+
+fn default_suggestion_count() -> i32 { 5 }
+fn default_learning_threshold() -> i32 { 3 }
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct SmartSuggestionModelConfig {
+    #[serde(default = "default_model_provider")]
+    pub provider: String,
+    #[serde(default = "default_model_name")]
+    pub name: String,
+    #[serde(default)]
+    pub auto_download: bool,
+    #[serde(default)]
+    pub files: SmartSuggestionModelFiles,
+}
+
+fn default_model_provider() -> String { "modelscope".to_string() }
+fn default_model_name() -> String { "predictive-text-small".to_string() }
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct SmartSuggestionModelFiles {
+    #[serde(default)]
+    pub vocab: SmartSuggestionModelFile,
+    #[serde(default)]
+    pub onnx: SmartSuggestionModelFile,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct SmartSuggestionModelFile {
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub filename: String,
+    #[serde(default)]
+    pub size: Option<u64>,
+    #[serde(default)]
+    pub checksum: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct XimeConfigFile {
     #[serde(default)]
     pub customization: CustomizationConfig,
@@ -795,6 +851,8 @@ pub struct XimeConfigFile {
     pub style: XimeStyleConfig,
     #[serde(default)]
     pub color_schemes: std::collections::HashMap<String, ColorSchemeEntry>,
+    #[serde(default)]
+    pub smart_suggestion: SmartSuggestionConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
