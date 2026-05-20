@@ -26,7 +26,9 @@ impl Default for WubiRadicalsHotkeyConfig {
     }
 }
 
-fn default_show_key() -> String { "Ctrl".to_string() }
+fn default_show_key() -> String {
+    "Ctrl".to_string()
+}
 
 #[derive(Debug, Deserialize, Serialize, Default)]
 pub struct KeyRadicalsConfig {
@@ -137,7 +139,7 @@ mod tests {
     fn test_hotkey_config_default() {
         let config = WubiRadicalsConfig::default();
         assert_eq!(config.hotkeys.show_key, "Ctrl");
-        
+
         let yaml = "hotkeys:\n  show_key: Alt";
         let config: WubiRadicalsHotkeyConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.show_key, "Alt");
@@ -149,11 +151,22 @@ mod tests {
         let mut radicals = KeyRadicalsConfig::default();
         radicals.g = "王龶五一戋".to_string();
         radicals.a = "工匚戈艹廿龷七弋戈".to_string();
-        config.schema_radicals.insert("wubi86".to_string(), radicals);
-        
-        assert_eq!(config.get_root_for_key("wubi86", 'g'), Some("王龶五一戋".to_string()));
-        assert_eq!(config.get_root_for_key("wubi86", 'G'), Some("王龶五一戋".to_string()));
-        assert_eq!(config.get_root_for_key("wubi86", 'a'), Some("工匚戈艹廿龷七弋戈".to_string()));
+        config
+            .schema_radicals
+            .insert("wubi86".to_string(), radicals);
+
+        assert_eq!(
+            config.get_root_for_key("wubi86", 'g'),
+            Some("王龶五一戋".to_string())
+        );
+        assert_eq!(
+            config.get_root_for_key("wubi86", 'G'),
+            Some("王龶五一戋".to_string())
+        );
+        assert_eq!(
+            config.get_root_for_key("wubi86", 'a'),
+            Some("工匚戈艹廿龷七弋戈".to_string())
+        );
         assert_eq!(config.get_root_for_key("wubi86", 'z'), None);
         assert_eq!(config.get_root_for_key("unknown_schema", 'g'), None);
     }
@@ -161,8 +174,10 @@ mod tests {
     #[test]
     fn test_is_schema_enabled_for_radicals() {
         let mut config = WubiRadicalsConfig::default();
-        config.schema_radicals.insert("wubi86".to_string(), KeyRadicalsConfig::default());
-        
+        config
+            .schema_radicals
+            .insert("wubi86".to_string(), KeyRadicalsConfig::default());
+
         assert!(config.is_schema_enabled_for_radicals("wubi86"));
         assert!(!config.is_schema_enabled_for_radicals("luna_pinyin"));
     }

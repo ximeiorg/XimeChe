@@ -2,7 +2,7 @@ use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::thread;
 
-use tracing::{debug, error, warn, info};
+use tracing::{debug, error, info, warn};
 use xime_config::XimeConfig;
 use xime_tray::{InputMode, TrayManager};
 use xime_wayland::{InputMethodV1State, WaylandConnectionV1};
@@ -29,38 +29,40 @@ impl WaylandLoop {
             rt_handle,
         }
     }
-    
+
     pub fn run(self) {
         info!("Wayland loop thread started");
-        
+
         let mut conn: Option<WaylandConnectionV1> = None;
         let mut xkb: Option<XkbContext> = None;
         let mut rime = RimeEngine::new();
-        
+
         let mut xime_config = XimeConfig::load();
         let _last_key_root_binding = xime_config.get_last_key_root_binding();
         let primary_color = xime_config.get_primary_color();
         self.rt_handle.block_on(async {
             self.tray.set_primary_color(primary_color).await;
         });
-        debug!("Loaded hotkeys: show_key={}, primary_color={:?}", 
-                  xime_config.wubi_radicals.hotkeys.show_key, primary_color);
-        
+        debug!(
+            "Loaded hotkeys: show_key={}, primary_color={:?}",
+            xime_config.wubi_radicals.hotkeys.show_key, primary_color
+        );
+
         let mut candidate_window_visible = false;
         let mut last_input_keysym: Option<u32> = None;
         let mut ctrl_root_visible = false;
         let mut last_ascii_mode = false;
         let mut last_state = InputMethodV1State::Inactive;
-        
+
         loop {
             use std::sync::mpsc::TryRecvError;
-            
+
             match self.command_rx.try_recv() {
                 Ok(DaemonCommand::OpenWaylandSocket(fd, display_name)) => {
                     debug!("Connecting from fd for display {}", display_name);
-                    
+
                     xkb = XkbContext::new().ok();
-                    
+
                     match WaylandConnectionV1::connect_from_fd(fd) {
                         Ok(c) => {
                             if c.get_input_method().is_ok() {
@@ -115,7 +117,7 @@ impl WaylandLoop {
                     break;
                 }
             }
-            
+
             if let Some(c) = conn.as_mut() {
                 if let Err(e) = c.dispatch_events() {
                     debug!("Dispatch error: {}", e);
@@ -126,9 +128,9 @@ impl WaylandLoop {
                     last_state = InputMethodV1State::Inactive;
                     continue;
                 }
-                
+
                 let state = c.get_state();
-                
+
                 if state.state != last_state {
                     debug!("State changed from {:?} to {:?}", last_state, state.state);
                     let is_active = state.state == InputMethodV1State::Active;
@@ -136,13 +138,13 @@ impl WaylandLoop {
                         self.tray.set_visible(is_active).await;
                     });
                     last_state = state.state;
-                    
+
                     if !is_active {
                         candidate_window_visible = false;
                         continue;
                     }
                 }
-                
+
                 if state.state == InputMethodV1State::Active {
                     self.handle_active_state(
                         c,
@@ -156,11 +158,11 @@ impl WaylandLoop {
                     );
                 }
             }
-            
+
             thread::sleep(std::time::Duration::from_millis(1));
         }
     }
-    
+
     #[allow(clippy::too_many_arguments)]
     fn handle_active_state(
         &self,
@@ -179,21 +181,28 @@ impl WaylandLoop {
                     debug!("Keymap error: {}", e);
                 }
             }
-            
+
             let (depressed, latched, locked, group) = c.get_modifiers();
             x.update_modifiers(depressed, latched, locked, group);
         }
-        
+
         let events = c.pop_key_events();
         for event in events {
-            debug!("Key event: keycode={}, pressed={}", event.key, event.pressed);
-            
+            debug!(
+                "Key event: keycode={}, pressed={}",
+                event.key, event.pressed
+            );
+
             if let Some(ref mut x) = xkb {
                 let keysym = x.key_from_keycode(event.key + 8);
                 if let Some(sym) = keysym {
                     self.handle_key_event(
-                        c, x, rime, xime_config,
-                        event, sym,
+                        c,
+                        x,
+                        rime,
+                        xime_config,
+                        event,
+                        sym,
                         candidate_window_visible,
                         last_input_keysym,
                         ctrl_root_visible,
@@ -203,7 +212,7 @@ impl WaylandLoop {
             }
         }
     }
-    
+
     #[allow(clippy::too_many_arguments)]
     fn handle_key_event(
         &self,
@@ -234,9 +243,7 @@ impl WaylandLoop {
         let is_ctrl = sym.raw() == 0xFFE3 || sym.raw() == 0xFFE4;
         debug!(
             "is_ctrl={}, candidate_visible={}, last_key={:?}",
-            is_ctrl,
-            candidate_window_visible,
-            last_input_keysym
+            is_ctrl, candidate_window_visible, last_input_keysym
         );
 
         if *candidate_window_visible && is_ctrl {
@@ -284,11 +291,7 @@ impl WaylandLoop {
                     });
                     debug!("Tray updated: ascii_mode={}", is_ascii);
                 }
-                debug!(
-                    "ascii_mode={}, composing={}",
-                    is_ascii,
-                    status.is_composing
-                );
+                debug!("ascii_mode={}, composing={}", is_ascii, status.is_composing);
             }
 
             if !result {
@@ -317,12 +320,7 @@ impl WaylandLoop {
                         .enumerate()
                         .map(|(i, x)| {
                             let comment = x.comment.map(|c| c.to_string()).unwrap_or_default();
-                            debug!(
-                                "candidate {} text='{}' comment='{}'",
-                                i,
-                                x.text,
-                                comment
-                            );
+                            debug!("candidate {} text='{}' comment='{}'", i, x.text, comment);
                             xime_ui::CandidateItem {
                                 text: x.text.to_string(),
                                 comment,
@@ -382,11 +380,7 @@ impl WaylandLoop {
                         let root = xime_config.get_root_for_key(&schema, letter);
                         debug!("root for '{}' (schema={}) = {:?}", letter, schema, root);
                         if let Some(root) = root {
-                            debug!(
-                                "Ctrl pressed, showing root for '{}': {}",
-                                letter,
-                                root
-                            );
+                            debug!("Ctrl pressed, showing root for '{}': {}", letter, root);
                             let primary_color = xime_config.get_primary_color();
                             if let Err(e) = c.show_root_window(letter, &root, primary_color) {
                                 debug!("Failed to show root window: {}", e);

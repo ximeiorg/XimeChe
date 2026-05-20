@@ -6,11 +6,11 @@ pub use candidate::CandidateItem;
 pub use candidate::CandidateList;
 pub use candidate::MoveDirection;
 pub use candidate::PageInfo;
-pub use renderer::CandidateRenderer;
-pub use renderer::draw_candidates_to_buffer;
 pub use renderer::calculate_candidate_width;
-pub use root_display::draw_root_to_buffer;
+pub use renderer::draw_candidates_to_buffer;
+pub use renderer::CandidateRenderer;
 pub use root_display::calculate_root_width;
+pub use root_display::draw_root_to_buffer;
 
 pub type Result<T> = std::result::Result<T, Error>;
 

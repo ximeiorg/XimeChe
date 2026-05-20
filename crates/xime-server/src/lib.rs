@@ -1,16 +1,18 @@
-mod types;
-mod error;
 mod auth;
+mod error;
+mod handlers;
 mod pair_store;
 mod platform;
-mod state;
 mod router;
-mod handlers;
+mod state;
+mod types;
 
-pub use types::*;
+pub use auth::{compute_hash, AuthConfig, AuthState, AuthToken, DeviceAuth};
 pub use error::ApiError;
-pub use auth::{AuthToken, DeviceAuth, compute_hash, AuthState, AuthConfig};
-pub use pair_store::{PairStore, PairedDevice, PairSession};
-pub use platform::{ClipboardProvider, ConfigDirProvider, PlatformProviders, InMemoryClipboard, DefaultConfigDir};
-pub use state::{ServerState, ClipboardState};
+pub use pair_store::{PairSession, PairStore, PairedDevice};
+pub use platform::{
+    ClipboardProvider, ConfigDirProvider, DefaultConfigDir, InMemoryClipboard, PlatformProviders,
+};
 pub use router::{create_router, serve};
+pub use state::{ClipboardState, ServerState};
+pub use types::*;

@@ -1,7 +1,7 @@
-mod pair;
 mod clipboard;
 mod health;
+mod pair;
 
-pub use pair::*;
 pub use clipboard::*;
 pub use health::*;
+pub use pair::*;

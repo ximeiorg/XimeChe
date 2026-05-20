@@ -8,9 +8,12 @@ pub struct Label {
 
 impl Label {
     pub fn new(text: impl Into<String>) -> Self {
-        Self { text: text.into(), text_color: None }
+        Self {
+            text: text.into(),
+            text_color: None,
+        }
     }
-    
+
     pub fn theme(mut self, color: Hsla) -> Self {
         self.text_color = Some(color);
         self

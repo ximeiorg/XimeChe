@@ -1,7 +1,9 @@
-use xkbcommon::xkb::{Context, Keymap, State, Keysym, Keycode, ModIndex, keysym_from_name, KEYSYM_CASE_INSENSITIVE};
-use std::os::unix::io::{RawFd, FromRawFd, OwnedFd};
 use std::fs::File;
+use std::os::unix::io::{FromRawFd, OwnedFd, RawFd};
 use tracing::debug;
+use xkbcommon::xkb::{
+    keysym_from_name, Context, Keycode, Keymap, Keysym, ModIndex, State, KEYSYM_CASE_INSENSITIVE,
+};
 
 use crate::Error;
 use crate::Result;
@@ -22,7 +24,7 @@ impl KeyBinding {
     pub fn parse(s: &str) -> Self {
         let mut binding = KeyBinding::default();
         let parts: Vec<&str> = s.split('+').collect();
-        
+
         for part in parts.iter() {
             let trimmed = part.trim();
             match trimmed.to_lowercase().as_str() {
@@ -39,28 +41,40 @@ impl KeyBinding {
         }
         binding
     }
-    
+
     /// Get the keysym value for Rime
     pub fn keysym_raw(&self) -> Option<u32> {
         self.keysym.map(|k| k.raw())
     }
-    
+
     /// Check if modifiers match (for hotkey detection) - without super
     pub fn matches_modifiers(&self, ctrl: bool, alt: bool, shift: bool) -> bool {
         self.ctrl == ctrl && self.alt == alt && self.shift == shift
     }
-    
+
     /// Check if all modifiers match including super/win
-    pub fn matches_modifiers_full(&self, ctrl: bool, alt: bool, shift: bool, super_key: bool) -> bool {
+    pub fn matches_modifiers_full(
+        &self,
+        ctrl: bool,
+        alt: bool,
+        shift: bool,
+        super_key: bool,
+    ) -> bool {
         self.ctrl == ctrl && self.alt == alt && self.shift == shift && self.super_key == super_key
     }
-    
+
     /// Get modifier mask for Rime
     pub fn modifier_mask(&self) -> u32 {
         let mut mask = 0u32;
-        if self.ctrl { mask |= 0x04; }  // K_CONTROL_MASK
-        if self.alt { mask |= 0x08; }   // K_ALT_MASK
-        if self.shift { mask |= 0x01; } // K_SHIFT_MASK
+        if self.ctrl {
+            mask |= 0x04;
+        } // K_CONTROL_MASK
+        if self.alt {
+            mask |= 0x08;
+        } // K_ALT_MASK
+        if self.shift {
+            mask |= 0x01;
+        } // K_SHIFT_MASK
         mask
     }
 }
@@ -74,7 +88,7 @@ pub struct XkbContext {
 impl XkbContext {
     pub fn new() -> Result<Self> {
         let context = Context::new(xkbcommon::xkb::CONTEXT_NO_FLAGS);
-        
+
         Ok(Self {
             context,
             keymap: None,
@@ -89,16 +103,16 @@ impl XkbContext {
 
     pub fn set_keymap_from_owned_fd(&mut self, owned_fd: OwnedFd, size: usize) -> Result<()> {
         let mut file = File::from(owned_fd);
-        
+
         debug!("Loading keymap from file (size: {} bytes)", size);
-        
+
         let keymap = Keymap::new_from_file(
             &self.context,
             &mut file,
             xkbcommon::xkb::KEYMAP_FORMAT_TEXT_V1,
             xkbcommon::xkb::KEYMAP_COMPILE_NO_FLAGS,
         );
-        
+
         match keymap {
             Some(km) => {
                 let state = State::new(&km);
@@ -137,17 +151,17 @@ impl XkbContext {
             let locked = state.serialize_mods(xkbcommon::xkb::STATE_MODS_LOCKED);
             let effective = state.serialize_mods(xkbcommon::xkb::STATE_MODS_EFFECTIVE);
             let layout = state.serialize_layout(xkbcommon::xkb::STATE_LAYOUT_EFFECTIVE);
-            
+
             // Check individual modifiers
             let shift = state.mod_index_is_active(0, xkbcommon::xkb::STATE_MODS_EFFECTIVE);
             let ctrl = state.mod_index_is_active(2, xkbcommon::xkb::STATE_MODS_EFFECTIVE);
             let alt = state.mod_index_is_active(1, xkbcommon::xkb::STATE_MODS_EFFECTIVE);
             // Mod4 (index 3) is usually Super/Win
             let super_key = state.mod_index_is_active(3, xkbcommon::xkb::STATE_MODS_EFFECTIVE);
-            
+
             debug!("XKB: depressed={}, latched={}, locked={}, effective={}, shift={}, ctrl={}, alt={}, super={}", 
                       depressed, latched, locked, effective, shift, ctrl, alt, super_key);
-            
+
             ModifierState {
                 depressed,
                 latched,
@@ -218,8 +232,7 @@ pub fn keysym_to_letter(keysym_raw: u32) -> Option<char> {
     // Uppercase letters: 0x41-0x5a (A-Z)
     else if keysym_raw >= 0x41 && keysym_raw <= 0x5a {
         Some((keysym_raw as u8 as char).to_ascii_lowercase())
-    }
-    else {
+    } else {
         None
     }
 }
@@ -336,7 +349,14 @@ mod tests {
 
     #[test]
     fn test_keybinding_matches_modifiers_basic() {
-        let binding = KeyBinding { ctrl: true, alt: false, shift: false, super_key: false, keysym: None, key_name: String::new() };
+        let binding = KeyBinding {
+            ctrl: true,
+            alt: false,
+            shift: false,
+            super_key: false,
+            keysym: None,
+            key_name: String::new(),
+        };
         assert!(binding.matches_modifiers(true, false, false));
         assert!(!binding.matches_modifiers(true, true, false));
         assert!(!binding.matches_modifiers(false, false, false));
@@ -344,7 +364,14 @@ mod tests {
 
     #[test]
     fn test_keybinding_matches_modifiers_multiple() {
-        let binding = KeyBinding { ctrl: true, alt: true, shift: false, super_key: false, keysym: None, key_name: String::new() };
+        let binding = KeyBinding {
+            ctrl: true,
+            alt: true,
+            shift: false,
+            super_key: false,
+            keysym: None,
+            key_name: String::new(),
+        };
         assert!(binding.matches_modifiers(true, true, false));
         assert!(!binding.matches_modifiers(true, false, false));
         assert!(!binding.matches_modifiers(false, true, false));
@@ -352,52 +379,108 @@ mod tests {
 
     #[test]
     fn test_keybinding_matches_modifiers_all() {
-        let binding = KeyBinding { ctrl: true, alt: true, shift: true, super_key: false, keysym: None, key_name: String::new() };
+        let binding = KeyBinding {
+            ctrl: true,
+            alt: true,
+            shift: true,
+            super_key: false,
+            keysym: None,
+            key_name: String::new(),
+        };
         assert!(binding.matches_modifiers(true, true, true));
         assert!(!binding.matches_modifiers(true, true, false));
     }
 
     #[test]
     fn test_keybinding_matches_modifiers_full_with_super() {
-        let binding = KeyBinding { ctrl: true, alt: true, shift: false, super_key: true, keysym: None, key_name: String::new() };
+        let binding = KeyBinding {
+            ctrl: true,
+            alt: true,
+            shift: false,
+            super_key: true,
+            keysym: None,
+            key_name: String::new(),
+        };
         assert!(binding.matches_modifiers_full(true, true, false, true));
         assert!(!binding.matches_modifiers_full(true, true, false, false));
     }
 
     #[test]
     fn test_keybinding_modifier_mask_ctrl() {
-        let binding = KeyBinding { ctrl: true, alt: false, shift: false, super_key: false, keysym: None, key_name: String::new() };
+        let binding = KeyBinding {
+            ctrl: true,
+            alt: false,
+            shift: false,
+            super_key: false,
+            keysym: None,
+            key_name: String::new(),
+        };
         assert_eq!(binding.modifier_mask(), 0x04);
     }
 
     #[test]
     fn test_keybinding_modifier_mask_alt() {
-        let binding = KeyBinding { ctrl: false, alt: true, shift: false, super_key: false, keysym: None, key_name: String::new() };
+        let binding = KeyBinding {
+            ctrl: false,
+            alt: true,
+            shift: false,
+            super_key: false,
+            keysym: None,
+            key_name: String::new(),
+        };
         assert_eq!(binding.modifier_mask(), 0x08);
     }
 
     #[test]
     fn test_keybinding_modifier_mask_shift() {
-        let binding = KeyBinding { ctrl: false, alt: false, shift: true, super_key: false, keysym: None, key_name: String::new() };
+        let binding = KeyBinding {
+            ctrl: false,
+            alt: false,
+            shift: true,
+            super_key: false,
+            keysym: None,
+            key_name: String::new(),
+        };
         assert_eq!(binding.modifier_mask(), 0x01);
     }
 
     #[test]
     fn test_keybinding_modifier_mask_combined() {
-        let binding = KeyBinding { ctrl: true, alt: true, shift: false, super_key: false, keysym: None, key_name: String::new() };
+        let binding = KeyBinding {
+            ctrl: true,
+            alt: true,
+            shift: false,
+            super_key: false,
+            keysym: None,
+            key_name: String::new(),
+        };
         assert_eq!(binding.modifier_mask(), 0x0C); // 0x04 | 0x08
     }
 
     #[test]
     fn test_keybinding_modifier_mask_all() {
-        let binding = KeyBinding { ctrl: true, alt: true, shift: true, super_key: false, keysym: None, key_name: String::new() };
+        let binding = KeyBinding {
+            ctrl: true,
+            alt: true,
+            shift: true,
+            super_key: false,
+            keysym: None,
+            key_name: String::new(),
+        };
         assert_eq!(binding.modifier_mask(), 0x0D); // 0x04 | 0x08 | 0x01
     }
 
     #[test]
     fn test_keybinding_keysym_raw() {
         let keysym = keysym_from_name("a", KEYSYM_CASE_INSENSITIVE);
-        let binding = KeyBinding { ctrl: false, alt: false, shift: false, super_key: false, keysym: Some(keysym), key_name: "A".to_string() };
+        let binding = KeyBinding {
+            ctrl: false,
+            alt: false,
+            shift: false,
+            super_key: false,
+            keysym: Some(keysym),
+            key_name: "A".to_string(),
+        };
         assert!(binding.keysym_raw().is_some());
         assert_eq!(binding.keysym_raw(), Some(0x61));
     }

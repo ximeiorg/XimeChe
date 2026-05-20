@@ -1,30 +1,26 @@
-use wayland_client;
-use wayland_client::protocol::*;
-use wayland_client::{Dispatch, Proxy, QueueHandle};
-use wayland_client::globals::GlobalListContents;
-use wayland_client::protocol::wl_registry::WlRegistry;
-use wayland_client::protocol::wl_seat::WlSeat;
-use wayland_client::protocol::wl_keyboard::WlKeyboard;
-use wayland_client::protocol::wl_compositor::WlCompositor;
-use wayland_client::protocol::wl_shm::WlShm;
-use wayland_client::protocol::wl_surface::WlSurface;
-use wayland_client::protocol::wl_output::WlOutput;
-use wayland_client::protocol::wl_buffer::WlBuffer;
-use wayland_client::protocol::wl_shm_pool::WlShmPool;
-use wayland_client::{
-    globals::registry_queue_init,
-    Connection, EventQueue,
-    event_created_child,
-};
-use wayland_backend::client::Backend;
-use std::sync::{Arc, Mutex};
-use std::os::unix::io::{OwnedFd, AsFd, FromRawFd};
+use std::os::unix::io::{AsFd, FromRawFd, OwnedFd};
 use std::os::unix::net::UnixStream;
 use std::slice;
+use std::sync::{Arc, Mutex};
 use tracing::debug;
+use wayland_backend::client::Backend;
+use wayland_client;
+use wayland_client::globals::GlobalListContents;
+use wayland_client::protocol::wl_buffer::WlBuffer;
+use wayland_client::protocol::wl_compositor::WlCompositor;
+use wayland_client::protocol::wl_keyboard::WlKeyboard;
+use wayland_client::protocol::wl_output::WlOutput;
+use wayland_client::protocol::wl_registry::WlRegistry;
+use wayland_client::protocol::wl_seat::WlSeat;
+use wayland_client::protocol::wl_shm::WlShm;
+use wayland_client::protocol::wl_shm_pool::WlShmPool;
+use wayland_client::protocol::wl_surface::WlSurface;
+use wayland_client::protocol::*;
+use wayland_client::{event_created_child, globals::registry_queue_init, Connection, EventQueue};
+use wayland_client::{Dispatch, Proxy, QueueHandle};
+use xime_ui::calculate_root_width;
 use xime_ui::draw_candidates_to_buffer;
 use xime_ui::draw_root_to_buffer;
-use xime_ui::calculate_root_width;
 use xime_ui::CandidateItem;
 
 pub mod __interfaces {
@@ -36,12 +32,12 @@ use self::__interfaces::*;
 
 wayland_scanner::generate_client_code!("protocols/input-method-unstable-v1.xml");
 
-pub use zwp_input_method_v1::ZwpInputMethodV1;
-pub use zwp_input_method_v1::Event as ImV1Event;
-pub use zwp_input_method_context_v1::ZwpInputMethodContextV1;
 pub use zwp_input_method_context_v1::Event as ContextEvent;
-pub use zwp_input_panel_v1::ZwpInputPanelV1;
+pub use zwp_input_method_context_v1::ZwpInputMethodContextV1;
+pub use zwp_input_method_v1::Event as ImV1Event;
+pub use zwp_input_method_v1::ZwpInputMethodV1;
 pub use zwp_input_panel_surface_v1::ZwpInputPanelSurfaceV1;
+pub use zwp_input_panel_v1::ZwpInputPanelV1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum InputMethodV1State {
@@ -82,7 +78,8 @@ impl Dispatch<WlRegistry, GlobalListContents> for InputMethodV1Data {
         _data: &GlobalListContents,
         _conn: &wayland_client::Connection,
         _qhandle: &QueueHandle<InputMethodV1Data>,
-    ) {}
+    ) {
+    }
 }
 
 impl Dispatch<WlSeat, InputMethodV1Data> for InputMethodV1Data {
@@ -93,7 +90,8 @@ impl Dispatch<WlSeat, InputMethodV1Data> for InputMethodV1Data {
         _data: &InputMethodV1Data,
         _conn: &wayland_client::Connection,
         _qhandle: &QueueHandle<InputMethodV1Data>,
-    ) {}
+    ) {
+    }
 }
 
 impl Dispatch<WlOutput, InputMethodV1Data> for InputMethodV1Data {
@@ -104,7 +102,8 @@ impl Dispatch<WlOutput, InputMethodV1Data> for InputMethodV1Data {
         _data: &InputMethodV1Data,
         _conn: &wayland_client::Connection,
         _qhandle: &QueueHandle<InputMethodV1Data>,
-    ) {}
+    ) {
+    }
 }
 
 impl Dispatch<ZwpInputMethodV1, InputMethodV1Data> for InputMethodV1Data {
@@ -142,7 +141,7 @@ impl Dispatch<ZwpInputMethodV1, InputMethodV1Data> for InputMethodV1Data {
             }
         }
     }
-    
+
     event_created_child!(InputMethodV1Data, ZwpInputMethodV1, [
         zwp_input_method_v1::EVT_ACTIVATE_OPCODE => (ZwpInputMethodContextV1, InputMethodV1Data::default()),
     ]);
@@ -158,7 +157,11 @@ impl Dispatch<ZwpInputMethodContextV1, InputMethodV1Data> for InputMethodV1Data 
         _qhandle: &QueueHandle<InputMethodV1Data>,
     ) {
         match event {
-            ContextEvent::SurroundingText { text, cursor, anchor } => {
+            ContextEvent::SurroundingText {
+                text,
+                cursor,
+                anchor,
+            } => {
                 state.surrounding_text = Some(text);
                 state.surrounding_cursor = cursor;
                 state.surrounding_anchor = anchor;
@@ -170,8 +173,7 @@ impl Dispatch<ZwpInputMethodContextV1, InputMethodV1Data> for InputMethodV1Data 
             ContextEvent::CommitState { serial } => {
                 state.serial = serial;
             }
-            ContextEvent::Reset => {
-            }
+            ContextEvent::Reset => {}
             _ => {}
         }
     }
@@ -185,7 +187,8 @@ impl Dispatch<ZwpInputPanelV1, InputMethodV1Data> for InputMethodV1Data {
         _data: &InputMethodV1Data,
         _conn: &wayland_client::Connection,
         _qhandle: &QueueHandle<InputMethodV1Data>,
-    ) {}
+    ) {
+    }
 }
 
 impl Dispatch<WlKeyboard, InputMethodV1Data> for InputMethodV1Data {
@@ -198,15 +201,30 @@ impl Dispatch<WlKeyboard, InputMethodV1Data> for InputMethodV1Data {
         _qhandle: &QueueHandle<InputMethodV1Data>,
     ) {
         match event {
-            wl_keyboard::Event::Keymap { format: _, fd, size } => {
+            wl_keyboard::Event::Keymap {
+                format: _,
+                fd,
+                size,
+            } => {
                 debug!("Keymap event received, size={}", size);
                 if let Ok(mut keymap) = state.keymap_pending.lock() {
                     *keymap = Some((fd, size as usize));
                 }
             }
-            wl_keyboard::Event::Key { serial, time, key, state: key_state } => {
-                let pressed = matches!(key_state, wayland_client::WEnum::Value(wl_keyboard::KeyState::Pressed));
-                debug!("Key event: serial={}, key={}, pressed={}", serial, key, pressed);
+            wl_keyboard::Event::Key {
+                serial,
+                time,
+                key,
+                state: key_state,
+            } => {
+                let pressed = matches!(
+                    key_state,
+                    wayland_client::WEnum::Value(wl_keyboard::KeyState::Pressed)
+                );
+                debug!(
+                    "Key event: serial={}, key={}, pressed={}",
+                    serial, key, pressed
+                );
                 if let Ok(mut events) = state.key_events.lock() {
                     events.push(KeyEvent {
                         serial,
@@ -216,7 +234,13 @@ impl Dispatch<WlKeyboard, InputMethodV1Data> for InputMethodV1Data {
                     });
                 }
             }
-            wl_keyboard::Event::Modifiers { serial: _, mods_depressed, mods_latched, mods_locked, group } => {
+            wl_keyboard::Event::Modifiers {
+                serial: _,
+                mods_depressed,
+                mods_latched,
+                mods_locked,
+                group,
+            } => {
                 if let Ok(mut mods) = state.modifiers.lock() {
                     *mods = (mods_depressed, mods_latched, mods_locked, group);
                 }
@@ -234,7 +258,8 @@ impl Dispatch<WlCompositor, InputMethodV1Data> for InputMethodV1Data {
         _data: &InputMethodV1Data,
         _conn: &wayland_client::Connection,
         _qhandle: &QueueHandle<InputMethodV1Data>,
-    ) {}
+    ) {
+    }
 }
 
 impl Dispatch<WlShm, InputMethodV1Data> for InputMethodV1Data {
@@ -245,7 +270,8 @@ impl Dispatch<WlShm, InputMethodV1Data> for InputMethodV1Data {
         _data: &InputMethodV1Data,
         _conn: &wayland_client::Connection,
         _qhandle: &QueueHandle<InputMethodV1Data>,
-    ) {}
+    ) {
+    }
 }
 
 impl Dispatch<WlSurface, InputMethodV1Data> for InputMethodV1Data {
@@ -277,7 +303,8 @@ impl Dispatch<WlBuffer, InputMethodV1Data> for InputMethodV1Data {
         _data: &InputMethodV1Data,
         _conn: &wayland_client::Connection,
         _qhandle: &QueueHandle<InputMethodV1Data>,
-    ) {}
+    ) {
+    }
 }
 
 impl Dispatch<WlShmPool, InputMethodV1Data> for InputMethodV1Data {
@@ -288,7 +315,8 @@ impl Dispatch<WlShmPool, InputMethodV1Data> for InputMethodV1Data {
         _data: &InputMethodV1Data,
         _conn: &wayland_client::Connection,
         _qhandle: &QueueHandle<InputMethodV1Data>,
-    ) {}
+    ) {
+    }
 }
 
 impl Dispatch<ZwpInputPanelSurfaceV1, InputMethodV1Data> for InputMethodV1Data {
@@ -299,7 +327,8 @@ impl Dispatch<ZwpInputPanelSurfaceV1, InputMethodV1Data> for InputMethodV1Data {
         _data: &InputMethodV1Data,
         _conn: &wayland_client::Connection,
         _qhandle: &QueueHandle<InputMethodV1Data>,
-    ) {}
+    ) {
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -359,51 +388,38 @@ pub struct WaylandConnectionV1 {
 
 impl WaylandConnectionV1 {
     pub fn connect() -> Result<Self> {
-        let connection = Connection::connect_to_env()
-            .map_err(|e| Error::ConnectFailed(e.to_string()))?;
+        let connection =
+            Connection::connect_to_env().map_err(|e| Error::ConnectFailed(e.to_string()))?;
 
         Self::init_with_connection(connection)
     }
-    
+
     pub fn connect_from_fd(fd: OwnedFd) -> Result<Self> {
         let stream = UnixStream::from(fd);
-        let backend = Backend::connect(stream)
-            .map_err(|e| Error::ConnectFailed(e.to_string()))?;
+        let backend = Backend::connect(stream).map_err(|e| Error::ConnectFailed(e.to_string()))?;
         let connection = Connection::from_backend(backend);
-        
+
         Self::init_with_connection(connection)
     }
-    
+
     pub fn init_with_connection(connection: Connection) -> Result<Self> {
-        let (globals, event_queue) = registry_queue_init(&connection)
-            .map_err(|e| Error::ConnectFailed(e.to_string()))?;
+        let (globals, event_queue) =
+            registry_queue_init(&connection).map_err(|e| Error::ConnectFailed(e.to_string()))?;
 
         let qh = event_queue.handle();
         let state = InputMethodV1Data::default();
 
-        let seat: Option<WlSeat> = globals
-            .bind(&qh, 1..=8, state.clone())
-            .ok();
+        let seat: Option<WlSeat> = globals.bind(&qh, 1..=8, state.clone()).ok();
 
-        let compositor: Option<WlCompositor> = globals
-            .bind(&qh, 1..=4, state.clone())
-            .ok();
+        let compositor: Option<WlCompositor> = globals.bind(&qh, 1..=4, state.clone()).ok();
 
-        let shm: Option<WlShm> = globals
-            .bind(&qh, 1..=1, state.clone())
-            .ok();
+        let shm: Option<WlShm> = globals.bind(&qh, 1..=1, state.clone()).ok();
 
-        let input_method: Option<ZwpInputMethodV1> = globals
-            .bind(&qh, 1..=1, state.clone())
-            .ok();
+        let input_method: Option<ZwpInputMethodV1> = globals.bind(&qh, 1..=1, state.clone()).ok();
 
-        let input_panel: Option<ZwpInputPanelV1> = globals
-            .bind(&qh, 1..=1, state.clone())
-            .ok();
+        let input_panel: Option<ZwpInputPanelV1> = globals.bind(&qh, 1..=1, state.clone()).ok();
 
-        let output: Option<WlOutput> = globals
-            .bind(&qh, 1..=1, state.clone())
-            .ok();
+        let output: Option<WlOutput> = globals.bind(&qh, 1..=1, state.clone()).ok();
 
         // Check if v1 global exists by checking bind result
         let has_v1_global = input_method.is_some() || input_panel.is_some();
@@ -440,19 +456,22 @@ impl WaylandConnectionV1 {
 
     pub fn dispatch_events(&mut self) -> Result<()> {
         // Blocking dispatch - wait for at least one event
-        self.event_queue.roundtrip(&mut self.state)
+        self.event_queue
+            .roundtrip(&mut self.state)
             .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
         Ok(())
     }
-    
+
     pub fn dispatch_pending(&mut self) -> Result<()> {
-        self.event_queue.dispatch_pending(&mut self.state)
+        self.event_queue
+            .dispatch_pending(&mut self.state)
             .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
         Ok(())
     }
 
     pub fn sync_roundtrip(&mut self) -> Result<()> {
-        self.event_queue.roundtrip(&mut self.state)
+        self.event_queue
+            .roundtrip(&mut self.state)
             .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
         Ok(())
     }
@@ -494,110 +513,153 @@ impl WaylandConnectionV1 {
     pub fn event_queue(&mut self) -> &mut EventQueue<InputMethodV1Data> {
         &mut self.event_queue
     }
-    
+
     pub fn get_context(&self) -> Option<ZwpInputMethodContextV1> {
         self.state.context.lock().ok().and_then(|ctx| ctx.clone())
     }
-    
+
     pub fn commit_string(&self, text: &str) {
         if let Some(ctx) = self.get_context() {
             ctx.commit_string(self.state.serial, text.to_string());
         }
     }
-    
+
     pub fn set_preedit(&self, text: &str, cursor: i32) {
         if let Some(ctx) = self.get_context() {
             ctx.preedit_cursor(cursor);
             ctx.preedit_string(self.state.serial, text.to_string(), "".to_string());
         }
     }
-    
+
     pub fn clear_preedit(&self) {
         if let Some(ctx) = self.get_context() {
             ctx.preedit_string(self.state.serial, "".to_string(), "".to_string());
         }
     }
-    
+
     pub fn flush(&self) -> Result<()> {
-        self.connection.flush()
+        self.connection
+            .flush()
             .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
         Ok(())
     }
-    
+
     pub fn forward_key(&self, serial: u32, time: u32, key: u32, pressed: bool) {
         if let Some(ctx) = self.get_context() {
             let key_state: u32 = if pressed { 1 } else { 0 };
             ctx.key(serial, time, key, key_state);
-            eprintln!("DEBUG: Forwarded key: serial={}, key={}, pressed={}", serial, key, pressed);
+            eprintln!(
+                "DEBUG: Forwarded key: serial={}, key={}, pressed={}",
+                serial, key, pressed
+            );
         }
     }
-    
+
     pub fn create_candidate_surface(&mut self) -> Result<()> {
         let compositor = self.compositor.as_ref().ok_or(Error::NoCompositor)?;
         let input_panel = self.input_panel.as_ref().ok_or(Error::NoInputPanel)?;
-        
+
         let qh = self.event_queue.handle();
-        
+
         let surface = compositor.create_surface(&qh, self.state.clone());
-        
+
         let panel_surface = input_panel.get_input_panel_surface(&surface, &qh, self.state.clone());
         panel_surface.set_overlay_panel();
-        
+
         self.candidate_surface = Some(surface);
         self.panel_surface = Some(panel_surface);
-        
-        self.connection.flush()
+
+        self.connection
+            .flush()
             .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
-        
+
         eprintln!("DEBUG: Created candidate panel surface with overlay_panel");
         Ok(())
     }
-    
-    pub fn show_candidate_window(&mut self, width: u32, height: u32, candidates: &[CandidateItem], highlighted_index: usize, primary_color: (u8, u8, u8)) -> Result<()> {
+
+    pub fn show_candidate_window(
+        &mut self,
+        width: u32,
+        height: u32,
+        candidates: &[CandidateItem],
+        highlighted_index: usize,
+        primary_color: (u8, u8, u8),
+    ) -> Result<()> {
         eprintln!("DEBUG: show_candidate_window called with width={}, height={}, candidates={}, highlighted={}", width, height, candidates.len(), highlighted_index);
-        
+
         if self.candidate_surface.is_none() {
             self.create_candidate_surface()?;
         }
-        
+
         if let Some(buffer) = self.current_buffer.take() {
             buffer.destroy();
         }
         if let Some(pool) = self.current_pool.take() {
             pool.destroy();
         }
-        
+
         let shm = self.shm.as_ref().ok_or(Error::NoShm)?;
         let surface = self.candidate_surface.as_ref().unwrap();
-        
+
         let qh = self.event_queue.handle();
-        
+
         let stride = width * 4;
         let size = stride * height;
         eprintln!("DEBUG: stride={}, size={}", stride, size);
-        
+
         let (pool, fd) = self.create_shm_pool_with_fd(shm, size)?;
         self.current_pool = Some(pool.clone());
-        
-        self.draw_candidates(&fd, width, height, candidates, highlighted_index, primary_color)?;
-        
-        eprintln!("DEBUG: About to create_buffer: offset=0, width={}, height={}, stride={}", width, height, stride);
-        let buffer = pool.create_buffer(0, width as i32, height as i32, stride as i32, wl_shm::Format::Argb8888, &qh, self.state.clone());
+
+        self.draw_candidates(
+            &fd,
+            width,
+            height,
+            candidates,
+            highlighted_index,
+            primary_color,
+        )?;
+
+        eprintln!(
+            "DEBUG: About to create_buffer: offset=0, width={}, height={}, stride={}",
+            width, height, stride
+        );
+        let buffer = pool.create_buffer(
+            0,
+            width as i32,
+            height as i32,
+            stride as i32,
+            wl_shm::Format::Argb8888,
+            &qh,
+            self.state.clone(),
+        );
         self.current_buffer = Some(buffer.clone());
         eprintln!("DEBUG: Buffer created successfully");
-        
+
         surface.attach(Some(&buffer), 0, 0);
         surface.damage_buffer(0, 0, width as i32, height as i32);
         surface.commit();
-        
-        eprintln!("DEBUG: Showed candidate window {}x{} with {} candidates", width, height, candidates.len());
+
+        eprintln!(
+            "DEBUG: Showed candidate window {}x{} with {} candidates",
+            width,
+            height,
+            candidates.len()
+        );
         Ok(())
     }
-    
-fn draw_candidates(&self, fd: &OwnedFd, width: u32, height: u32, candidates: &[CandidateItem], highlighted_index: usize, primary_color: (u8, u8, u8)) -> Result<()> {
+
+    fn draw_candidates(
+        &self,
+        fd: &OwnedFd,
+        width: u32,
+        height: u32,
+        candidates: &[CandidateItem],
+        highlighted_index: usize,
+        primary_color: (u8, u8, u8),
+    ) -> Result<()> {
         let size = (width * height * 4) as usize;
         let size_nonzero = std::num::NonZero::new(size).expect("size should be non-zero");
-        
+
         let ptr = unsafe {
             nix::sys::mman::mmap(
                 None,
@@ -606,31 +668,39 @@ fn draw_candidates(&self, fd: &OwnedFd, width: u32, height: u32, candidates: &[C
                 nix::sys::mman::MapFlags::MAP_SHARED,
                 fd,
                 0,
-            ).map_err(|e| Error::Io(std::io::Error::from_raw_os_error(e as i32)))?
+            )
+            .map_err(|e| Error::Io(std::io::Error::from_raw_os_error(e as i32)))?
         };
-        
+
         let pixels: &mut [u8] = unsafe { slice::from_raw_parts_mut(ptr.as_ptr() as *mut u8, size) };
-        
-        draw_candidates_to_buffer(pixels, width, height, candidates, highlighted_index, primary_color);
-        
+
+        draw_candidates_to_buffer(
+            pixels,
+            width,
+            height,
+            candidates,
+            highlighted_index,
+            primary_color,
+        );
+
         unsafe {
             nix::sys::mman::munmap(ptr, size)
                 .map_err(|e| Error::Io(std::io::Error::from_raw_os_error(e as i32)))?;
         }
-        
+
         Ok(())
     }
-    
+
     fn create_shm_pool_with_fd(&self, shm: &WlShm, size: u32) -> Result<(WlShmPool, OwnedFd)> {
         eprintln!("DEBUG: create_shm_pool_with_fd size={}", size);
         let qh = self.event_queue.handle();
-        
+
         let fd = Self::create_anonymous_file(size)?;
-        
+
         let pool = shm.create_pool(fd.as_fd(), size as i32, &qh, self.state.clone());
         Ok((pool, fd))
     }
-    
+
     pub fn hide_candidate_window(&mut self) {
         if let Some(surface) = &self.candidate_surface {
             surface.attach(None::<&WlBuffer>, 0, 0);
@@ -638,19 +708,33 @@ fn draw_candidates(&self, fd: &OwnedFd, width: u32, height: u32, candidates: &[C
             eprintln!("DEBUG: Hidden candidate window");
         }
     }
-    
+
     /// Show a single key root display window
     /// Displays "a: 工匚戈艹廿龷七弋戈" in a small popup
-    pub fn show_root_window(&mut self, key: char, root: &str, primary_color: (u8, u8, u8)) -> Result<()> {
-        eprintln!("DEBUG: show_root_window called for key={}, root={}", key, root);
-        
+    pub fn show_root_window(
+        &mut self,
+        key: char,
+        root: &str,
+        primary_color: (u8, u8, u8),
+    ) -> Result<()> {
+        eprintln!(
+            "DEBUG: show_root_window called for key={}, root={}",
+            key, root
+        );
+
         let width = calculate_root_width(key, root, primary_color);
         let height = 36;
-        
+
         // Use candidate_surface to display root (same surface, different content)
         let shm = self.shm.as_ref().ok_or(Error::NoShm)?;
-        let surface = self.candidate_surface.as_ref().ok_or(Error::Io(std::io::Error::new(std::io::ErrorKind::Other, "No candidate surface")))?;
-        
+        let surface = self
+            .candidate_surface
+            .as_ref()
+            .ok_or(Error::Io(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "No candidate surface",
+            )))?;
+
         // Destroy old buffer and pool
         if let Some(buffer) = self.current_buffer.take() {
             buffer.destroy();
@@ -658,40 +742,60 @@ fn draw_candidates(&self, fd: &OwnedFd, width: u32, height: u32, candidates: &[C
         if let Some(pool) = self.current_pool.take() {
             pool.destroy();
         }
-        
+
         let qh = self.event_queue.handle();
-        
+
         let stride = width * 4;
         let size = stride * height;
-        
+
         let (pool, fd) = self.create_shm_pool_with_fd(shm, size)?;
         self.current_pool = Some(pool.clone());
-        
+
         self.draw_root(&fd, width, height, key, root, primary_color)?;
-        
-        let buffer = pool.create_buffer(0, width as i32, height as i32, stride as i32, wl_shm::Format::Argb8888, &qh, self.state.clone());
+
+        let buffer = pool.create_buffer(
+            0,
+            width as i32,
+            height as i32,
+            stride as i32,
+            wl_shm::Format::Argb8888,
+            &qh,
+            self.state.clone(),
+        );
         self.current_buffer = Some(buffer.clone());
-        
+
         surface.attach(Some(&buffer), 0, 0);
         surface.damage_buffer(0, 0, width as i32, height as i32);
         surface.commit();
-        
-        self.connection.flush()
+
+        self.connection
+            .flush()
             .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
-        
-        eprintln!("DEBUG: Showed root window {}x{} for key {} (on candidate surface)", width, height, key);
+
+        eprintln!(
+            "DEBUG: Showed root window {}x{} for key {} (on candidate surface)",
+            width, height, key
+        );
         Ok(())
     }
-    
+
     pub fn hide_root_window(&mut self) {
         // No need to hide, main loop will restore candidate display
         eprintln!("DEBUG: hide_root_window called - will restore candidate on next update");
     }
-    
-    fn draw_root(&self, fd: &OwnedFd, width: u32, height: u32, key: char, root: &str, primary_color: (u8, u8, u8)) -> Result<()> {
+
+    fn draw_root(
+        &self,
+        fd: &OwnedFd,
+        width: u32,
+        height: u32,
+        key: char,
+        root: &str,
+        primary_color: (u8, u8, u8),
+    ) -> Result<()> {
         let size = (width * height * 4) as usize;
         let size_nonzero = std::num::NonZero::new(size).expect("size should be non-zero");
-        
+
         let ptr = unsafe {
             nix::sys::mman::mmap(
                 None,
@@ -700,33 +804,34 @@ fn draw_candidates(&self, fd: &OwnedFd, width: u32, height: u32, candidates: &[C
                 nix::sys::mman::MapFlags::MAP_SHARED,
                 fd.as_fd(),
                 0,
-            ).map_err(|e| Error::Io(std::io::Error::from_raw_os_error(e as i32)))?
+            )
+            .map_err(|e| Error::Io(std::io::Error::from_raw_os_error(e as i32)))?
         };
-        
+
         let pixels: &mut [u8] = unsafe { slice::from_raw_parts_mut(ptr.as_ptr() as *mut u8, size) };
-        
+
         draw_root_to_buffer(pixels, width, height, key, root, primary_color);
-        
+
         unsafe {
             nix::sys::mman::munmap(ptr, size)
                 .map_err(|e| Error::Io(std::io::Error::from_raw_os_error(e as i32)))?;
         }
-        
+
         Ok(())
     }
-    
+
     fn create_anonymous_file(size: u32) -> Result<OwnedFd> {
         let fd = nix::fcntl::open(
             &std::env::temp_dir(),
             nix::fcntl::OFlag::O_TMPFILE | nix::fcntl::OFlag::O_RDWR | nix::fcntl::OFlag::O_CLOEXEC,
             nix::sys::stat::Mode::empty(),
-        ).map_err(|e| Error::Io(std::io::Error::from_raw_os_error(e as i32)))?;
-        
+        )
+        .map_err(|e| Error::Io(std::io::Error::from_raw_os_error(e as i32)))?;
+
         let owned_fd = unsafe { OwnedFd::from_raw_fd(fd) };
         let file = std::fs::File::from(owned_fd);
         file.set_len(size as u64)?;
-        
+
         Ok(file.into())
     }
 }
-

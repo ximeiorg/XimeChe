@@ -1,7 +1,7 @@
-use std::sync::Arc;
-use crate::auth::{AuthState, AuthConfig, compute_hash};
+use crate::auth::{compute_hash, AuthConfig, AuthState};
 use crate::pair_store::PairStore;
 use crate::platform::PlatformProviders;
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct ServerState {
@@ -36,7 +36,7 @@ impl ServerState {
             providers,
         }
     }
-    
+
     pub fn with_auth_secret(providers: PlatformProviders, secret: Vec<u8>) -> Self {
         use crate::auth::AuthConfig;
         let pair_store = PairStore::load_from(providers.config_dir.config_dir());

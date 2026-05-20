@@ -1,13 +1,10 @@
 use wayland_client;
-use wayland_client::protocol::*;
-use wayland_client::{Dispatch, Proxy, QueueHandle};
 use wayland_client::globals::GlobalListContents;
 use wayland_client::protocol::wl_registry::WlRegistry;
 use wayland_client::protocol::wl_seat::WlSeat;
-use wayland_client::{
-    globals::registry_queue_init,
-    Connection, EventQueue,
-};
+use wayland_client::protocol::*;
+use wayland_client::{globals::registry_queue_init, Connection, EventQueue};
+use wayland_client::{Dispatch, Proxy, QueueHandle};
 
 pub mod __interfaces {
     use wayland_client::protocol::__interfaces::*;
@@ -19,8 +16,8 @@ use self::__interfaces::*;
 wayland_scanner::generate_client_code!("protocols/input-method-unstable-v2.xml");
 
 pub use zwp_input_method_manager_v2::ZwpInputMethodManagerV2;
-pub use zwp_input_method_v2::ZwpInputMethodV2;
 pub use zwp_input_method_v2::Event as ImEvent;
+pub use zwp_input_method_v2::ZwpInputMethodV2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum InputMethodState {
@@ -48,7 +45,8 @@ impl Dispatch<WlRegistry, GlobalListContents> for InputMethodData {
         _data: &GlobalListContents,
         _conn: &wayland_client::Connection,
         _qhandle: &QueueHandle<InputMethodData>,
-    ) {}
+    ) {
+    }
 }
 
 impl Dispatch<WlSeat, InputMethodData> for InputMethodData {
@@ -59,7 +57,8 @@ impl Dispatch<WlSeat, InputMethodData> for InputMethodData {
         _data: &InputMethodData,
         _conn: &wayland_client::Connection,
         _qhandle: &QueueHandle<InputMethodData>,
-    ) {}
+    ) {
+    }
 }
 
 impl Dispatch<ZwpInputMethodManagerV2, InputMethodData> for InputMethodData {
@@ -70,7 +69,8 @@ impl Dispatch<ZwpInputMethodManagerV2, InputMethodData> for InputMethodData {
         _data: &InputMethodData,
         _conn: &wayland_client::Connection,
         _qhandle: &QueueHandle<InputMethodData>,
-    ) {}
+    ) {
+    }
 }
 
 impl Dispatch<ZwpInputMethodV2, InputMethodData> for InputMethodData {
@@ -89,7 +89,11 @@ impl Dispatch<ZwpInputMethodV2, InputMethodData> for InputMethodData {
             ImEvent::Deactivate => {
                 state.state = InputMethodState::Inactive;
             }
-            ImEvent::SurroundingText { text, cursor, anchor } => {
+            ImEvent::SurroundingText {
+                text,
+                cursor,
+                anchor,
+            } => {
                 state.surrounding_text = Some(text);
                 state.surrounding_cursor = cursor;
                 state.surrounding_anchor = anchor;
@@ -140,22 +144,19 @@ pub struct WaylandConnection {
 
 impl WaylandConnection {
     pub fn connect() -> Result<Self> {
-        let connection = Connection::connect_to_env()
-            .map_err(|e| Error::ConnectFailed(e.to_string()))?;
+        let connection =
+            Connection::connect_to_env().map_err(|e| Error::ConnectFailed(e.to_string()))?;
 
-        let (globals, event_queue) = registry_queue_init(&connection)
-            .map_err(|e| Error::ConnectFailed(e.to_string()))?;
+        let (globals, event_queue) =
+            registry_queue_init(&connection).map_err(|e| Error::ConnectFailed(e.to_string()))?;
 
         let qh = event_queue.handle();
         let state = InputMethodData::default();
 
-        let seat: Option<WlSeat> = globals
-            .bind(&qh, 1..=8, InputMethodData::default())
-            .ok();
+        let seat: Option<WlSeat> = globals.bind(&qh, 1..=8, InputMethodData::default()).ok();
 
-        let input_method_manager: Option<ZwpInputMethodManagerV2> = globals
-            .bind(&qh, 1..=1, InputMethodData::default())
-            .ok();
+        let input_method_manager: Option<ZwpInputMethodManagerV2> =
+            globals.bind(&qh, 1..=1, InputMethodData::default()).ok();
 
         Ok(Self {
             connection,
@@ -172,7 +173,9 @@ impl WaylandConnection {
     }
 
     pub fn get_input_method_manager(&self) -> Result<&ZwpInputMethodManagerV2> {
-        self.input_method_manager.as_ref().ok_or(Error::NoInputMethodManager)
+        self.input_method_manager
+            .as_ref()
+            .ok_or(Error::NoInputMethodManager)
     }
 
     pub fn create_input_method(&mut self) -> Result<&ZwpInputMethodV2> {
@@ -185,25 +188,29 @@ impl WaylandConnection {
 
         self.sync_roundtrip()?;
 
-        self.input_method.as_ref()
+        self.input_method
+            .as_ref()
             .ok_or(Error::BindFailed("Input method not created".to_string()))
     }
 
     pub fn dispatch_events(&mut self) -> Result<()> {
         // Blocking dispatch - wait for at least one event
-        self.event_queue.roundtrip(&mut self.state)
+        self.event_queue
+            .roundtrip(&mut self.state)
             .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
         Ok(())
     }
-    
+
     pub fn dispatch_pending(&mut self) -> Result<()> {
-        self.event_queue.dispatch_pending(&mut self.state)
+        self.event_queue
+            .dispatch_pending(&mut self.state)
             .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
         Ok(())
     }
 
     pub fn sync_roundtrip(&mut self) -> Result<()> {
-        self.event_queue.roundtrip(&mut self.state)
+        self.event_queue
+            .roundtrip(&mut self.state)
             .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
         Ok(())
     }

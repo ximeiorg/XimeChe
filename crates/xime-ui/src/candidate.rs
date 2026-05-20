@@ -26,18 +26,20 @@ impl CandidateList {
     }
 
     pub fn set_candidates(&mut self, texts: Vec<(&str, Option<&str>)>, select_keys: Option<&str>) {
-        self.items = texts.iter().enumerate().map(|(i, (text, comment))| {
-            CandidateItem {
+        self.items = texts
+            .iter()
+            .enumerate()
+            .map(|(i, (text, comment))| CandidateItem {
                 text: text.to_string(),
                 comment: comment.map(|c| c.to_string()).unwrap_or_default(),
                 index: i,
-            }
-        }).collect();
-        
+            })
+            .collect();
+
         if let Some(keys) = select_keys {
             self.select_keys = keys.to_string();
         }
-        
+
         self.current_page = 0;
         self.highlighted_index = 0;
     }
@@ -159,7 +161,10 @@ mod tests {
     #[test]
     fn test_candidate_list_set_candidates() {
         let mut list = CandidateList::new(5);
-        list.set_candidates(vec![("你好", None), ("世界", Some("shijie"))], Some("12345"));
+        list.set_candidates(
+            vec![("你好", None), ("世界", Some("shijie"))],
+            Some("12345"),
+        );
         assert!(!list.is_empty());
         let info = list.get_page_info();
         assert_eq!(info.total_pages, 1);
@@ -180,11 +185,19 @@ mod tests {
     fn test_candidate_list_page_down() {
         let mut list = CandidateList::new(5);
         let candidates: Vec<(&str, Option<&str>)> = vec![
-            ("C1", None), ("C2", None), ("C3", None), ("C4", None), ("C5", None),
-            ("C6", None), ("C7", None), ("C8", None), ("C9", None), ("C10", None)
+            ("C1", None),
+            ("C2", None),
+            ("C3", None),
+            ("C4", None),
+            ("C5", None),
+            ("C6", None),
+            ("C7", None),
+            ("C8", None),
+            ("C9", None),
+            ("C10", None),
         ];
         list.set_candidates(candidates, None);
-        
+
         assert_eq!(list.get_page_info().current_page, 0);
         list.page_down();
         assert_eq!(list.get_page_info().current_page, 1);
@@ -196,11 +209,19 @@ mod tests {
     fn test_candidate_list_page_up() {
         let mut list = CandidateList::new(5);
         let candidates: Vec<(&str, Option<&str>)> = vec![
-            ("C1", None), ("C2", None), ("C3", None), ("C4", None), ("C5", None),
-            ("C6", None), ("C7", None), ("C8", None), ("C9", None), ("C10", None)
+            ("C1", None),
+            ("C2", None),
+            ("C3", None),
+            ("C4", None),
+            ("C5", None),
+            ("C6", None),
+            ("C7", None),
+            ("C8", None),
+            ("C9", None),
+            ("C10", None),
         ];
         list.set_candidates(candidates, None);
-        
+
         list.page_down();
         assert_eq!(list.get_page_info().current_page, 1);
         list.page_up();
@@ -213,7 +234,7 @@ mod tests {
     fn test_candidate_list_move_highlight_down() {
         let mut list = CandidateList::new(5);
         list.set_candidates(vec![("A", None), ("B", None), ("C", None)], None);
-        
+
         assert_eq!(list.get_page_info().highlighted_index, 0);
         list.move_highlight(MoveDirection::Down);
         assert_eq!(list.get_page_info().highlighted_index, 1);
@@ -227,7 +248,7 @@ mod tests {
     fn test_candidate_list_move_highlight_up() {
         let mut list = CandidateList::new(5);
         list.set_candidates(vec![("A", None), ("B", None), ("C", None)], None);
-        
+
         list.move_highlight(MoveDirection::Down);
         list.move_highlight(MoveDirection::Down);
         assert_eq!(list.get_page_info().highlighted_index, 2);
@@ -243,7 +264,7 @@ mod tests {
     fn test_candidate_list_select_highlighted() {
         let mut list = CandidateList::new(5);
         list.set_candidates(vec![("你好", None), ("世界", None)], None);
-        
+
         assert_eq!(list.select_highlighted(), Some("你好"));
         list.move_highlight(MoveDirection::Down);
         assert_eq!(list.select_highlighted(), Some("世界"));
@@ -252,8 +273,11 @@ mod tests {
     #[test]
     fn test_candidate_list_select_by_key() {
         let mut list = CandidateList::new(5);
-        list.set_candidates(vec![("你好", None), ("世界", None), ("测试", None)], Some("123"));
-        
+        list.set_candidates(
+            vec![("你好", None), ("世界", None), ("测试", None)],
+            Some("123"),
+        );
+
         assert_eq!(list.select_by_key('1'), Some("你好"));
         assert_eq!(list.select_by_key('2'), Some("世界"));
         assert_eq!(list.select_by_key('3'), Some("测试"));
@@ -264,14 +288,22 @@ mod tests {
     fn test_candidate_list_select_by_key_with_pagination() {
         let mut list = CandidateList::new(5);
         let candidates: Vec<(&str, Option<&str>)> = vec![
-            ("C0", None), ("C1", None), ("C2", None), ("C3", None), ("C4", None),
-            ("C5", None), ("C6", None), ("C7", None), ("C8", None), ("C9", None)
+            ("C0", None),
+            ("C1", None),
+            ("C2", None),
+            ("C3", None),
+            ("C4", None),
+            ("C5", None),
+            ("C6", None),
+            ("C7", None),
+            ("C8", None),
+            ("C9", None),
         ];
         list.set_candidates(candidates, Some("12345"));
-        
+
         assert_eq!(list.select_by_key('1'), Some("C0"));
         assert_eq!(list.select_by_key('5'), Some("C4"));
-        
+
         list.page_down();
         assert_eq!(list.select_by_key('1'), Some("C5"));
         assert_eq!(list.select_by_key('5'), Some("C9"));
@@ -281,12 +313,21 @@ mod tests {
     fn test_candidate_list_get_page_info() {
         let mut list = CandidateList::new(5);
         let candidates: Vec<(&str, Option<&str>)> = vec![
-            ("C0", None), ("C1", None), ("C2", None), ("C3", None), ("C4", None),
-            ("C5", None), ("C6", None), ("C7", None), ("C8", None), ("C9", None),
-            ("C10", None), ("C11", None)
+            ("C0", None),
+            ("C1", None),
+            ("C2", None),
+            ("C3", None),
+            ("C4", None),
+            ("C5", None),
+            ("C6", None),
+            ("C7", None),
+            ("C8", None),
+            ("C9", None),
+            ("C10", None),
+            ("C11", None),
         ];
         list.set_candidates(candidates, Some("abcdef"));
-        
+
         let info = list.get_page_info();
         assert_eq!(info.page_size, 5);
         assert_eq!(info.current_page, 0);
@@ -294,7 +335,7 @@ mod tests {
         assert!(!info.is_last_page);
         assert_eq!(info.highlighted_index, 0);
         assert_eq!(info.select_keys, "abcdef");
-        
+
         list.page_down();
         list.page_down();
         let info = list.get_page_info();
@@ -306,14 +347,22 @@ mod tests {
     fn test_candidate_list_page_reset_on_set() {
         let mut list = CandidateList::new(5);
         let candidates: Vec<(&str, Option<&str>)> = vec![
-            ("C0", None), ("C1", None), ("C2", None), ("C3", None), ("C4", None),
-            ("C5", None), ("C6", None), ("C7", None), ("C8", None), ("C9", None)
+            ("C0", None),
+            ("C1", None),
+            ("C2", None),
+            ("C3", None),
+            ("C4", None),
+            ("C5", None),
+            ("C6", None),
+            ("C7", None),
+            ("C8", None),
+            ("C9", None),
         ];
         list.set_candidates(candidates, None);
-        
+
         list.page_down();
         assert_eq!(list.get_page_info().current_page, 1);
-        
+
         list.set_candidates(vec![("新候选", None)], None);
         assert_eq!(list.get_page_info().current_page, 0);
         assert_eq!(list.get_page_info().highlighted_index, 0);
@@ -344,14 +393,33 @@ mod tests {
     #[test]
     fn test_page_info_total_pages_calculation() {
         let mut list = CandidateList::new(5);
-        
+
         list.set_candidates(vec![("A", None)], None);
         assert_eq!(list.get_page_info().total_pages, 1);
-        
-        list.set_candidates(vec![("A", None), ("B", None), ("C", None), ("D", None), ("E", None)], None);
+
+        list.set_candidates(
+            vec![
+                ("A", None),
+                ("B", None),
+                ("C", None),
+                ("D", None),
+                ("E", None),
+            ],
+            None,
+        );
         assert_eq!(list.get_page_info().total_pages, 1);
-        
-        list.set_candidates(vec![("A", None), ("B", None), ("C", None), ("D", None), ("E", None), ("F", None)], None);
+
+        list.set_candidates(
+            vec![
+                ("A", None),
+                ("B", None),
+                ("C", None),
+                ("D", None),
+                ("E", None),
+                ("F", None),
+            ],
+            None,
+        );
         assert_eq!(list.get_page_info().total_pages, 2);
     }
 }

@@ -1,9 +1,9 @@
-use zbus::Connection;
-use zbus::object_server::InterfaceRef;
-use tracing::debug;
-use crate::{StatusNotifierItem, DBusMenu, InputMode, MenuAction};
 use crate::sni::StatusNotifierItemSignals;
+use crate::{DBusMenu, InputMode, MenuAction, StatusNotifierItem};
 use tokio::sync::mpsc::{channel, Receiver};
+use tracing::debug;
+use zbus::object_server::InterfaceRef;
+use zbus::Connection;
 
 const SNI_WATCHER_SERVICE: &str = "org.kde.StatusNotifierWatcher";
 const SNI_WATCHER_OBJECT: &str = "/StatusNotifierWatcher";
@@ -16,40 +16,58 @@ pub struct TrayManager {
 }
 
 impl TrayManager {
-    pub async fn register(connection: &Connection) -> zbus::Result<(Self, Receiver<()>, Receiver<MenuAction>)> {
+    pub async fn register(
+        connection: &Connection,
+    ) -> zbus::Result<(Self, Receiver<()>, Receiver<MenuAction>)> {
         let (toggle_tx, toggle_rx) = channel::<()>(1);
         let (action_tx, action_rx) = channel::<MenuAction>(1);
-        
-        connection.object_server().at(MENU_OBJECT, DBusMenu::with_action_channel(action_tx)).await?;
-        connection.object_server().at(SNI_OBJECT, StatusNotifierItem::with_toggle_channel(toggle_tx)).await?;
-        
-        let sni_ref = connection.object_server()
-            .interface::<_, StatusNotifierItem>(SNI_OBJECT).await?;
-        
-        connection.call_method(
-            Some(SNI_WATCHER_SERVICE),
-            SNI_WATCHER_OBJECT,
-            Some(SNI_WATCHER_INTERFACE),
-            "RegisterStatusNotifierItem",
-            &(connection.unique_name().map(|n| n.to_string()).unwrap_or_default()),
-        ).await?;
-        
+
+        connection
+            .object_server()
+            .at(MENU_OBJECT, DBusMenu::with_action_channel(action_tx))
+            .await?;
+        connection
+            .object_server()
+            .at(
+                SNI_OBJECT,
+                StatusNotifierItem::with_toggle_channel(toggle_tx),
+            )
+            .await?;
+
+        let sni_ref = connection
+            .object_server()
+            .interface::<_, StatusNotifierItem>(SNI_OBJECT)
+            .await?;
+
+        connection
+            .call_method(
+                Some(SNI_WATCHER_SERVICE),
+                SNI_WATCHER_OBJECT,
+                Some(SNI_WATCHER_INTERFACE),
+                "RegisterStatusNotifierItem",
+                &(connection
+                    .unique_name()
+                    .map(|n| n.to_string())
+                    .unwrap_or_default()),
+            )
+            .await?;
+
         debug!("SNI registered successfully (initially hidden)");
         Ok((Self { sni_ref }, toggle_rx, action_rx))
     }
-    
+
     pub async fn set_mode(&self, mode: InputMode) {
         let iface = self.sni_ref.get_mut().await;
         iface.set_mode(mode);
         self.sni_ref.new_icon().await.ok();
         self.sni_ref.new_tool_tip().await.ok();
     }
-    
+
     pub async fn set_visible(&self, visible: bool) {
         let iface = self.sni_ref.get_mut().await;
         let was_visible = iface.is_visible();
         iface.set_visible(visible);
-        
+
         if was_visible != visible {
             let status = if visible { "Active" } else { "Passive" };
             self.sni_ref.new_status(status).await.ok();
@@ -59,12 +77,12 @@ impl TrayManager {
             debug!("Tray visibility changed to {}", status);
         }
     }
-    
+
     pub async fn get_mode(&self) -> InputMode {
         let iface = self.sni_ref.get().await;
         iface.get_mode()
     }
-    
+
     pub async fn set_primary_color(&self, color: (u8, u8, u8)) {
         let iface = self.sni_ref.get_mut().await;
         iface.set_primary_color(color);

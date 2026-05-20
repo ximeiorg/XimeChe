@@ -1,5 +1,5 @@
-use thiserror::Error;
 use std::ffi::NulError;
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {
