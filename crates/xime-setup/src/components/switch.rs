@@ -12,14 +12,19 @@ pub struct Switch {
 
 impl Switch {
     pub fn new(checked: bool) -> Self {
-        Self { checked, on_change: None, primary: None, bg_off: None }
+        Self {
+            checked,
+            on_change: None,
+            primary: None,
+            bg_off: None,
+        }
     }
-    
+
     pub fn on_change(mut self, callback: impl Fn(bool, &mut Window, &mut App) + 'static) -> Self {
         self.on_change = Some(Arc::new(callback));
         self
     }
-    
+
     pub fn theme(mut self, primary: Hsla, bg_off: Hsla) -> Self {
         self.primary = Some(primary);
         self.bg_off = Some(bg_off);
@@ -48,14 +53,10 @@ impl IntoElement for Switch {
             .flex()
             .items_center()
             .when(checked, |this: Stateful<Div>| {
-                this.bg(primary)
-                    .justify_end()
-                    .pr(padding)
+                this.bg(primary).justify_end().pr(padding)
             })
             .when(!checked, |this: Stateful<Div>| {
-                this.bg(bg_off)
-                    .justify_start()
-                    .pl(padding)
+                this.bg(bg_off).justify_start().pl(padding)
             })
             .cursor_pointer()
             .when_some(on_change, |this: Stateful<Div>, cb| {
@@ -68,7 +69,7 @@ impl IntoElement for Switch {
                     .w(knob_size)
                     .h(knob_size)
                     .rounded(px(10.0))
-                    .bg(white())
+                    .bg(white()),
             )
     }
 }

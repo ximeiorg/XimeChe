@@ -1,6 +1,6 @@
-use gpui::{prelude::FluentBuilder, *};
-use crate::components::{Switch, Dropdown, NumberInput, Button, Kbd, Label};
+use crate::components::{Button, Dropdown, Kbd, Label, NumberInput, Switch};
 use crate::theme::ThemeColors;
+use gpui::{prelude::FluentBuilder, *};
 
 pub struct SettingsItem {
     label: String,
@@ -49,27 +49,39 @@ impl SettingsItem {
     pub fn render(&self, colors: &ThemeColors) -> Div {
         let control_element: AnyElement = match &self.control {
             SettingsControl::Switch(s) => {
-                let themed = s.clone()
-                    .theme(colors.primary, colors.disabled);
+                let themed = s.clone().theme(colors.primary, colors.disabled);
                 themed.into_any_element()
-            },
+            }
             SettingsControl::Dropdown(d) => d.clone().into_any_element(),
             SettingsControl::NumberInput(n) => {
-                let themed = n.clone()
-                    .theme(colors.surface_variant, colors.border_variant, colors.foreground, colors.surface_variant, colors.foreground_muted);
+                let themed = n.clone().theme(
+                    colors.surface_variant,
+                    colors.border_variant,
+                    colors.foreground,
+                    colors.primary,
+                    colors.surface_variant,
+                    colors.foreground_muted,
+                );
                 themed.into_any_element()
-            },
-            SettingsControl::Button(b) => b.clone().into_any_element(),
+            }
+            SettingsControl::Button(b) => {
+                let themed =
+                    b.clone()
+                        .theme(colors.primary, colors.primary_hover, colors.on_primary);
+                themed.into_any_element()
+            }
             SettingsControl::Kbd(k) => {
-                let themed = k.clone()
-                    .theme(colors.surface_variant, colors.border_variant, colors.foreground);
+                let themed = k.clone().theme(
+                    colors.surface_variant,
+                    colors.border_variant,
+                    colors.foreground,
+                );
                 themed.into_any_element()
-            },
+            }
             SettingsControl::Label(l) => {
-                let themed = l.clone()
-                    .theme(colors.foreground);
+                let themed = l.clone().theme(colors.foreground);
                 themed.into_any_element()
-            },
+            }
             SettingsControl::Custom => div().into_any_element(),
         };
 
@@ -88,24 +100,29 @@ impl SettingsItem {
                         div()
                             .text_size(px(14.0))
                             .text_color(colors.foreground)
-                            .child(self.label.clone())
+                            .child(self.label.clone()),
                     )
                     .when_some(self.description.clone(), |this: Div, desc| {
                         this.child(
                             div()
                                 .text_size(px(12.0))
                                 .text_color(colors.foreground_muted)
-                                .child(desc)
+                                .child(desc),
                         )
-                    })
+                    }),
             )
             .child(control_element)
     }
-    
-    pub fn render_custom(colors: &ThemeColors, label: impl Into<String>, description: Option<impl Into<String>>, content: impl IntoElement) -> Div {
+
+    pub fn render_custom(
+        colors: &ThemeColors,
+        label: impl Into<String>,
+        description: Option<impl Into<String>>,
+        content: impl IntoElement,
+    ) -> Div {
         let label = label.into();
         let description = description.map(|d| d.into());
-        
+
         div()
             .flex()
             .flex_col()
@@ -121,16 +138,16 @@ impl SettingsItem {
                         div()
                             .text_size(px(14.0))
                             .text_color(colors.foreground)
-                            .child(label)
+                            .child(label),
                     )
                     .when_some(description, |this: Div, desc| {
                         this.child(
                             div()
                                 .text_size(px(12.0))
                                 .text_color(colors.foreground_muted)
-                                .child(desc)
+                                .child(desc),
                         )
-                    })
+                    }),
             )
             .child(content)
     }
@@ -150,12 +167,15 @@ impl SettingsControl {
     pub fn is_custom(&self) -> bool {
         matches!(self, SettingsControl::Custom)
     }
-    
+
     pub fn switch(checked: bool) -> Self {
         SettingsControl::Switch(Switch::new(checked))
     }
-    
-    pub fn switch_with(checked: bool, on_change: impl Fn(bool, &mut Window, &mut App) + 'static) -> Self {
+
+    pub fn switch_with(
+        checked: bool,
+        on_change: impl Fn(bool, &mut Window, &mut App) + 'static,
+    ) -> Self {
         SettingsControl::Switch(Switch::new(checked).on_change(on_change))
     }
 
@@ -166,16 +186,22 @@ impl SettingsControl {
     pub fn number_input(value: f64) -> Self {
         SettingsControl::NumberInput(NumberInput::new(value))
     }
-    
-    pub fn number_input_with(value: f64, on_change: impl Fn(f64, &mut Window, &mut App) + 'static) -> Self {
+
+    pub fn number_input_with(
+        value: f64,
+        on_change: impl Fn(f64, &mut Window, &mut App) + 'static,
+    ) -> Self {
         SettingsControl::NumberInput(NumberInput::new(value).on_change(on_change))
     }
 
     pub fn button(label: impl Into<String>) -> Self {
         SettingsControl::Button(Button::new(label))
     }
-    
-    pub fn button_with(label: impl Into<String>, on_click: impl Fn(&mut Window, &mut App) + 'static) -> Self {
+
+    pub fn button_with(
+        label: impl Into<String>,
+        on_click: impl Fn(&mut Window, &mut App) + 'static,
+    ) -> Self {
         SettingsControl::Button(Button::new(label).on_click(on_click))
     }
 
@@ -202,7 +228,13 @@ pub struct SettingsGroup {
 
 impl SettingsGroup {
     pub fn new(title: impl Into<String>, colors: ThemeColors) -> Self {
-        Self { title: title.into(), description: None, items: vec![], custom_items: vec![], colors }
+        Self {
+            title: title.into(),
+            description: None,
+            items: vec![],
+            custom_items: vec![],
+            colors,
+        }
     }
 
     pub fn description(mut self, desc: impl Into<String>) -> Self {
@@ -214,7 +246,7 @@ impl SettingsGroup {
         self.items = items;
         self
     }
-    
+
     pub fn custom_item(mut self, item: Div) -> Self {
         self.custom_items.push(item);
         self
@@ -245,16 +277,16 @@ impl IntoElement for SettingsGroup {
                             .text_size(px(16.0))
                             .font_weight(FontWeight::BOLD)
                             .text_color(self.colors.foreground)
-                            .child(self.title)
+                            .child(self.title),
                     )
                     .when_some(self.description, |this, desc| {
                         this.child(
                             div()
                                 .text_size(px(12.0))
                                 .text_color(self.colors.foreground_muted)
-                                .child(desc)
+                                .child(desc),
                         )
-                    })
+                    }),
             )
             .children(self.items.iter().map(|item| item.render(&self.colors)))
             .children(self.custom_items)
@@ -269,7 +301,11 @@ pub struct SettingsPage {
 
 impl SettingsPage {
     pub fn new(title: impl Into<String>, colors: ThemeColors) -> Self {
-        Self { title: title.into(), groups: vec![], colors }
+        Self {
+            title: title.into(),
+            groups: vec![],
+            colors,
+        }
     }
 
     pub fn group(mut self, group: SettingsGroup) -> Self {
@@ -299,7 +335,7 @@ impl IntoElement for SettingsPage {
                     .font_weight(FontWeight::BOLD)
                     .text_color(self.colors.foreground)
                     .pb(px(8.0))
-                    .child(self.title)
+                    .child(self.title),
             )
             .children(self.groups)
     }

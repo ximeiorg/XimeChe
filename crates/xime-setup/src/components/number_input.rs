@@ -12,6 +12,7 @@ pub struct NumberInput {
     bg: Option<Hsla>,
     border_color: Option<Hsla>,
     text_color: Option<Hsla>,
+    primary_color: Option<Hsla>,
     btn_hover_bg: Option<Hsla>,
     disabled_color: Option<Hsla>,
 }
@@ -27,35 +28,45 @@ impl NumberInput {
             bg: None,
             border_color: None,
             text_color: None,
+            primary_color: None,
             btn_hover_bg: None,
             disabled_color: None,
         }
     }
-    
+
     pub fn min(mut self, min: f64) -> Self {
         self.min = min;
         self
     }
-    
+
     pub fn max(mut self, max: f64) -> Self {
         self.max = max;
         self
     }
-    
+
     pub fn step(mut self, step: f64) -> Self {
         self.step = step;
         self
     }
-    
+
     pub fn on_change(mut self, callback: impl Fn(f64, &mut Window, &mut App) + 'static) -> Self {
         self.on_change = Some(Arc::new(callback));
         self
     }
-    
-    pub fn theme(mut self, bg: Hsla, border: Hsla, text: Hsla, hover: Hsla, disabled: Hsla) -> Self {
+
+    pub fn theme(
+        mut self,
+        bg: Hsla,
+        border: Hsla,
+        text: Hsla,
+        primary: Hsla,
+        hover: Hsla,
+        disabled: Hsla,
+    ) -> Self {
         self.bg = Some(bg);
         self.border_color = Some(border);
         self.text_color = Some(text);
+        self.primary_color = Some(primary);
         self.btn_hover_bg = Some(hover);
         self.disabled_color = Some(disabled);
         self
@@ -66,19 +77,19 @@ impl IntoElement for NumberInput {
     type Element = Div;
 
     fn into_element(self) -> Self::Element {
-        let primary = rgb(0x8F73E2);
+        let primary = self.primary_color.unwrap_or(rgb(0x8F73E2).into());
         let bg = self.bg.unwrap_or(rgb(0x262626).into());
         let border = self.border_color.unwrap_or(rgb(0x404040).into());
         let text = self.text_color.unwrap_or(rgb(0xe0e0e0).into());
         let hover_bg = self.btn_hover_bg.unwrap_or(rgb(0x404040).into());
         let disabled = self.disabled_color.unwrap_or(rgb(0x808080).into());
-        
+
         let value = self.value;
         let min = self.min;
         let max = self.max;
         let step = self.step;
         let on_change = self.on_change.clone();
-        
+
         div()
             .flex()
             .items_center()
@@ -101,9 +112,7 @@ impl IntoElement for NumberInput {
                     .cursor_pointer()
                     .hover(|style| style.bg(hover_bg))
                     .text_size(px(16.0))
-                    .when(value > min, |this: Stateful<Div>| {
-                        this.text_color(text)
-                    })
+                    .when(value > min, |this: Stateful<Div>| this.text_color(text))
                     .when(value <= min, |this: Stateful<Div>| {
                         this.text_color(disabled)
                     })
@@ -113,7 +122,7 @@ impl IntoElement for NumberInput {
                             cb(new_value, window, cx);
                         })
                     })
-                    .child("-")
+                    .child("-"),
             )
             .child(
                 div()
@@ -125,7 +134,7 @@ impl IntoElement for NumberInput {
                     .text_size(px(14.0))
                     .text_color(primary)
                     .font_weight(FontWeight::MEDIUM)
-                    .child(format!("{}", value as i32))
+                    .child(format!("{}", value as i32)),
             )
             .child(
                 div()
@@ -139,9 +148,7 @@ impl IntoElement for NumberInput {
                     .cursor_pointer()
                     .hover(|style| style.bg(hover_bg))
                     .text_size(px(16.0))
-                    .when(value < max, |this: Stateful<Div>| {
-                        this.text_color(text)
-                    })
+                    .when(value < max, |this: Stateful<Div>| this.text_color(text))
                     .when(value >= max, |this: Stateful<Div>| {
                         this.text_color(disabled)
                     })
@@ -151,7 +158,7 @@ impl IntoElement for NumberInput {
                             cb(new_value, window, cx);
                         })
                     })
-                    .child("+")
+                    .child("+"),
             )
     }
 }

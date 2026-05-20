@@ -70,7 +70,10 @@ pub struct KeyEvent {
 
 impl KeyEvent {
     pub fn new(key_code: KeyCode, modifiers: Modifier) -> Self {
-        Self { key_code, modifiers }
+        Self {
+            key_code,
+            modifiers,
+        }
     }
 
     pub fn from_char(c: char) -> Self {
@@ -81,7 +84,10 @@ impl KeyEvent {
             ' ' => XK_SPACE,
             _ => c as KeyCode,
         };
-        Self { key_code, modifiers: 0 }
+        Self {
+            key_code,
+            modifiers: 0,
+        }
     }
 }
 

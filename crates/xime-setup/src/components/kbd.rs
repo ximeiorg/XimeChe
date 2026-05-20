@@ -10,9 +10,14 @@ pub struct Kbd {
 
 impl Kbd {
     pub fn new(key: impl Into<String>) -> Self {
-        Self { key: key.into(), bg: None, border: None, text: None }
+        Self {
+            key: key.into(),
+            bg: None,
+            border: None,
+            text: None,
+        }
     }
-    
+
     pub fn theme(mut self, bg: Hsla, border: Hsla, text: Hsla) -> Self {
         self.bg = Some(bg);
         self.border = Some(border);

@@ -1,6 +1,6 @@
-use cosmic_text::{FontSystem, SwashCache, Buffer, Metrics, Attrs, Color, Shaping, Family, fontdb};
-use tiny_skia::{Pixmap, Paint, PathBuilder, FillRule};
 use crate::candidate::CandidateItem;
+use cosmic_text::{fontdb, Attrs, Buffer, Color, Family, FontSystem, Metrics, Shaping, SwashCache};
+use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap};
 
 const SHADOW_OFFSET_X: f32 = 2.0;
 const SHADOW_OFFSET_Y: f32 = 4.0;
@@ -19,7 +19,10 @@ impl CandidateRenderer {
         let font_source = fontdb::Source::Binary(std::sync::Arc::new(VIVO_FONT));
         let font_system = FontSystem::new_with_fonts([font_source]);
         let swash_cache = SwashCache::new();
-        Self { font_system, swash_cache }
+        Self {
+            font_system,
+            swash_cache,
+        }
     }
 
     pub fn calculate_width(&mut self, candidates: &[CandidateItem]) -> u32 {
@@ -41,7 +44,15 @@ impl CandidateRenderer {
         (total_width.ceil() as u32).max(100)
     }
 
-    pub fn draw_candidates(&mut self, pixels: &mut [u8], width: u32, height: u32, candidates: &[CandidateItem], highlighted_index: usize, primary_color: (u8, u8, u8)) {
+    pub fn draw_candidates(
+        &mut self,
+        pixels: &mut [u8],
+        width: u32,
+        height: u32,
+        candidates: &[CandidateItem],
+        highlighted_index: usize,
+        primary_color: (u8, u8, u8),
+    ) {
         if candidates.is_empty() {
             return;
         }
@@ -49,21 +60,40 @@ impl CandidateRenderer {
         let mut pixmap = Pixmap::new(width, height).expect("Failed to create pixmap");
 
         // First calculate all widths
-        let widths: Vec<f32> = candidates.iter().enumerate().map(|(idx, c)| {
-            let main_text = format!("{}. {}", idx + 1, c.text);
-            let w = self.measure_text_width(&main_text, 16.0);
-            let comment_w = if !c.comment.is_empty() {
-                self.measure_text_width(&c.comment, 12.0) + 5.0
-            } else {
-                0.0
-            };
-            w + comment_w + 23.0
-        }).collect();
+        let widths: Vec<f32> = candidates
+            .iter()
+            .enumerate()
+            .map(|(idx, c)| {
+                let main_text = format!("{}. {}", idx + 1, c.text);
+                let w = self.measure_text_width(&main_text, 16.0);
+                let comment_w = if !c.comment.is_empty() {
+                    self.measure_text_width(&c.comment, 12.0) + 5.0
+                } else {
+                    0.0
+                };
+                w + comment_w + 23.0
+            })
+            .collect();
 
         self.draw_shadow(&mut pixmap, width, height);
         self.draw_background(&mut pixmap, width, height);
-        self.draw_highlight(&mut pixmap, width, height, candidates, highlighted_index, &widths, primary_color);
-        self.draw_text(&mut pixmap, width, height, candidates, highlighted_index, &widths);
+        self.draw_highlight(
+            &mut pixmap,
+            width,
+            height,
+            candidates,
+            highlighted_index,
+            &widths,
+            primary_color,
+        );
+        self.draw_text(
+            &mut pixmap,
+            width,
+            height,
+            candidates,
+            highlighted_index,
+            &widths,
+        );
 
         let data = pixmap.data();
         for i in (0..data.len()).step_by(4) {
@@ -120,7 +150,10 @@ impl CandidateRenderer {
         border_paint.set_color_rgba8(0xE0, 0xE0, 0xE0, 0xFF);
         border_paint.anti_alias = true;
 
-        let stroke = tiny_skia::Stroke { width: border_width, ..Default::default() };
+        let stroke = tiny_skia::Stroke {
+            width: border_width,
+            ..Default::default()
+        };
         pixmap.stroke_path(
             &rounded_rect,
             &border_paint,
@@ -130,7 +163,16 @@ impl CandidateRenderer {
         );
     }
 
-    fn draw_highlight(&mut self, pixmap: &mut Pixmap, _width: u32, height: u32, candidates: &[CandidateItem], highlighted_index: usize, widths: &[f32], primary_color: (u8, u8, u8)) {
+    fn draw_highlight(
+        &mut self,
+        pixmap: &mut Pixmap,
+        _width: u32,
+        height: u32,
+        candidates: &[CandidateItem],
+        highlighted_index: usize,
+        widths: &[f32],
+        primary_color: (u8, u8, u8),
+    ) {
         if candidates.is_empty() || highlighted_index >= candidates.len() {
             return;
         }
@@ -171,7 +213,15 @@ impl CandidateRenderer {
         );
     }
 
-    fn draw_text(&mut self, pixmap: &mut Pixmap, _width: u32, height: u32, candidates: &[CandidateItem], highlighted_index: usize, widths: &[f32]) {
+    fn draw_text(
+        &mut self,
+        pixmap: &mut Pixmap,
+        _width: u32,
+        height: u32,
+        candidates: &[CandidateItem],
+        highlighted_index: usize,
+        widths: &[f32],
+    ) {
         let line_height = 20.0f32;
         let y_offset = ((height as f32 - line_height) / 2.0).max(0.0) as i32;
 
@@ -196,15 +246,26 @@ impl CandidateRenderer {
 
             let main_text = format!("{}. {}", idx + 1, candidate.text);
             let main_width = self.draw_text_item(
-                &main_text, 16.0, main_color, x_offset as i32, y_offset,
-                pixmap.data_mut(), pixmap_width, pixmap_height
+                &main_text,
+                16.0,
+                main_color,
+                x_offset as i32,
+                y_offset,
+                pixmap.data_mut(),
+                pixmap_width,
+                pixmap_height,
             );
 
-let _comment_width = if !candidate.comment.is_empty() {
+            let _comment_width = if !candidate.comment.is_empty() {
                 self.draw_text_item(
-                    &candidate.comment, 12.0, comment_color,
-                    (x_offset + main_width + 3.0) as i32, y_offset + 4,
-                    pixmap.data_mut(), pixmap_width, pixmap_height
+                    &candidate.comment,
+                    12.0,
+                    comment_color,
+                    (x_offset + main_width + 3.0) as i32,
+                    y_offset + 4,
+                    pixmap.data_mut(),
+                    pixmap_width,
+                    pixmap_height,
                 )
             } else {
                 0.0
@@ -232,14 +293,25 @@ let _comment_width = if !candidate.comment.is_empty() {
         buffer.set_text(text, &attrs, Shaping::Advanced, None);
         buffer.shape_until_scroll(&mut self.font_system, false);
 
-        let text_width = buffer.layout_runs().fold(0.0f32, |max_w, run| max_w.max(run.line_w));
+        let text_width = buffer
+            .layout_runs()
+            .fold(0.0f32, |max_w, run| max_w.max(run.line_w));
 
         buffer.draw(
             &mut self.font_system,
             &mut self.swash_cache,
             color,
             |x, y, w, h, color| {
-                blend_glyph(pixmap_data, x as i32 + x_start, y + y_offset, w as i32, h as i32, color, pixmap_width, pixmap_height);
+                blend_glyph(
+                    pixmap_data,
+                    x as i32 + x_start,
+                    y + y_offset,
+                    w as i32,
+                    h as i32,
+                    color,
+                    pixmap_width,
+                    pixmap_height,
+                );
             },
         );
 
@@ -253,7 +325,9 @@ let _comment_width = if !candidate.comment.is_empty() {
         buffer.set_text(text, &attrs, Shaping::Advanced, None);
         buffer.shape_until_scroll(&mut self.font_system, false);
 
-        buffer.layout_runs().fold(0.0f32, |max_w, run| max_w.max(run.line_w))
+        buffer
+            .layout_runs()
+            .fold(0.0f32, |max_w, run| max_w.max(run.line_w))
     }
 }
 
@@ -263,7 +337,16 @@ impl Default for CandidateRenderer {
     }
 }
 
-fn blend_glyph(pixmap_data: &mut [u8], x: i32, y: i32, w: i32, h: i32, color: Color, width: usize, height: usize) {
+fn blend_glyph(
+    pixmap_data: &mut [u8],
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    color: Color,
+    width: usize,
+    height: usize,
+) {
     for gy in 0..h as usize {
         for gx in 0..w as usize {
             let px = x as usize + gx;
@@ -315,9 +398,23 @@ fn build_rounded_rect(x: f32, y: f32, w: f32, h: f32, r: f32) -> tiny_skia::Path
     pb.finish().unwrap()
 }
 
-pub fn draw_candidates_to_buffer(pixels: &mut [u8], width: u32, height: u32, candidates: &[CandidateItem], highlighted_index: usize, primary_color: (u8, u8, u8)) {
+pub fn draw_candidates_to_buffer(
+    pixels: &mut [u8],
+    width: u32,
+    height: u32,
+    candidates: &[CandidateItem],
+    highlighted_index: usize,
+    primary_color: (u8, u8, u8),
+) {
     let mut renderer = CandidateRenderer::new();
-    renderer.draw_candidates(pixels, width, height, candidates, highlighted_index, primary_color);
+    renderer.draw_candidates(
+        pixels,
+        width,
+        height,
+        candidates,
+        highlighted_index,
+        primary_color,
+    );
 }
 
 pub fn calculate_candidate_width(candidates: &[CandidateItem]) -> u32 {
@@ -334,9 +431,21 @@ mod tests {
         let mut renderer = CandidateRenderer::new();
 
         let candidates: Vec<CandidateItem> = vec![
-            CandidateItem { text: "式".to_string(), comment: "aa".to_string(), index: 0 },
-            CandidateItem { text: "是".to_string(), comment: "bb".to_string(), index: 1 },
-            CandidateItem { text: "时".to_string(), comment: "cc".to_string(), index: 2 },
+            CandidateItem {
+                text: "式".to_string(),
+                comment: "aa".to_string(),
+                index: 0,
+            },
+            CandidateItem {
+                text: "是".to_string(),
+                comment: "bb".to_string(),
+                index: 1,
+            },
+            CandidateItem {
+                text: "时".to_string(),
+                comment: "cc".to_string(),
+                index: 2,
+            },
         ];
         let width = renderer.calculate_width(&candidates);
         eprintln!("Width with comments: {}", width);
@@ -373,18 +482,20 @@ mod tests {
     #[test]
     fn test_draw_candidates_with_custom_color() {
         let mut renderer = CandidateRenderer::new();
-        
-        let candidates: Vec<CandidateItem> = vec![
-            CandidateItem { text: "测试".to_string(), comment: "".to_string(), index: 0 },
-        ];
-        
+
+        let candidates: Vec<CandidateItem> = vec![CandidateItem {
+            text: "测试".to_string(),
+            comment: "".to_string(),
+            index: 0,
+        }];
+
         let width = 200;
         let height = 36;
         let primary_color = (0x1A, 0x73, 0xE8);
-        
+
         let mut pixels = vec![0u8; width as usize * height as usize * 4];
         renderer.draw_candidates(&mut pixels, width, height, &candidates, 0, primary_color);
-        
+
         assert!(!pixels.is_empty());
         assert!(pixels.len() == width as usize * height as usize * 4);
     }
@@ -392,24 +503,24 @@ mod tests {
     #[test]
     fn test_draw_candidates_empty() {
         let mut renderer = CandidateRenderer::new();
-        
+
         let candidates: Vec<CandidateItem> = vec![];
         let primary_color = (0x8F, 0x73, 0xE2);
-        
+
         let mut pixels = vec![0u8; 100 * 36 * 4];
         renderer.draw_candidates(&mut pixels, 100, 36, &candidates, 0, primary_color);
-        
+
         assert!(!pixels.is_empty());
     }
 
     #[test]
     fn test_draw_highlight_primary_color_applied() {
         let primary_color = (0xC6, 0x28, 0x28);
-        
+
         let r = primary_color.0;
         let g = primary_color.1;
         let b = primary_color.2;
-        
+
         assert_eq!(r, 198);
         assert_eq!(g, 40);
         assert_eq!(b, 40);

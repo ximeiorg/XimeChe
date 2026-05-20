@@ -1,6 +1,9 @@
-use gpui::*;
+use crate::rime_config::{
+    deploy_all, RimeConfigManager, SchemaConfig, SchemaConfigManager, SchemaInfo, SchemaManager,
+    XimeStyleManager,
+};
 use crate::theme::{SystemTheme, ThemeColors};
-use crate::rime_config::{RimeConfigManager, SchemaManager, SchemaConfig, SchemaConfigManager, deploy_all, SchemaInfo, XimeStyleManager};
+use gpui::*;
 
 pub struct SettingsState {
     pub appearance: AppearanceState,
@@ -44,7 +47,8 @@ impl SettingsState {
         if self.input_schema.selected_schema >= self.input_schema.available_schemas.len() {
             return;
         }
-        let schema_id = &self.input_schema.available_schemas[self.input_schema.selected_schema].schema_id;
+        let schema_id =
+            &self.input_schema.available_schemas[self.input_schema.selected_schema].schema_id;
         if let Ok(manager) = SchemaConfigManager::new(schema_id) {
             self.input_schema.schema_config = manager.get_config();
             self.input_schema.config_loaded = true;
@@ -56,15 +60,16 @@ impl SettingsState {
         let primary_color = self.get_primary_color();
         ThemeColors::from_theme(&self.system_theme, primary_color)
     }
-    
+
     fn get_primary_color(&self) -> u32 {
-        self.appearance.available_color_schemes
+        self.appearance
+            .available_color_schemes
             .iter()
             .find(|(id, _, _)| id == &self.appearance.color_scheme)
             .map(|(_, _, color)| *color)
             .unwrap_or(0x8F73E2)
     }
-    
+
     pub fn load_color_schemes(&mut self, cx: &mut Context<Self>) {
         if self.appearance.color_schemes_loaded {
             return;
@@ -82,54 +87,56 @@ impl SettingsState {
         }
     }
 
-pub fn save_color_scheme(&self) -> Result<(), String> {
+    pub fn save_color_scheme(&self) -> Result<(), String> {
         let mut manager = XimeStyleManager::load()?;
         manager.set_color_scheme(&self.appearance.color_scheme)?;
         notify_daemon_reload_style();
         Ok(())
     }
-    
+
     pub fn save_appearance(&self) -> Result<(), String> {
         let mut manager = XimeStyleManager::load()?;
-        
+
         manager.set_font_size(self.appearance.font_size as f32)?;
         manager.set_candidate_count(self.appearance.candidate_count)?;
         manager.set_show_code_hint(self.appearance.show_code_hint)?;
         manager.set_corner_radius(self.appearance.corner_radius as f32)?;
-        
+
         notify_daemon_reload_style();
         Ok(())
     }
 
     pub fn save_schema(&self) -> Result<(), String> {
         if self.input_schema.selected_schema < self.input_schema.available_schemas.len() {
-            let selected_id = &self.input_schema.available_schemas[self.input_schema.selected_schema].schema_id;
-            
+            let selected_id =
+                &self.input_schema.available_schemas[self.input_schema.selected_schema].schema_id;
+
             let manager = RimeConfigManager::new()?;
             manager.set_string("default_schema", selected_id)?;
             manager.save()?;
-            
+
             let schema_manager = SchemaManager::new()?;
             schema_manager.set_schema_list(&[selected_id])?;
             schema_manager.save()?;
-            
+
             deploy_all()?;
-            
+
             notify_daemon_reload();
         }
         Ok(())
     }
-    
+
     pub fn save_schema_config(&self) -> Result<(), String> {
         if self.input_schema.selected_schema >= self.input_schema.available_schemas.len() {
-            return Ok(())
+            return Ok(());
         }
-        
-        let schema_id = &self.input_schema.available_schemas[self.input_schema.selected_schema].schema_id;
+
+        let schema_id =
+            &self.input_schema.available_schemas[self.input_schema.selected_schema].schema_id;
         let manager = SchemaConfigManager::new(schema_id)?;
-        
+
         let config = &self.input_schema.schema_config;
-        
+
         if let Some(v) = config.speller.max_code_length {
             manager.set_int("speller/max_code_length", v)?;
         }
@@ -141,7 +148,7 @@ pub fn save_color_scheme(&self) -> Result<(), String> {
                 manager.set_string("speller/auto_clear", v)?;
             }
         }
-        
+
         if let Some(v) = config.translator.enable_charset_filter {
             manager.set_bool("translator/enable_charset_filter", v)?;
         }
@@ -163,41 +170,71 @@ pub fn save_color_scheme(&self) -> Result<(), String> {
         if let Some(v) = config.translator.max_phrase_length {
             manager.set_int("translator/max_phrase_length", v)?;
         }
-        
+
         if let Some(v) = &config.reverse_lookup.prefix {
             manager.set_string("reverse_lookup/prefix", v)?;
         }
         if let Some(v) = &config.reverse_lookup.suffix {
             manager.set_string("reverse_lookup/suffix", v)?;
         }
-        
+
         if let Some(v) = &config.tradition.opencc_config {
             manager.set_string("tradition/opencc_config", v)?;
         }
-        
-        manager.save()?;
-        
-        Ok(())
-}
 
-pub fn save_smart_suggestion(&self) -> Result<(), String> {
-        let manager = RimeConfigManager::new()?;
-        
-        manager.set_bool("smart_suggestion/enabled", self.smart_suggestion.enabled)?;
-        manager.set_int("smart_suggestion/suggestion_count", self.smart_suggestion.suggestion_count)?;
-        manager.set_bool("smart_suggestion/prefer_common_words", self.smart_suggestion.prefer_common_words)?;
-        manager.set_bool("smart_suggestion/record_user_frequency", self.smart_suggestion.record_user_frequency)?;
-        manager.set_bool("smart_suggestion/auto_adjust_frequency", self.smart_suggestion.auto_adjust_frequency)?;
-        manager.set_int("smart_suggestion/learning_threshold", self.smart_suggestion.learning_threshold)?;
-        
-        manager.set_string("smart_suggestion/model/provider", &self.smart_suggestion.model_provider)?;
-        manager.set_string("smart_suggestion/model/name", &self.smart_suggestion.model_name)?;
-        manager.set_bool("smart_suggestion/model/auto_download", self.smart_suggestion.auto_download)?;
-        manager.set_string("smart_suggestion/model/files/vocab/url", &self.smart_suggestion.vocab_url)?;
-        manager.set_string("smart_suggestion/model/files/onnx/url", &self.smart_suggestion.onnx_url)?;
-        
         manager.save()?;
-        
+
+        Ok(())
+    }
+
+    pub fn save_smart_suggestion(&self) -> Result<(), String> {
+        let manager = RimeConfigManager::new()?;
+
+        manager.set_bool("smart_suggestion/enabled", self.smart_suggestion.enabled)?;
+        manager.set_int(
+            "smart_suggestion/suggestion_count",
+            self.smart_suggestion.suggestion_count,
+        )?;
+        manager.set_bool(
+            "smart_suggestion/prefer_common_words",
+            self.smart_suggestion.prefer_common_words,
+        )?;
+        manager.set_bool(
+            "smart_suggestion/record_user_frequency",
+            self.smart_suggestion.record_user_frequency,
+        )?;
+        manager.set_bool(
+            "smart_suggestion/auto_adjust_frequency",
+            self.smart_suggestion.auto_adjust_frequency,
+        )?;
+        manager.set_int(
+            "smart_suggestion/learning_threshold",
+            self.smart_suggestion.learning_threshold,
+        )?;
+
+        manager.set_string(
+            "smart_suggestion/model/provider",
+            &self.smart_suggestion.model_provider,
+        )?;
+        manager.set_string(
+            "smart_suggestion/model/name",
+            &self.smart_suggestion.model_name,
+        )?;
+        manager.set_bool(
+            "smart_suggestion/model/auto_download",
+            self.smart_suggestion.auto_download,
+        )?;
+        manager.set_string(
+            "smart_suggestion/model/files/vocab/url",
+            &self.smart_suggestion.vocab_url,
+        )?;
+        manager.set_string(
+            "smart_suggestion/model/files/onnx/url",
+            &self.smart_suggestion.onnx_url,
+        )?;
+
+        manager.save()?;
+
         Ok(())
     }
 
@@ -208,7 +245,8 @@ pub fn save_smart_suggestion(&self) -> Result<(), String> {
                 if notify_daemon_reload() {
                     self.deploy_message = Some("部署成功！配置已重载。".to_string());
                 } else {
-                    self.deploy_message = Some("部署成功！(服务器未运行，配置将在下次启动时生效)".to_string());
+                    self.deploy_message =
+                        Some("部署成功！(服务器未运行，配置将在下次启动时生效)".to_string());
                 }
             }
             Err(e) => {
@@ -236,18 +274,16 @@ fn notify_daemon_reload() -> bool {
 }
 
 fn notify_daemon_reload_style() {
-    zbus::blocking::Connection::session()
+    zbus::blocking::Connection::session().ok().and_then(|conn| {
+        conn.call_method(
+            Some("org.xime.Xime"),
+            "/org/xime/Xime",
+            Some("org.xime.Xime.Controller"),
+            "ReloadStyle",
+            &(),
+        )
         .ok()
-        .and_then(|conn| {
-            conn.call_method(
-                Some("org.xime.Xime"),
-                "/org/xime/Xime",
-                Some("org.xime.Xime.Controller"),
-                "ReloadStyle",
-                &(),
-            )
-            .ok()
-        });
+    });
 }
 
 #[derive(Clone, Default)]
@@ -297,8 +333,8 @@ impl Default for SmartSuggestionState {
             model_provider: "modelscope".to_string(),
             model_name: "predictive-text-small".to_string(),
             auto_download: true,
-            vocab_url: "https://modelscope.cn/models/bikeand/predictive-text-small/resolve/master/vocab.json".to_string(),
-            onnx_url: "https://modelscope.cn/models/bikeand/predictive-text-small/resolve/master/model_int8_dynamic.onnx".to_string(),
+            vocab_url: "".to_string(),
+            onnx_url: "".to_string(),
             model_downloaded: false,
         }
     }

@@ -32,7 +32,7 @@ impl ClipboardProvider for InMemoryClipboard {
     fn read(&self) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         Ok(self.content.lock().unwrap().clone())
     }
-    
+
     fn write(&self, content: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         *self.content.lock().unwrap() = content.to_string();
         Ok(())
@@ -63,13 +63,15 @@ mod linux {
     impl ClipboardProvider for SystemClipboard {
         fn read(&self) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
             let mut clipboard = self.clipboard.lock().unwrap();
-            clipboard.get_text()
+            clipboard
+                .get_text()
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
         }
-        
+
         fn write(&self, content: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let mut clipboard = self.clipboard.lock().unwrap();
-            clipboard.set_text(content)
+            clipboard
+                .set_text(content)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
         }
     }
@@ -104,13 +106,15 @@ mod windows {
     impl ClipboardProvider for SystemClipboard {
         fn read(&self) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
             let mut clipboard = self.clipboard.lock().unwrap();
-            clipboard.get_text()
+            clipboard
+                .get_text()
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
         }
-        
+
         fn write(&self, content: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let mut clipboard = self.clipboard.lock().unwrap();
-            clipboard.set_text(content)
+            clipboard
+                .set_text(content)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
         }
     }
@@ -119,7 +123,8 @@ mod windows {
         let app_data = std::env::var("APPDATA")
             .or_else(|_| std::env::var("LOCALAPPDATA"))
             .unwrap_or_else(|_| {
-                let user_profile = std::env::var("USERPROFILE").unwrap_or_else(|_| "C:".to_string());
+                let user_profile =
+                    std::env::var("USERPROFILE").unwrap_or_else(|_| "C:".to_string());
                 format!("{}\\AppData\\Roaming", user_profile)
             });
         PathBuf::from(app_data).join("xime")
@@ -165,7 +170,7 @@ impl PlatformProviders {
             config_dir: std::sync::Arc::new(DefaultConfigDir::new(get_config_dir())),
         })
     }
-    
+
     #[cfg(feature = "windows")]
     pub fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         Ok(Self {

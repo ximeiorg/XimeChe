@@ -1,5 +1,5 @@
-use std::ffi::CStr;
 use crate::get_api;
+use std::ffi::CStr;
 
 pub struct Commit {
     inner: librime_sys2::RimeCommit,

@@ -1,5 +1,5 @@
-use std::ffi::CStr;
 use crate::get_api;
+use std::ffi::CStr;
 
 pub struct Status {
     inner: librime_sys2::RimeStatus,

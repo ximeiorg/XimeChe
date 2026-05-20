@@ -1,5 +1,5 @@
-use cosmic_text::{FontSystem, SwashCache, Buffer, Metrics, Attrs, Color, Shaping, Family, fontdb};
-use tiny_skia::{Pixmap, Paint, PathBuilder, FillRule};
+use cosmic_text::{fontdb, Attrs, Buffer, Color, Family, FontSystem, Metrics, Shaping, SwashCache};
+use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap};
 
 const CORNER_RADIUS: f32 = 8.0;
 const KEY_BG_CORNER_RADIUS: f32 = 4.0;
@@ -18,7 +18,10 @@ impl RootRenderer {
         let font_source = fontdb::Source::Binary(std::sync::Arc::new(CHAI_FONT));
         let font_system = FontSystem::new_with_fonts([font_source]);
         let swash_cache = SwashCache::new();
-        Self { font_system, swash_cache }
+        Self {
+            font_system,
+            swash_cache,
+        }
     }
 
     /// Calculate width for single key root display
@@ -26,23 +29,27 @@ impl RootRenderer {
     pub fn calculate_width(key: char, root: &str, _primary_color: (u8, u8, u8)) -> u32 {
         let key_text = key.to_string();
         let root_text = root;
-        
+
         let metrics = Metrics::new(16.0, 20.0);
         let attrs = Attrs::new().family(Family::Name("ChaiPUA-0.2.7"));
-        
+
         let font_source = fontdb::Source::Binary(std::sync::Arc::new(CHAI_FONT));
         let mut font_system = FontSystem::new_with_fonts([font_source]);
-        
+
         let mut key_buffer = Buffer::new(&mut font_system, metrics);
         key_buffer.set_text(&key_text, &attrs, Shaping::Advanced, None);
         key_buffer.shape_until_scroll(&mut font_system, false);
-        let key_width = key_buffer.layout_runs().fold(0.0f32, |max_w, run| max_w.max(run.line_w));
-        
+        let key_width = key_buffer
+            .layout_runs()
+            .fold(0.0f32, |max_w, run| max_w.max(run.line_w));
+
         let mut root_buffer = Buffer::new(&mut font_system, metrics);
         root_buffer.set_text(root_text, &attrs, Shaping::Advanced, None);
         root_buffer.shape_until_scroll(&mut font_system, false);
-        let root_width = root_buffer.layout_runs().fold(0.0f32, |max_w, run| max_w.max(run.line_w));
-        
+        let root_width = root_buffer
+            .layout_runs()
+            .fold(0.0f32, |max_w, run| max_w.max(run.line_w));
+
         let key_bg_width = key_width + 16.0;
         let total_width = 12.0 + key_bg_width + 8.0 + root_width + 12.0;
         (total_width.ceil() as u32).max(80)
@@ -50,12 +57,27 @@ impl RootRenderer {
 
     /// Draw single key root to buffer
     /// Shows [key] with primary colored background/border, followed by root text
-    pub fn draw_root(pixels: &mut [u8], width: u32, height: u32, key: char, root: &str, primary_color: (u8, u8, u8)) {
+    pub fn draw_root(
+        pixels: &mut [u8],
+        width: u32,
+        height: u32,
+        key: char,
+        root: &str,
+        primary_color: (u8, u8, u8),
+    ) {
         let mut renderer = RootRenderer::new();
         renderer.draw_root_internal(pixels, width, height, key, root, primary_color);
     }
 
-    fn draw_root_internal(&mut self, pixels: &mut [u8], width: u32, height: u32, key: char, root: &str, primary_color: (u8, u8, u8)) {
+    fn draw_root_internal(
+        &mut self,
+        pixels: &mut [u8],
+        width: u32,
+        height: u32,
+        key: char,
+        root: &str,
+        primary_color: (u8, u8, u8),
+    ) {
         let mut pixmap = Pixmap::new(width, height).expect("Failed to create pixmap");
 
         self.draw_background(&mut pixmap, width, height);
@@ -92,7 +114,10 @@ impl RootRenderer {
         border_paint.set_color_rgba8(0xE0, 0xE0, 0xE0, 0xFF);
         border_paint.anti_alias = true;
 
-        let stroke = tiny_skia::Stroke { width: 2.0, ..Default::default() };
+        let stroke = tiny_skia::Stroke {
+            width: 2.0,
+            ..Default::default()
+        };
         pixmap.stroke_path(
             &rounded_rect,
             &border_paint,
@@ -102,31 +127,49 @@ impl RootRenderer {
         );
     }
 
-    fn draw_text(&mut self, pixmap: &mut Pixmap, _width: u32, height: u32, key: char, root: &str, primary_color: (u8, u8, u8)) {
+    fn draw_text(
+        &mut self,
+        pixmap: &mut Pixmap,
+        _width: u32,
+        height: u32,
+        key: char,
+        root: &str,
+        primary_color: (u8, u8, u8),
+    ) {
         let (r, g, b) = primary_color;
         let metrics = Metrics::new(16.0, 20.0);
         let attrs = Attrs::new().family(Family::Name("ChaiPUA-0.2.7"));
-        
+
         let key_text = key.to_string();
         let mut key_buffer = Buffer::new(&mut self.font_system, metrics);
         key_buffer.set_text(&key_text, &attrs, Shaping::Advanced, None);
         key_buffer.shape_until_scroll(&mut self.font_system, false);
-        let key_text_width = key_buffer.layout_runs().fold(0.0f32, |max_w, run| max_w.max(run.line_w));
-        
+        let key_text_width = key_buffer
+            .layout_runs()
+            .fold(0.0f32, |max_w, run| max_w.max(run.line_w));
+
         let mut root_buffer = Buffer::new(&mut self.font_system, metrics);
         root_buffer.set_text(root, &attrs, Shaping::Advanced, None);
         root_buffer.shape_until_scroll(&mut self.font_system, false);
-        let _root_text_width = root_buffer.layout_runs().fold(0.0f32, |max_w, run| max_w.max(run.line_w));
-        
+        let _root_text_width = root_buffer
+            .layout_runs()
+            .fold(0.0f32, |max_w, run| max_w.max(run.line_w));
+
         let key_bg_width = key_text_width + 16.0;
         let key_bg_height = 24.0;
-        
+
         let x_start = 12.0;
         let key_bg_x = x_start;
         let key_bg_y = (height as f32 - key_bg_height) / 2.0;
-        
-        let key_bg_rect = build_rounded_rect(key_bg_x, key_bg_y, key_bg_width, key_bg_height, KEY_BG_CORNER_RADIUS);
-        
+
+        let key_bg_rect = build_rounded_rect(
+            key_bg_x,
+            key_bg_y,
+            key_bg_width,
+            key_bg_height,
+            KEY_BG_CORNER_RADIUS,
+        );
+
         let mut bg_paint = Paint::default();
         bg_paint.set_color_rgba8(r, g, b, 0x30);
         bg_paint.anti_alias = true;
@@ -137,11 +180,14 @@ impl RootRenderer {
             tiny_skia::Transform::identity(),
             None,
         );
-        
+
         let mut border_paint = Paint::default();
         border_paint.set_color_rgba8(r, g, b, 0xFF);
         border_paint.anti_alias = true;
-        let stroke = tiny_skia::Stroke { width: 1.5, ..Default::default() };
+        let stroke = tiny_skia::Stroke {
+            width: 1.5,
+            ..Default::default()
+        };
         pixmap.stroke_path(
             &key_bg_rect,
             &border_paint,
@@ -149,34 +195,52 @@ impl RootRenderer {
             tiny_skia::Transform::identity(),
             None,
         );
-        
+
         let pixmap_width = pixmap.width() as usize;
         let pixmap_height = pixmap.height() as usize;
         let pixmap_data = pixmap.data_mut();
-        
+
         let key_x_offset = (key_bg_x + (key_bg_width - key_text_width) / 2.0) as i32;
         let key_y_offset = (key_bg_y + (key_bg_height - 20.0) / 2.0) as i32;
-        
+
         let key_color = Color::rgba(r, g, b, 0xFF);
         key_buffer.draw(
             &mut self.font_system,
             &mut self.swash_cache,
             key_color,
             |x, y, w, h, color| {
-                blend_glyph(pixmap_data, x as i32 + key_x_offset, y + key_y_offset, w as i32, h as i32, color, pixmap_width, pixmap_height);
+                blend_glyph(
+                    pixmap_data,
+                    x as i32 + key_x_offset,
+                    y + key_y_offset,
+                    w as i32,
+                    h as i32,
+                    color,
+                    pixmap_width,
+                    pixmap_height,
+                );
             },
         );
-        
+
         let root_x_start = x_start + key_bg_width + 8.0;
         let root_y_offset = ((height as f32 - 20.0) / 2.0).max(0.0) as i32;
-        
+
         let root_color = Color::rgba(0x33, 0x33, 0x33, 0xFF);
         root_buffer.draw(
             &mut self.font_system,
             &mut self.swash_cache,
             root_color,
             |x, y, w, h, color| {
-                blend_glyph(pixmap_data, x as i32 + root_x_start as i32, y + root_y_offset, w as i32, h as i32, color, pixmap_width, pixmap_height);
+                blend_glyph(
+                    pixmap_data,
+                    x as i32 + root_x_start as i32,
+                    y + root_y_offset,
+                    w as i32,
+                    h as i32,
+                    color,
+                    pixmap_width,
+                    pixmap_height,
+                );
             },
         );
     }
@@ -189,7 +253,14 @@ impl Default for RootRenderer {
 }
 
 /// Draw root display to buffer
-pub fn draw_root_to_buffer(pixels: &mut [u8], width: u32, height: u32, key: char, root: &str, primary_color: (u8, u8, u8)) {
+pub fn draw_root_to_buffer(
+    pixels: &mut [u8],
+    width: u32,
+    height: u32,
+    key: char,
+    root: &str,
+    primary_color: (u8, u8, u8),
+) {
     RootRenderer::draw_root(pixels, width, height, key, root, primary_color);
 }
 
@@ -198,7 +269,16 @@ pub fn calculate_root_width(key: char, root: &str, primary_color: (u8, u8, u8)) 
     RootRenderer::calculate_width(key, root, primary_color)
 }
 
-fn blend_glyph(pixmap_data: &mut [u8], x: i32, y: i32, w: i32, h: i32, color: Color, width: usize, height: usize) {
+fn blend_glyph(
+    pixmap_data: &mut [u8],
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    color: Color,
+    width: usize,
+    height: usize,
+) {
     for gy in 0..h as usize {
         for gx in 0..w as usize {
             let px = x as usize + gx;

@@ -1,13 +1,13 @@
-pub mod input_schema;
-pub mod appearance;
-pub mod hotkeys;
-pub mod smart_suggestion;
-pub mod dictionary;
 pub mod about;
+pub mod appearance;
+pub mod dictionary;
+pub mod hotkeys;
+pub mod input_schema;
+pub mod smart_suggestion;
 
-use gpui::{prelude::FluentBuilder, ParentElement, IntoElement, *};
-use crate::components::{TitleBar};
+use crate::components::TitleBar;
 use crate::state::SettingsState;
+use gpui::{prelude::FluentBuilder, IntoElement, ParentElement, *};
 
 pub struct SettingsApp {
     current_page: usize,
@@ -17,16 +17,20 @@ pub struct SettingsApp {
 impl SettingsApp {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let settings = cx.new(|cx| SettingsState::new(cx));
-        
-        let this = Self { 
+
+        let this = Self {
             current_page: 0,
             settings: settings.clone(),
         };
-        
-        cx.observe(&settings, |this: &mut SettingsApp, _settings, cx: &mut Context<SettingsApp>| {
-            cx.notify();
-        }).detach();
-        
+
+        cx.observe(
+            &settings,
+            |this: &mut SettingsApp, _settings, cx: &mut Context<SettingsApp>| {
+                cx.notify();
+            },
+        )
+        .detach();
+
         this
     }
 }
@@ -45,13 +49,13 @@ fn get_page_icon(index: usize) -> &'static str {
 impl Render for SettingsApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         window.set_background_appearance(WindowBackgroundAppearance::Blurred);
-        
+
         let pages = ["输入方案", "外观", "快捷键", "智能联想", "关于"];
         let current = self.current_page;
         let settings = self.settings.clone();
         let settings_for_title = settings.clone();
         let colors = cx.read_entity(&settings, |state, _| state.colors());
-        
+
         let sidebar = div()
             .w(px(213.0))
             .h_full()
@@ -60,48 +64,42 @@ impl Render for SettingsApp {
             .flex_col()
             .gap(px(2.0))
             .p(px(8.0))
-            .children(
-                pages
-                    .iter()
-                    .enumerate()
-                    .map(|(i, name)| {
-                        let is_current = i == current;
-                        let view = cx.entity();
-                        let icon_path = get_page_icon(i);
+            .children(pages.iter().enumerate().map(|(i, name)| {
+                let is_current = i == current;
+                let view = cx.entity();
+                let icon_path = get_page_icon(i);
+                div()
+                    .id(("menu", i))
+                    .py(px(10.0))
+                    .px(px(12.0))
+                    .rounded(px(8.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(12.0))
+                    .when(is_current, |this: Stateful<Div>| this.bg(colors.primary))
+                    .when(!is_current, |this: Stateful<Div>| {
+                        this.cursor_pointer()
+                            .hover(|style: StyleRefinement| style.bg(hsla(0.0, 0.0, 1.0, 0.15)))
+                    })
+                    .text_size(px(15.0))
+                    .text_color(colors.on_primary)
+                    .on_click(move |_, _window: &mut Window, cx: &mut App| {
+                        cx.update_entity(
+                            &view,
+                            |app: &mut SettingsApp, cx: &mut Context<SettingsApp>| {
+                                app.current_page = i;
+                                cx.notify();
+                            },
+                        );
+                    })
+                    .child(img(icon_path).w(px(20.0)).h(px(20.0)))
+                    .child(
                         div()
-                            .id(("menu", i))
-                            .py(px(10.0))
-                            .px(px(12.0))
-                            .rounded(px(8.0))
-                            .flex()
-                            .items_center()
-                            .gap(px(12.0))
-                            .when(is_current, |this: Stateful<Div>| this.bg(colors.primary))
-                            .when(!is_current, |this: Stateful<Div>| {
-                                this.cursor_pointer()
-                                    .hover(|style: StyleRefinement| style.bg(hsla(0.0, 0.0, 1.0, 0.15)))
-                            })
                             .text_size(px(15.0))
                             .text_color(colors.on_primary)
-                            .on_click(move |_, _window: &mut Window, cx: &mut App| {
-                                cx.update_entity(&view, |app: &mut SettingsApp, cx: &mut Context<SettingsApp>| {
-                                    app.current_page = i;
-                                    cx.notify();
-                                });
-                            })
-                            .child(
-                                img(icon_path)
-                                    .w(px(20.0))
-                                    .h(px(20.0))
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(15.0))
-                                    .text_color(colors.on_primary)
-                                    .child(name.to_string())
-                            )
-                    })
-            );
+                            .child(name.to_string()),
+                    )
+            }));
 
         let content = match self.current_page {
             0 => input_schema::render(settings, cx),
@@ -132,8 +130,8 @@ impl Render for SettingsApp {
                             .min_w(px(400.0))
                             .overflow_y_scroll()
                             .bg(colors.background)
-                            .child(content)
-                    )
+                            .child(content),
+                    ),
             )
     }
 }

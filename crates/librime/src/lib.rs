@@ -1,12 +1,14 @@
-pub mod error;
-pub mod traits;
-pub mod session;
-pub mod context;
 pub mod commit;
-pub mod status;
+pub mod context;
+pub mod error;
 pub mod key;
+pub mod session;
+pub mod status;
+pub mod traits;
 
-pub use key::{KeyCode, Modifier, K_SHIFT_MASK, K_CONTROL_MASK, K_ALT_MASK, K_RELEASE_MASK, XK_SHIFT_L};
+pub use key::{
+    KeyCode, Modifier, K_ALT_MASK, K_CONTROL_MASK, K_RELEASE_MASK, K_SHIFT_MASK, XK_SHIFT_L,
+};
 
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
@@ -17,9 +19,7 @@ struct RimeApiWrapper(*mut librime_sys2::RimeApi);
 unsafe impl Send for RimeApiWrapper {}
 unsafe impl Sync for RimeApiWrapper {}
 
-static RIME_API: Lazy<RimeApiWrapper> = Lazy::new(|| {
-    RimeApiWrapper(unsafe { rime_get_api() })
-});
+static RIME_API: Lazy<RimeApiWrapper> = Lazy::new(|| RimeApiWrapper(unsafe { rime_get_api() }));
 
 static DEPLOY_RESULT: Lazy<Mutex<Option<DeployResult>>> = Lazy::new(|| Mutex::new(None));
 
@@ -57,7 +57,6 @@ macro_rules! rime_api_call {
         }
     };
 }
-
 
 pub fn get_api() -> *mut librime_sys2::RimeApi {
     RIME_API.0
@@ -167,7 +166,7 @@ extern "C" fn notification_handler(
     unsafe {
         let msg_type = CStr::from_ptr(message_type).to_string_lossy();
         let msg_value = CStr::from_ptr(message_value).to_string_lossy();
-        
+
         if msg_type == "deploy" {
             let mut result = DEPLOY_RESULT.lock().unwrap();
             match msg_value.as_ref() {

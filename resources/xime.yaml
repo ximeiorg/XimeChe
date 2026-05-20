@@ -100,12 +100,12 @@ smart_suggestion:
   
   model:
     provider: "modelscope"
-    name: "predictive-text"
+    name: "predictive-text-small"
     auto_download: true
     files:
-      - url: "https://modelscope.cn/models/bikeand/predictive-text/resolve/master/vocab.json"
+      - url: "https://modelscope.cn/models/bikeand/predictive-text-small/resolve/master/vocab.json"
         filename: "vocab.json"
-      - url: "https://modelscope.cn/models/bikeand/predictive-text/resolve/master/model.onnx"
+      - url: "https://modelscope.cn/models/bikeand/predictive-text-small/resolve/master/model.onnx"
         filename: "model.onnx"
-      - url: "https://modelscope.cn/models/bikeand/predictive-text/resolve/master/model.onnx.data"
+      - url: "https://modelscope.cn/models/bikeand/predictive-text-small/resolve/master/model.onnx.data"
         filename: "model.onnx.data"

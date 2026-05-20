@@ -1,5 +1,5 @@
-use std::ffi::CStr;
 use crate::get_api;
+use std::ffi::CStr;
 
 pub struct Context {
     inner: librime_sys2::RimeContext,
@@ -66,7 +66,11 @@ impl Context {
         if self.inner.commit_text_preview.is_null() {
             None
         } else {
-            Some(unsafe { CStr::from_ptr(self.inner.commit_text_preview).to_str().unwrap() })
+            Some(unsafe {
+                CStr::from_ptr(self.inner.commit_text_preview)
+                    .to_str()
+                    .unwrap()
+            })
         }
     }
 

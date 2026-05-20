@@ -1,19 +1,18 @@
-use gpui::{prelude::FluentBuilder, ParentElement, IntoElement, *};
-use crate::components::{Radio, SettingsPage, SettingsGroup, SettingsItem, SettingsControl};
-use crate::state::SettingsState;
+use crate::components::{Radio, SettingsControl, SettingsGroup, SettingsItem, SettingsPage};
 use crate::pages::SettingsApp;
+use crate::state::SettingsState;
+use gpui::{prelude::FluentBuilder, IntoElement, ParentElement, *};
 
 pub fn render(settings: Entity<SettingsState>, cx: &mut Context<SettingsApp>) -> AnyElement {
     let schemas_loaded = cx.read_entity(&settings, |state, _| state.schemas_loaded);
-    
+
     if !schemas_loaded {
         cx.update_entity(&settings, |state: &mut SettingsState, cx| {
             if let Ok(manager) = crate::rime_config::SchemaManager::new() {
                 let schemas = manager.get_schema_list();
-                let selected_schema = manager.get_selected_schema()
-                    .and_then(|selected_id| {
-                        schemas.iter().position(|s| s.schema_id == selected_id)
-                    })
+                let selected_schema = manager
+                    .get_selected_schema()
+                    .and_then(|selected_id| schemas.iter().position(|s| s.schema_id == selected_id))
                     .unwrap_or(0);
                 state.input_schema.available_schemas = schemas;
                 state.input_schema.selected_schema = selected_schema;
@@ -22,31 +21,36 @@ pub fn render(settings: Entity<SettingsState>, cx: &mut Context<SettingsApp>) ->
             }
         });
     }
-    
+
     let config_loaded = cx.read_entity(&settings, |state, _| state.input_schema.config_loaded);
     if !config_loaded {
         cx.update_entity(&settings, |state: &mut SettingsState, cx| {
             state.load_schema_config(cx);
         });
     }
-    
-    let (selected, schemas, colors, schema_config, schema_name) = cx.read_entity(&settings, |state, _| {
-        let schema_name = if state.input_schema.selected_schema < state.input_schema.available_schemas.len() {
-            state.input_schema.available_schemas[state.input_schema.selected_schema].name.clone()
-        } else {
-            String::new()
-        };
-        (
-            state.input_schema.selected_schema, 
-            state.input_schema.available_schemas.clone(), 
-            state.colors(),
-            state.input_schema.schema_config.clone(),
-            schema_name,
-        )
-    });
-    
+
+    let (selected, schemas, colors, schema_config, schema_name) =
+        cx.read_entity(&settings, |state, _| {
+            let schema_name = if state.input_schema.selected_schema
+                < state.input_schema.available_schemas.len()
+            {
+                state.input_schema.available_schemas[state.input_schema.selected_schema]
+                    .name
+                    .clone()
+            } else {
+                String::new()
+            };
+            (
+                state.input_schema.selected_schema,
+                state.input_schema.available_schemas.clone(),
+                state.colors(),
+                state.input_schema.schema_config.clone(),
+                schema_name,
+            )
+        });
+
     let settings_clone = settings.clone();
-    
+
     let schema_items: Vec<AnyElement> = schemas
         .iter()
         .enumerate()
@@ -98,7 +102,7 @@ pub fn render(settings: Entity<SettingsState>, cx: &mut Context<SettingsApp>) ->
                 .into_any_element()
         })
         .collect();
-    
+
     let config_section = if config_loaded {
         render_schema_config(settings.clone(), &schema_config, &colors, &schema_name, cx)
     } else {
@@ -108,7 +112,7 @@ pub fn render(settings: Entity<SettingsState>, cx: &mut Context<SettingsApp>) ->
             .child("正在加载方案配置...")
             .into_any_element()
     };
-    
+
     div()
         .flex()
         .flex_col()
@@ -120,7 +124,7 @@ pub fn render(settings: Entity<SettingsState>, cx: &mut Context<SettingsApp>) ->
                 .text_size(px(20.0))
                 .font_weight(FontWeight::BOLD)
                 .text_color(colors.foreground)
-                .child("输入方案")
+                .child("输入方案"),
         )
         .child(
             div()
@@ -136,21 +140,22 @@ pub fn render(settings: Entity<SettingsState>, cx: &mut Context<SettingsApp>) ->
                     div()
                         .text_size(px(14.0))
                         .text_color(colors.foreground_muted)
-                        .child("选择默认输入方案")
+                        .child("选择默认输入方案"),
                 )
                 .when(schemas.is_empty(), |this| {
                     this.child(
                         div()
                             .text_size(px(14.0))
                             .text_color(colors.foreground_muted)
-                            .child("未找到输入方案，请先部署")
+                            .child("未找到输入方案，请先部署"),
                     )
                 })
-                .when(!schemas.is_empty(), |this| this.children(schema_items))
+                .when(!schemas.is_empty(), |this| this.children(schema_items)),
         )
-        .when(!schemas.is_empty() && selected < schemas.len() && config_loaded, |this| {
-            this.child(config_section)
-        })
+        .when(
+            !schemas.is_empty() && selected < schemas.len() && config_loaded,
+            |this| this.child(config_section),
+        )
         .into_any_element()
 }
 
@@ -170,12 +175,17 @@ fn render_schema_config(
             SettingsItem::new(
                 "最大编码长度",
                 SettingsControl::number_input_with(
-                    config.speller.max_code_length.map(|v| v as f64).unwrap_or(4.0),
+                    config
+                        .speller
+                        .max_code_length
+                        .map(|v| v as f64)
+                        .unwrap_or(4.0),
                     {
                         let s = settings_for_int.clone();
                         move |v, _window, cx| {
                             s.update(cx, |state: &mut SettingsState, cx| {
-                                state.input_schema.schema_config.speller.max_code_length = Some(v as i32);
+                                state.input_schema.schema_config.speller.max_code_length =
+                                    Some(v as i32);
                                 if let Err(e) = state.save_schema_config() {
                                     eprintln!("Save failed: {}", e);
                                 }
@@ -215,7 +225,11 @@ fn render_schema_config(
                         let s = settings_for_switch.clone();
                         move |v, _window, cx| {
                             s.update(cx, |state: &mut SettingsState, cx| {
-                                state.input_schema.schema_config.translator.enable_completion = Some(v);
+                                state
+                                    .input_schema
+                                    .schema_config
+                                    .translator
+                                    .enable_completion = Some(v);
                                 if let Err(e) = state.save_schema_config() {
                                     eprintln!("Save failed: {}", e);
                                 }
@@ -234,7 +248,11 @@ fn render_schema_config(
                         let s = settings_for_switch.clone();
                         move |v, _window, cx| {
                             s.update(cx, |state: &mut SettingsState, cx| {
-                                state.input_schema.schema_config.translator.enable_charset_filter = Some(v);
+                                state
+                                    .input_schema
+                                    .schema_config
+                                    .translator
+                                    .enable_charset_filter = Some(v);
                                 if let Err(e) = state.save_schema_config() {
                                     eprintln!("Save failed: {}", e);
                                 }
@@ -253,7 +271,8 @@ fn render_schema_config(
                         let s = settings_for_switch.clone();
                         move |v, _window, cx| {
                             s.update(cx, |state: &mut SettingsState, cx| {
-                                state.input_schema.schema_config.translator.enable_user_dict = Some(v);
+                                state.input_schema.schema_config.translator.enable_user_dict =
+                                    Some(v);
                                 if let Err(e) = state.save_schema_config() {
                                     eprintln!("Save failed: {}", e);
                                 }
@@ -283,12 +302,20 @@ fn render_schema_config(
             SettingsItem::new(
                 "最大自动造词长度",
                 SettingsControl::number_input_with(
-                    config.translator.max_phrase_length.map(|v| v as f64).unwrap_or(10.0),
+                    config
+                        .translator
+                        .max_phrase_length
+                        .map(|v| v as f64)
+                        .unwrap_or(10.0),
                     {
                         let s = settings_for_int.clone();
                         move |v, _window, cx| {
                             s.update(cx, |state: &mut SettingsState, cx| {
-                                state.input_schema.schema_config.translator.max_phrase_length = Some(v as i32);
+                                state
+                                    .input_schema
+                                    .schema_config
+                                    .translator
+                                    .max_phrase_length = Some(v as i32);
                                 if let Err(e) = state.save_schema_config() {
                                     eprintln!("Save failed: {}", e);
                                 }
@@ -307,14 +334,22 @@ fn render_schema_config(
             SettingsItem::new(
                 "反查前缀",
                 SettingsControl::label(
-                    config.reverse_lookup.prefix.clone().unwrap_or_else(|| "z".to_string()),
+                    config
+                        .reverse_lookup
+                        .prefix
+                        .clone()
+                        .unwrap_or_else(|| "z".to_string()),
                 ),
             )
             .description("输入此字符后开始反查"),
             SettingsItem::new(
                 "反查后缀",
                 SettingsControl::label(
-                    config.reverse_lookup.suffix.clone().unwrap_or_else(|| "'".to_string()),
+                    config
+                        .reverse_lookup
+                        .suffix
+                        .clone()
+                        .unwrap_or_else(|| "'".to_string()),
                 ),
             )
             .description("输入此字符结束反查"),
@@ -324,7 +359,11 @@ fn render_schema_config(
         vec![SettingsItem::new(
             "简繁转换配置",
             SettingsControl::label(
-                config.tradition.opencc_config.clone().unwrap_or_else(|| "s2hk.json".to_string()),
+                config
+                    .tradition
+                    .opencc_config
+                    .clone()
+                    .unwrap_or_else(|| "s2hk.json".to_string()),
             ),
         )
         .description("可选: s2t(繁体), s2hk(香港), s2tw(台湾)")]

@@ -56,18 +56,18 @@ fn get_lock_file_path() -> PathBuf {
 
 fn try_acquire_singleton_lock() -> bool {
     let lock_path = get_lock_file_path();
-    
+
     if let Some(parent) = lock_path.parent() {
         std::fs::create_dir_all(parent).ok();
     }
-    
+
     let file = File::create(&lock_path);
-    
+
     match file {
         Ok(f) => {
             use nix::fcntl::{Flock, FlockArg};
             use std::mem::forget;
-            
+
             match Flock::lock(f, FlockArg::LockExclusiveNonblock) {
                 Ok(flock) => {
                     forget(flock);
@@ -85,14 +85,11 @@ fn main() {
         info!("xime-setup is already running, exiting...");
         return;
     }
-    
+
     Application::new().run(|cx: &mut App| {
         let _ = cx.open_window(
             WindowOptions {
-                window_bounds: Some(WindowBounds::centered(
-                    size(px(800.0), px(640.0)),
-                    cx,
-                )),
+                window_bounds: Some(WindowBounds::centered(size(px(800.0), px(640.0)), cx)),
                 titlebar: Some(TitlebarOptions {
                     title: Some("Xime 设置".into()),
                     appears_transparent: true,

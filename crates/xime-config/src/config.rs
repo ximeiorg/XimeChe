@@ -1,11 +1,11 @@
-use std::fs;
-use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
 
-use crate::style::{StyleConfig, ColorScheme};
-use crate::wubi_radicals::WubiRadicalsConfig;
 use crate::smart_suggestion::SmartSuggestionConfig;
+use crate::style::{ColorScheme, StyleConfig};
+use crate::wubi_radicals::WubiRadicalsConfig;
 
 #[derive(Debug, Deserialize, Serialize, Default)]
 pub struct XimeConfig {
@@ -115,22 +115,22 @@ impl XimeConfig {
     }
 
     pub fn is_schema_enabled_for_radicals(&self, current_schema: &str) -> bool {
-        self.wubi_radicals.is_schema_enabled_for_radicals(current_schema)
+        self.wubi_radicals
+            .is_schema_enabled_for_radicals(current_schema)
     }
 
     pub fn save(&self) -> Result<(), String> {
         let path = Self::config_path();
         let content = serde_yaml::to_string(self)
             .map_err(|e| format!("Failed to serialize config: {}", e))?;
-        
+
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
                 .map_err(|e| format!("Failed to create config dir: {}", e))?;
         }
-        
-        fs::write(&path, content)
-            .map_err(|e| format!("Failed to write config: {}", e))?;
-        
+
+        fs::write(&path, content).map_err(|e| format!("Failed to write config: {}", e))?;
+
         Ok(())
     }
 }
@@ -202,7 +202,10 @@ mod tests {
 
         for (name, color) in &expected_schemes {
             assert!(config.color_schemes.contains_key(*name));
-            assert_eq!(config.color_schemes.get(*name).unwrap().primary_color, *color);
+            assert_eq!(
+                config.color_schemes.get(*name).unwrap().primary_color,
+                *color
+            );
         }
     }
 
@@ -261,7 +264,14 @@ color_schemes:
         let merged = XimeConfig::merge_configs(system, Some(user));
 
         assert!(!merged.color_schemes.is_empty());
-        assert_eq!(merged.color_schemes.get("lavender_purple").unwrap().primary_color, 0x8F73E2);
+        assert_eq!(
+            merged
+                .color_schemes
+                .get("lavender_purple")
+                .unwrap()
+                .primary_color,
+            0x8F73E2
+        );
     }
 
     #[test]

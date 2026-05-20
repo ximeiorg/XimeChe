@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 use std::fs;
+use std::path::PathBuf;
 use std::sync::Once;
 use tracing::error;
 
@@ -24,53 +24,59 @@ fn ensure_config_files() {
     if !user_dir.exists() {
         fs::create_dir_all(&user_dir).ok();
     }
-    
+
     let default_custom = user_dir.join("default.custom.yaml");
     if !default_custom.exists() {
-        fs::write(&default_custom, 
-r#"customization:
+        fs::write(
+            &default_custom,
+            r#"customization:
   distribution_code_name: Xime
   distribution_version: 1.0
 
 patch:
   schema_list:
     - schema: wubi86_jidian
-"#).ok();
+"#,
+        )
+        .ok();
     }
-    
+
     let xime_yaml = user_dir.join("xime.yaml");
     if !xime_yaml.exists() {
-        fs::write(&xime_yaml, 
-r#"config_version: "1.0"
+        fs::write(
+            &xime_yaml,
+            r#"config_version: "1.0"
 style:
   font_size: 14.0
   candidate_count: 5
   show_code_hint: false
   corner_radius: 8.0
   color_scheme: lavender_purple
-"#).ok();
+"#,
+        )
+        .ok();
     }
 }
 
 fn init_rime_for_config() {
     RIME_DEPLOYED.call_once(|| {
         ensure_config_files();
-        
+
         let user_dir = get_user_data_dir();
         let shared_dir = get_shared_data_dir();
-        
+
         let mut traits = librime::traits::Traits::new();
         traits.set_shared_data_dir(shared_dir.to_str().unwrap_or(""));
         traits.set_user_data_dir(user_dir.to_str().unwrap_or(""));
         traits.set_log_dir(user_dir.to_str().unwrap_or(""));
-        
+
         librime::setup(&mut traits);
         if let Err(e) = librime::initialize(&mut traits) {
             error!("Failed to initialize Rime: {}", e);
         }
-        
+
         librime::full_deploy_and_wait();
-        
+
         if librime::is_maintenance_mode() {
             librime::join_maintenance_thread();
         }
@@ -105,20 +111,20 @@ impl SchemaManager {
             user_dir: get_user_data_dir(),
         })
     }
-    
+
     pub fn get_schema_list(&self) -> Vec<SchemaInfo> {
         let xime_dir = get_xime_data_dir();
         let shared_dir = get_shared_data_dir();
         let mut schemas = Vec::new();
         let mut seen_ids = std::collections::HashSet::new();
-        
+
         if let Ok(entries) = fs::read_dir(&self.user_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                     if name.ends_with(".schema.yaml") {
                         let schema_id = name.replace(".schema.yaml", "");
-                        
+
                         if let Ok(content) = fs::read_to_string(&path) {
                             let info = extract_schema_info(&content, &schema_id);
                             schemas.push(info.clone());
@@ -128,18 +134,18 @@ impl SchemaManager {
                 }
             }
         }
-        
+
         if let Ok(entries) = fs::read_dir(&xime_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                     if name.ends_with(".schema.yaml") {
                         let schema_id = name.replace(".schema.yaml", "");
-                        
+
                         if seen_ids.contains(&schema_id) {
                             continue;
                         }
-                        
+
                         if let Ok(content) = fs::read_to_string(&path) {
                             let info = extract_schema_info(&content, &schema_id);
                             schemas.push(info.clone());
@@ -149,18 +155,18 @@ impl SchemaManager {
                 }
             }
         }
-        
+
         if let Ok(entries) = fs::read_dir(&shared_dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
                 if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                     if name.ends_with(".schema.yaml") {
                         let schema_id = name.replace(".schema.yaml", "");
-                        
+
                         if seen_ids.contains(&schema_id) {
                             continue;
                         }
-                        
+
                         if let Ok(content) = fs::read_to_string(&path) {
                             let info = extract_schema_info(&content, &schema_id);
                             schemas.push(info);
@@ -169,46 +175,48 @@ impl SchemaManager {
                 }
             }
         }
-        
+
         schemas.sort_by(|a, b| a.name.cmp(&b.name));
         schemas
     }
-    
+
     pub fn get_selected_schema(&self) -> Option<String> {
         let default_custom = self.user_dir.join("default.custom.yaml");
         if !default_custom.exists() {
             return None;
         }
-        
+
         let content = fs::read_to_string(&default_custom).ok()?;
         extract_selected_schema(&content)
     }
-    
+
     pub fn set_schema_list(&self, schema_ids: &[&str]) -> Result<(), String> {
         let default_custom = self.user_dir.join("default.custom.yaml");
-        
+
         let schema_list_yaml = schema_ids
             .iter()
             .map(|id| format!("    - schema: {}", id))
             .collect::<Vec<_>>()
             .join("\n");
-        
+
         let content = format!(
-r#"customization:
+            r#"customization:
   distribution_code_name: Xime
   distribution_version: 1.0
 
 patch:
   schema_list:
 {}
-"#, schema_list_yaml);
-        
+"#,
+            schema_list_yaml
+        );
+
         fs::write(&default_custom, content)
             .map_err(|e| format!("Failed to write default.custom.yaml: {}", e))?;
-        
+
         Ok(())
     }
-    
+
     pub fn save(&self) -> Result<(), String> {
         Ok(())
     }
@@ -219,34 +227,38 @@ fn extract_schema_info(content: &str, schema_id: &str) -> SchemaInfo {
     let mut version = "未知".to_string();
     let mut author = "未知".to_string();
     let mut description = "".to_string();
-    
+
     let lines: Vec<&str> = content.lines().collect();
     let mut in_schema_block = false;
     let mut indent_level = 0;
-    
+
     for i in 0..lines.len() {
         let line = lines[i];
         let trimmed = line.trim();
-        
+
         if trimmed == "schema:" {
             in_schema_block = true;
             indent_level = line.len() - line.trim_start().len();
             continue;
         }
-        
+
         if in_schema_block {
             let current_indent = line.len() - line.trim_start().len();
-            
+
             if current_indent <= indent_level && !trimmed.is_empty() && !trimmed.starts_with('#') {
                 break;
             }
-            
+
             if trimmed.starts_with("name:") {
-                name = trimmed.split(':').nth(1)
+                name = trimmed
+                    .split(':')
+                    .nth(1)
                     .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
                     .unwrap_or_else(|| schema_id.to_string());
             } else if trimmed.starts_with("version:") {
-                version = trimmed.split(':').nth(1)
+                version = trimmed
+                    .split(':')
+                    .nth(1)
                     .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
                     .unwrap_or_else(|| "未知".to_string());
             } else if trimmed.starts_with("author:") {
@@ -256,7 +268,7 @@ fn extract_schema_info(content: &str, schema_id: &str) -> SchemaInfo {
             }
         }
     }
-    
+
     SchemaInfo {
         schema_id: schema_id.to_string(),
         name,
@@ -269,32 +281,36 @@ fn extract_schema_info(content: &str, schema_id: &str) -> SchemaInfo {
 fn extract_author(lines: &[&str], start_idx: usize) -> String {
     let line = lines[start_idx];
     let trimmed = line.trim();
-    
+
     if let Some(single) = trimmed.split(':').nth(1) {
         let author = single.trim().trim_matches('"').trim_matches('\'');
         if !author.is_empty() && !author.starts_with('-') && !author.starts_with('[') {
             return author.to_string();
         }
     }
-    
+
     let indent = line.len() - line.trim_start().len();
     let mut authors = Vec::new();
-    
+
     for i in (start_idx + 1)..lines.len() {
         let next_line = lines[i];
         let next_trimmed = next_line.trim();
         let next_indent = next_line.len() - next_line.trim_start().len();
-        
+
         if next_indent <= indent || next_trimmed.is_empty() || !next_trimmed.starts_with('-') {
             break;
         }
-        
-        let author_name = next_trimmed.trim_start_matches('-').trim().trim_matches('"').trim_matches('\'');
+
+        let author_name = next_trimmed
+            .trim_start_matches('-')
+            .trim()
+            .trim_matches('"')
+            .trim_matches('\'');
         if !author_name.is_empty() {
             authors.push(author_name.to_string());
         }
     }
-    
+
     if authors.is_empty() {
         "未知".to_string()
     } else {
@@ -305,32 +321,32 @@ fn extract_author(lines: &[&str], start_idx: usize) -> String {
 fn extract_description(lines: &[&str], start_idx: usize) -> String {
     let line = lines[start_idx];
     let trimmed = line.trim();
-    
+
     if let Some(desc) = trimmed.split(':').nth(1) {
         let desc = desc.trim();
         if !desc.is_empty() && !desc.starts_with('|') {
             return desc.trim_matches('"').trim_matches('\'').to_string();
         }
     }
-    
+
     if trimmed.ends_with('|') {
         let indent = line.len() - line.trim_start().len();
         let mut desc_lines = Vec::new();
-        
+
         for i in (start_idx + 1)..lines.len() {
             let next_line = lines[i];
             let next_trimmed = next_line.trim();
             let next_indent = next_line.len() - next_line.trim_start().len();
-            
+
             if next_indent < indent && !next_trimmed.is_empty() {
                 break;
             }
-            
+
             if !next_trimmed.is_empty() {
                 desc_lines.push(next_trimmed.to_string());
             }
         }
-        
+
         desc_lines.join(" ").trim().to_string()
     } else {
         "".to_string()
@@ -340,7 +356,8 @@ fn extract_description(lines: &[&str], start_idx: usize) -> String {
 fn extract_selected_schema(content: &str) -> Option<String> {
     for line in content.lines() {
         if line.contains("schema:") {
-            let schema = line.split("schema:")
+            let schema = line
+                .split("schema:")
                 .nth(1)
                 .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string());
             if let Some(s) = schema {
@@ -419,11 +436,13 @@ impl SchemaConfigManager {
             schema_id: schema_id.to_string(),
         })
     }
-    
+
     pub fn get_config(&self) -> SchemaConfig {
-        let custom_yaml = self.user_dir.join(format!("{}.custom.yaml", self.schema_id));
+        let custom_yaml = self
+            .user_dir
+            .join(format!("{}.custom.yaml", self.schema_id));
         let base_yaml = get_shared_data_dir().join(format!("{}.schema.yaml", self.schema_id));
-        
+
         let base_config = if base_yaml.exists() {
             fs::read_to_string(&base_yaml)
                 .ok()
@@ -431,7 +450,7 @@ impl SchemaConfigManager {
         } else {
             None
         };
-        
+
         let custom_config = if custom_yaml.exists() {
             fs::read_to_string(&custom_yaml)
                 .ok()
@@ -439,31 +458,33 @@ impl SchemaConfigManager {
         } else {
             None
         };
-        
+
         merge_configs(base_config, custom_config)
     }
-    
+
     pub fn set_int(&self, key: &str, value: i32) -> Result<(), String> {
         self.update_custom_yaml(key, value.to_string())
     }
-    
+
     pub fn set_bool(&self, key: &str, value: bool) -> Result<(), String> {
         self.update_custom_yaml(key, value.to_string())
     }
-    
+
     pub fn set_string(&self, key: &str, value: &str) -> Result<(), String> {
         self.update_custom_yaml(key, value.to_string())
     }
-    
+
     fn update_custom_yaml(&self, key: &str, value: String) -> Result<(), String> {
-        let custom_yaml = self.user_dir.join(format!("{}.custom.yaml", self.schema_id));
-        
+        let custom_yaml = self
+            .user_dir
+            .join(format!("{}.custom.yaml", self.schema_id));
+
         let existing_content = if custom_yaml.exists() {
             fs::read_to_string(&custom_yaml).ok()
         } else {
             None
         };
-        
+
         let mut lines: Vec<String> = existing_content
             .map(|c| c.lines().map(|l| l.to_string()).collect())
             .unwrap_or_else(|| {
@@ -475,32 +496,34 @@ impl SchemaConfigManager {
                     "patch:".to_string(),
                 ]
             });
-        
+
         let key_parts: Vec<&str> = key.split('/').collect();
         let key_indent = key_parts.len() * 2;
         let formatted_key = key_parts.join("_");
-        
+
         let new_line = format!("  {}: {}", formatted_key, value);
-        
+
         let patch_idx = lines.iter().position(|l| l.trim() == "patch:");
         if let Some(idx) = patch_idx {
             let key_line_prefix = format!("  {}:", formatted_key);
-            let existing_idx = lines.iter().skip(idx + 1)
+            let existing_idx = lines
+                .iter()
+                .skip(idx + 1)
                 .position(|l| l.starts_with(&key_line_prefix));
-            
+
             if let Some(e_idx) = existing_idx {
                 lines[idx + 1 + e_idx] = new_line;
             } else {
                 lines.insert(idx + 1, new_line);
             }
         }
-        
+
         fs::write(&custom_yaml, lines.join("\n") + "\n")
             .map_err(|e| format!("Failed to write: {}", e))?;
-        
+
         Ok(())
     }
-    
+
     pub fn save(&self) -> Result<(), String> {
         Ok(())
     }
@@ -508,18 +531,22 @@ impl SchemaConfigManager {
 
 fn parse_schema_config(content: &str) -> Option<SchemaConfig> {
     let yaml: serde_yaml::Value = serde_yaml::from_str(content).ok()?;
-    
+
     Some(SchemaConfig {
-        speller: yaml.get("speller")
+        speller: yaml
+            .get("speller")
             .and_then(|v| serde_yaml::from_value(v.clone()).ok())
             .unwrap_or_default(),
-        translator: yaml.get("translator")
+        translator: yaml
+            .get("translator")
             .and_then(|v| serde_yaml::from_value(v.clone()).ok())
             .unwrap_or_default(),
-        reverse_lookup: yaml.get("reverse_lookup")
+        reverse_lookup: yaml
+            .get("reverse_lookup")
             .and_then(|v| serde_yaml::from_value(v.clone()).ok())
             .unwrap_or_default(),
-        tradition: yaml.get("tradition")
+        tradition: yaml
+            .get("tradition")
             .and_then(|v| serde_yaml::from_value(v.clone()).ok())
             .unwrap_or_default(),
     })
@@ -533,14 +560,14 @@ fn parse_custom_patch(content: &str) -> Option<SchemaConfig> {
 
 fn merge_configs(base: Option<SchemaConfig>, custom: Option<SchemaConfig>) -> SchemaConfig {
     let mut result = base.unwrap_or_default();
-    
+
     if let Some(c) = custom {
         result.speller = merge_speller(result.speller, c.speller);
         result.translator = merge_translator(result.translator, c.translator);
         result.reverse_lookup = merge_reverse_lookup(result.reverse_lookup, c.reverse_lookup);
         result.tradition = c.tradition;
     }
-    
+
     result
 }
 
@@ -564,7 +591,10 @@ fn merge_translator(base: TranslatorConfig, custom: TranslatorConfig) -> Transla
     }
 }
 
-fn merge_reverse_lookup(base: ReverseLookupConfig, custom: ReverseLookupConfig) -> ReverseLookupConfig {
+fn merge_reverse_lookup(
+    base: ReverseLookupConfig,
+    custom: ReverseLookupConfig,
+) -> ReverseLookupConfig {
     ReverseLookupConfig {
         prefix: custom.prefix.or(base.prefix),
         suffix: custom.suffix.or(base.suffix),
@@ -582,34 +612,34 @@ impl RimeConfigManager {
             user_dir: get_user_data_dir(),
         })
     }
-    
+
     pub fn get_double(&self, key: &str) -> Option<f64> {
         self.get_value(key).and_then(|v| v.parse::<f64>().ok())
     }
-    
+
     pub fn get_int(&self, key: &str) -> Option<i32> {
         self.get_value(key).and_then(|v| v.parse::<i32>().ok())
     }
-    
+
     pub fn get_bool(&self, key: &str) -> Option<bool> {
         self.get_value(key).and_then(|v| v.parse::<bool>().ok())
     }
-    
+
     pub fn get_string(&self, key: &str) -> Option<String> {
         self.get_value(key)
     }
-    
+
     fn get_value(&self, key: &str) -> Option<String> {
         let xime_yaml = self.user_dir.join("xime.yaml");
         let xime_custom = self.user_dir.join("xime.custom.yaml");
-        
+
         if xime_custom.exists() {
             let content = fs::read_to_string(&xime_custom).ok()?;
             if let Some(v) = get_yaml_value(&content, key) {
                 return Some(v);
             }
         }
-        
+
         if xime_yaml.exists() {
             let content = fs::read_to_string(&xime_yaml).ok()?;
             get_yaml_value(&content, key)
@@ -617,32 +647,32 @@ impl RimeConfigManager {
             None
         }
     }
-    
+
     pub fn set_double(&self, key: &str, value: f64) -> Result<(), String> {
         self.set_value(key, value.to_string())
     }
-    
+
     pub fn set_int(&self, key: &str, value: i32) -> Result<(), String> {
         self.set_value(key, value.to_string())
     }
-    
+
     pub fn set_bool(&self, key: &str, value: bool) -> Result<(), String> {
         self.set_value(key, value.to_string())
     }
-    
+
     pub fn set_string(&self, key: &str, value: &str) -> Result<(), String> {
         self.set_value(key, value.to_string())
     }
-    
+
     fn set_value(&self, key: &str, value: String) -> Result<(), String> {
         let xime_custom = self.user_dir.join("xime.custom.yaml");
-        
+
         let existing_content = if xime_custom.exists() {
             fs::read_to_string(&xime_custom).ok()
         } else {
             None
         };
-        
+
         let mut lines: Vec<String> = existing_content
             .map(|c| c.lines().map(|l| l.to_string()).collect())
             .unwrap_or_else(|| {
@@ -654,35 +684,37 @@ impl RimeConfigManager {
                     "patch:".to_string(),
                 ]
             });
-        
+
         let key_parts: Vec<&str> = key.split('/').collect();
         let formatted_key = if key_parts.len() > 1 {
             format!("{}{}", "  ".repeat(key_parts.len()), key_parts.join("_"))
         } else {
             format!("  {}", key)
         };
-        
+
         let new_line = format!("{}: {}", formatted_key, value);
-        
+
         let patch_idx = lines.iter().position(|l| l.trim() == "patch:");
         if let Some(idx) = patch_idx {
             let key_prefix = format!("{}:", formatted_key);
-            let existing_idx = lines.iter().skip(idx + 1)
+            let existing_idx = lines
+                .iter()
+                .skip(idx + 1)
                 .position(|l| l.starts_with(&key_prefix));
-            
+
             if let Some(e_idx) = existing_idx {
                 lines[idx + 1 + e_idx] = new_line;
             } else {
                 lines.insert(idx + 1, new_line);
             }
         }
-        
+
         fs::write(&xime_custom, lines.join("\n") + "\n")
             .map_err(|e| format!("Failed to write: {}", e))?;
-        
+
         Ok(())
     }
-    
+
     pub fn save(&self) -> Result<(), String> {
         Ok(())
     }
@@ -690,14 +722,14 @@ impl RimeConfigManager {
 
 fn get_yaml_value(content: &str, key: &str) -> Option<String> {
     let key_parts: Vec<&str> = key.split('/').collect();
-    
+
     let yaml: serde_yaml::Value = serde_yaml::from_str(content).ok()?;
     let mut current = &yaml;
-    
+
     for part in &key_parts {
         current = current.get(part)?;
     }
-    
+
     match current {
         serde_yaml::Value::String(s) => Some(s.clone()),
         serde_yaml::Value::Number(n) => Some(n.to_string()),
@@ -712,18 +744,18 @@ fn get_xime_config_path() -> PathBuf {
         PathBuf::from(&home).join(".config/xime/xime.yaml"),
         PathBuf::from(&home).join(".config/xime/rime/xime.yaml"),
     ];
-    
+
     for path in &user_paths {
         if path.exists() {
             return path.clone();
         }
     }
-    
+
     let system_path = PathBuf::from("/usr/share/xime/xime.yaml");
     if system_path.exists() {
         return system_path;
     }
-    
+
     user_paths[0].clone()
 }
 
@@ -741,9 +773,15 @@ pub struct XimeStyleConfig {
     pub corner_radius: f32,
 }
 
-fn default_font_size() -> f32 { 14.0 }
-fn default_candidate_count() -> i32 { 5 }
-fn default_corner_radius() -> f32 { 8.0 }
+fn default_font_size() -> f32 {
+    14.0
+}
+fn default_candidate_count() -> i32 {
+    5
+}
+fn default_corner_radius() -> f32 {
+    8.0
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ColorSchemeEntry {
@@ -756,7 +794,9 @@ pub struct ColorSchemeEntry {
 }
 
 fn deserialize_hex_color<'de, D>(deserializer: D) -> Result<u32, D::Error>
-where D: serde::Deserializer<'de> {
+where
+    D: serde::Deserializer<'de>,
+{
     let value: serde_yaml::Value = serde::Deserialize::deserialize(deserializer)?;
     match value {
         serde_yaml::Value::Number(n) => {
@@ -769,11 +809,14 @@ where D: serde::Deserializer<'de> {
         serde_yaml::Value::String(s) => {
             let s = s.trim();
             if s.starts_with("0x") || s.starts_with("0X") {
-                u32::from_str_radix(&s[2..], 16).map_err(|_| serde::de::Error::custom("Invalid hex color"))
+                u32::from_str_radix(&s[2..], 16)
+                    .map_err(|_| serde::de::Error::custom("Invalid hex color"))
             } else if s.starts_with('#') {
-                u32::from_str_radix(&s[1..], 16).map_err(|_| serde::de::Error::custom("Invalid hex color"))
+                u32::from_str_radix(&s[1..], 16)
+                    .map_err(|_| serde::de::Error::custom("Invalid hex color"))
             } else {
-                s.parse::<u32>().map_err(|_| serde::de::Error::custom("Invalid color number"))
+                s.parse::<u32>()
+                    .map_err(|_| serde::de::Error::custom("Invalid color number"))
             }
         }
         _ => Ok(0x8F73E2),
@@ -781,7 +824,9 @@ where D: serde::Deserializer<'de> {
 }
 
 fn serialize_hex_color<S>(value: &u32, serializer: S) -> Result<S::Ok, S::Error>
-where S: serde::Serializer {
+where
+    S: serde::Serializer,
+{
     serializer.serialize_str(&format!("0x{:06X}", value))
 }
 
@@ -803,8 +848,12 @@ pub struct SmartSuggestionConfig {
     pub model: SmartSuggestionModelConfig,
 }
 
-fn default_suggestion_count() -> i32 { 5 }
-fn default_learning_threshold() -> i32 { 3 }
+fn default_suggestion_count() -> i32 {
+    5
+}
+fn default_learning_threshold() -> i32 {
+    3
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct SmartSuggestionModelConfig {
@@ -818,8 +867,12 @@ pub struct SmartSuggestionModelConfig {
     pub files: SmartSuggestionModelFiles,
 }
 
-fn default_model_provider() -> String { "modelscope".to_string() }
-fn default_model_name() -> String { "predictive-text-small".to_string() }
+fn default_model_provider() -> String {
+    "modelscope".to_string()
+}
+fn default_model_name() -> String {
+    "predictive-text-small".to_string()
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct SmartSuggestionModelFiles {
@@ -869,8 +922,12 @@ pub struct CustomizationConfig {
     pub rime_version: String,
 }
 
-fn default_distribution_code_name() -> String { "Xime".to_string() }
-fn default_distribution_version() -> String { "0.13.3".to_string() }
+fn default_distribution_code_name() -> String {
+    "Xime".to_string()
+}
+fn default_distribution_version() -> String {
+    "0.13.3".to_string()
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct WubiRadicalsConfig {
@@ -896,23 +953,26 @@ pub struct XimeStyleManager {
 impl XimeStyleManager {
     pub fn load() -> Result<Self, String> {
         let config_path = get_xime_config_path();
-        
+
         if !config_path.exists() {
             return Err("xime.yaml not found".to_string());
         }
-        
+
         let content = fs::read_to_string(&config_path)
             .map_err(|e| format!("Failed to read xime.yaml: {}", e))?;
-        
+
         let mut config: XimeConfigFile = serde_yaml::from_str(&content)
             .map_err(|e| format!("Failed to parse xime.yaml: {}", e))?;
-        
+
         let system_config = Self::load_system_color_schemes().unwrap_or_default();
         config.color_schemes.extend(system_config.color_schemes);
-        
-        Ok(Self { config_path, config })
+
+        Ok(Self {
+            config_path,
+            config,
+        })
     }
-    
+
     fn load_system_color_schemes() -> Option<XimeConfigFile> {
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
         let system_path = PathBuf::from(manifest_dir)
@@ -920,64 +980,65 @@ impl XimeStyleManager {
             .and_then(|p| p.parent())
             .map(|p| p.join("resources/xime.yaml"))
             .unwrap_or_else(|| PathBuf::from("/usr/share/xime/xime.yaml"));
-        
+
         if !system_path.exists() {
             return None;
         }
-        
+
         let content = fs::read_to_string(&system_path).ok()?;
-        
-        let config: XimeConfigFile = serde_yaml::from_str(&content)
-            .ok()?;
-        
+
+        let config: XimeConfigFile = serde_yaml::from_str(&content).ok()?;
+
         Some(XimeConfigFile {
             color_schemes: config.color_schemes,
             ..Default::default()
         })
     }
-    
+
     pub fn get_style(&self) -> XimeStyleConfig {
         self.config.style.clone()
     }
-    
+
     pub fn get_color_schemes(&self) -> Vec<(String, String, u32)> {
-        self.config.color_schemes.iter()
+        self.config
+            .color_schemes
+            .iter()
             .map(|(id, entry)| (id.clone(), entry.name.clone(), entry.primary_color))
             .collect()
     }
-    
+
     pub fn set_color_scheme(&mut self, scheme_id: &str) -> Result<(), String> {
         self.config.style.color_scheme = scheme_id.to_string();
         self.save()
     }
-    
+
     pub fn set_font_size(&mut self, size: f32) -> Result<(), String> {
         self.config.style.font_size = size;
         self.save()
     }
-    
+
     pub fn set_candidate_count(&mut self, count: i32) -> Result<(), String> {
         self.config.style.candidate_count = count;
         self.save()
     }
-    
+
     pub fn set_show_code_hint(&mut self, show: bool) -> Result<(), String> {
         self.config.style.show_code_hint = show;
         self.save()
     }
-    
+
     pub fn set_corner_radius(&mut self, radius: f32) -> Result<(), String> {
         self.config.style.corner_radius = radius;
         self.save()
     }
-    
+
     fn save(&self) -> Result<(), String> {
         let content = serde_yaml::to_string(&self.config)
             .map_err(|e| format!("Failed to serialize xime.yaml: {}", e))?;
-        
+
         fs::write(&self.config_path, content)
             .map_err(|e| format!("Failed to write xime.yaml: {}", e))?;
-        
+
         Ok(())
     }
 }

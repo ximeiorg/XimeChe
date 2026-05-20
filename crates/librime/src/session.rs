@@ -1,8 +1,8 @@
-use crate::context::Context;
 use crate::commit::Commit;
-use crate::status::Status;
+use crate::context::Context;
 use crate::error::{Error, Result};
 use crate::get_api;
+use crate::status::Status;
 
 use std::ffi::CString;
 

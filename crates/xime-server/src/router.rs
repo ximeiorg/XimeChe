@@ -1,13 +1,16 @@
-use std::sync::Arc;
-use axum::Router;
-use axum::routing::{get, post};
 use axum::middleware;
-use tower_http::cors::{CorsLayer, Any};
+use axum::routing::{get, post};
+use axum::Router;
+use std::sync::Arc;
+use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 
 use crate::auth::AuthState;
+use crate::handlers::{
+    auth_middleware, clipboard_read, clipboard_write, health_check, pair_confirm, pair_list,
+    pair_remove, pair_request, pair_status,
+};
 use crate::state::ServerState;
-use crate::handlers::{health_check, pair_request, pair_status, pair_confirm, pair_list, pair_remove, clipboard_read, clipboard_write, auth_middleware};
 
 pub fn create_router(state: ServerState) -> Router {
     let auth = state.auth.clone();
@@ -16,10 +19,11 @@ pub fn create_router(state: ServerState) -> Router {
         .nest("/clipboard", clipboard_routes(auth))
         .route("/health", get(health_check))
         .layer(TraceLayer::new_for_http())
-        .layer(CorsLayer::new()
-            .allow_origin(Any)
-            .allow_methods(Any)
-            .allow_headers(Any)
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(Any)
+                .allow_headers(Any),
         )
         .with_state(state)
 }
@@ -43,10 +47,10 @@ fn clipboard_routes(auth: Arc<AuthState>) -> Router<ServerState> {
 pub async fn serve(state: ServerState, port: u16) -> Result<(), anyhow::Error> {
     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    
+
     tracing::info!("HTTP server listening on {}", addr);
-    
+
     axum::serve(listener, create_router(state)).await?;
-    
+
     Ok(())
 }

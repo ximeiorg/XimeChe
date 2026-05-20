@@ -1,23 +1,26 @@
-use std::sync::Arc;
+use crate::auth::{compute_hash, AuthState};
+use crate::error::ApiError;
+use crate::state::ServerState;
+use crate::types::*;
 use axum::{
-    extract::{State, Query, Json},
+    extract::{Json, Query, State},
     http::header,
     middleware::Next,
 };
-use crate::types::*;
-use crate::error::ApiError;
-use crate::auth::{AuthState, compute_hash};
-use crate::state::ServerState;
+use std::sync::Arc;
 
 pub async fn clipboard_read(
     State(state): State<ServerState>,
     Query(query): Query<ClipboardQuery>,
 ) -> Result<Json<ClipboardReadResponse>, ApiError> {
-    let clipboard_content = state.providers.clipboard.read()
+    let clipboard_content = state
+        .providers
+        .clipboard
+        .read()
         .map_err(|e| ApiError::ClipboardReadFailed(e.to_string()))?;
-    
+
     let hash = compute_hash(&clipboard_content);
-    
+
     if let Some(since_hash) = query.since_hash {
         if since_hash == hash {
             return Ok(Json(ClipboardReadResponse {
@@ -26,7 +29,7 @@ pub async fn clipboard_read(
             }));
         }
     }
-    
+
     Ok(Json(ClipboardReadResponse {
         content: clipboard_content,
         hash,
@@ -41,21 +44,27 @@ pub async fn clipboard_write(
     if computed != req.hash {
         return Err(ApiError::HashMismatch);
     }
-    
-    let current_content = state.providers.clipboard.read()
+
+    let current_content = state
+        .providers
+        .clipboard
+        .read()
         .map_err(|e| ApiError::ClipboardReadFailed(e.to_string()))?;
     let current_hash = compute_hash(&current_content);
-    
+
     if current_hash == req.hash {
         return Ok(Json(ClipboardWriteResponse {
             accepted: false,
             hash: current_hash,
         }));
     }
-    
-    state.providers.clipboard.write(&req.content)
+
+    state
+        .providers
+        .clipboard
+        .write(&req.content)
         .map_err(|e| ApiError::ClipboardWriteFailed(e.to_string()))?;
-    
+
     Ok(Json(ClipboardWriteResponse {
         accepted: true,
         hash: req.hash.clone(),
@@ -67,21 +76,22 @@ pub async fn auth_middleware(
     request: axum::extract::Request,
     next: Next,
 ) -> Result<axum::response::Response, ApiError> {
-    let auth_header = request.headers()
+    let auth_header = request
+        .headers()
         .get(header::AUTHORIZATION)
         .and_then(|h| h.to_str().ok())
         .ok_or(ApiError::InvalidToken)?;
-    
+
     if !auth_header.starts_with("Bearer ") {
         return Err(ApiError::InvalidToken);
     }
-    
+
     let token = &auth_header[7..];
     let device_auth = auth.verify_token(token)?;
-    
+
     if !device_auth.is_valid() {
         return Err(ApiError::TokenExpired);
     }
-    
+
     Ok(next.run(request).await)
 }

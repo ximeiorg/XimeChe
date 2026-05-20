@@ -18,8 +18,12 @@ pub struct SmartSuggestionConfig {
     pub model: SmartSuggestionModelConfig,
 }
 
-fn default_suggestion_count() -> i32 { 5 }
-fn default_learning_threshold() -> i32 { 3 }
+fn default_suggestion_count() -> i32 {
+    5
+}
+fn default_learning_threshold() -> i32 {
+    3
+}
 
 #[derive(Debug, Deserialize, Serialize, Default)]
 pub struct SmartSuggestionModelConfig {
@@ -33,8 +37,12 @@ pub struct SmartSuggestionModelConfig {
     pub files: Vec<SmartSuggestionModelFile>,
 }
 
-fn default_model_provider() -> String { "modelscope".to_string() }
-fn default_model_name() -> String { "predictive-text".to_string() }
+fn default_model_provider() -> String {
+    "modelscope".to_string()
+}
+fn default_model_name() -> String {
+    "predictive-text-small".to_string()
+}
 
 #[derive(Debug, Deserialize, Serialize, Default)]
 pub struct SmartSuggestionModelFile {
@@ -55,7 +63,7 @@ mod tests {
         assert_eq!(config.suggestion_count, 5);
         assert_eq!(config.learning_threshold, 3);
         assert_eq!(config.model.provider, "modelscope");
-        assert_eq!(config.model.name, "predictive-text");
+        assert_eq!(config.model.name, "predictive-text-small");
     }
 
     #[test]

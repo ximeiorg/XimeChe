@@ -1,9 +1,9 @@
-use std::sync::mpsc::Sender;
-use std::os::unix::io::AsRawFd;
-use std::os::fd::AsFd;
 use nix::unistd::dup;
+use std::os::fd::AsFd;
+use std::os::unix::io::AsRawFd;
+use std::sync::mpsc::Sender;
 use tracing::debug;
-use zbus::{interface};
+use zbus::interface;
 use zbus::zvariant::Fd;
 
 use crate::DaemonCommand;
@@ -28,24 +28,23 @@ impl XimeDaemon {
 
 #[interface(name = "org.xime.Xime.Controller")]
 impl XimeDaemon {
-    async fn open_wayland_socket(
-        &self,
-        fd: Fd<'_>,
-        display_name: String,
-    ) -> zbus::fdo::Result<()> {
+    async fn open_wayland_socket(&self, fd: Fd<'_>, display_name: String) -> zbus::fdo::Result<()> {
         let raw_fd = fd.as_raw_fd();
-        debug!("Received OpenWaylandSocket(fd={}, display={})", raw_fd, display_name);
-        
+        debug!(
+            "Received OpenWaylandSocket(fd={}, display={})",
+            raw_fd, display_name
+        );
+
         let owned_fd = dup(fd.as_fd())
             .map_err(|e| zbus::fdo::Error::Failed(format!("Failed to dup fd: {}", e)))?;
-        
+
         self.command_tx
             .send(DaemonCommand::OpenWaylandSocket(owned_fd, display_name))
             .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
-        
+
         Ok(())
     }
-    
+
     async fn deploy(&self) -> zbus::fdo::Result<()> {
         debug!("Received Deploy request");
         self.command_tx
@@ -53,7 +52,7 @@ impl XimeDaemon {
             .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
         Ok(())
     }
-    
+
     async fn reload_style(&self) -> zbus::fdo::Result<()> {
         debug!("Received ReloadStyle request");
         self.command_tx

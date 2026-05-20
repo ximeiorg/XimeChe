@@ -96,14 +96,18 @@ impl std::fmt::Debug for Traits {
             if self.inner.shared_data_dir.is_null() {
                 "<null>".to_string()
             } else {
-                CStr::from_ptr(self.inner.shared_data_dir).to_string_lossy().into_owned()
+                CStr::from_ptr(self.inner.shared_data_dir)
+                    .to_string_lossy()
+                    .into_owned()
             }
         };
         let user = unsafe {
             if self.inner.user_data_dir.is_null() {
                 "<null>".to_string()
             } else {
-                CStr::from_ptr(self.inner.user_data_dir).to_string_lossy().into_owned()
+                CStr::from_ptr(self.inner.user_data_dir)
+                    .to_string_lossy()
+                    .into_owned()
             }
         };
         f.debug_struct("Traits")
@@ -136,7 +140,11 @@ mod tests {
         let mut traits = Traits::new();
         traits.set_shared_data_dir("/usr/share/rime-data");
         assert!(!traits.inner.shared_data_dir.is_null());
-        let path = unsafe { CStr::from_ptr(traits.inner.shared_data_dir).to_str().unwrap() };
+        let path = unsafe {
+            CStr::from_ptr(traits.inner.shared_data_dir)
+                .to_str()
+                .unwrap()
+        };
         assert_eq!(path, "/usr/share/rime-data");
     }
 
@@ -154,7 +162,11 @@ mod tests {
         let mut traits = Traits::new();
         traits.set_distribution_name("Xime");
         assert!(!traits.inner.distribution_name.is_null());
-        let name = unsafe { CStr::from_ptr(traits.inner.distribution_name).to_str().unwrap() };
+        let name = unsafe {
+            CStr::from_ptr(traits.inner.distribution_name)
+                .to_str()
+                .unwrap()
+        };
         assert_eq!(name, "Xime");
     }
 
@@ -163,7 +175,11 @@ mod tests {
         let mut traits = Traits::new();
         traits.set_distribution_code_name("xime");
         assert!(!traits.inner.distribution_code_name.is_null());
-        let name = unsafe { CStr::from_ptr(traits.inner.distribution_code_name).to_str().unwrap() };
+        let name = unsafe {
+            CStr::from_ptr(traits.inner.distribution_code_name)
+                .to_str()
+                .unwrap()
+        };
         assert_eq!(name, "xime");
     }
 
@@ -172,7 +188,11 @@ mod tests {
         let mut traits = Traits::new();
         traits.set_distribution_version("0.13.3");
         assert!(!traits.inner.distribution_version.is_null());
-        let version = unsafe { CStr::from_ptr(traits.inner.distribution_version).to_str().unwrap() };
+        let version = unsafe {
+            CStr::from_ptr(traits.inner.distribution_version)
+                .to_str()
+                .unwrap()
+        };
         assert_eq!(version, "0.13.3");
     }
 
@@ -195,14 +215,15 @@ mod tests {
     #[test]
     fn test_traits_builder_chain() {
         let mut traits = Traits::new();
-        traits.set_shared_data_dir("/usr/share/rime-data")
-              .set_user_data_dir("/home/user/.config/rime")
-              .set_distribution_name("Xime")
-              .set_distribution_code_name("xime")
-              .set_distribution_version("0.13.3")
-              .set_app_name("xime-daemon")
-              .set_min_log_level(2);
-        
+        traits
+            .set_shared_data_dir("/usr/share/rime-data")
+            .set_user_data_dir("/home/user/.config/rime")
+            .set_distribution_name("Xime")
+            .set_distribution_code_name("xime")
+            .set_distribution_version("0.13.3")
+            .set_app_name("xime-daemon")
+            .set_min_log_level(2);
+
         assert!(!traits.inner.shared_data_dir.is_null());
         assert!(!traits.inner.user_data_dir.is_null());
         assert!(!traits.inner.distribution_name.is_null());

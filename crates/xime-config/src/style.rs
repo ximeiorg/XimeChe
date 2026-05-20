@@ -32,11 +32,21 @@ impl Default for StyleConfig {
     }
 }
 
-fn default_font_size() -> f32 { 14.0 }
-fn default_candidate_count() -> i32 { 5 }
-fn default_horizontal() -> bool { true }
-fn default_corner_radius() -> f32 { 8.0 }
-fn default_color_scheme() -> String { "lavender_purple".to_string() }
+fn default_font_size() -> f32 {
+    14.0
+}
+fn default_candidate_count() -> i32 {
+    5
+}
+fn default_horizontal() -> bool {
+    true
+}
+fn default_corner_radius() -> f32 {
+    8.0
+}
+fn default_color_scheme() -> String {
+    "lavender_purple".to_string()
+}
 
 #[derive(Debug, Deserialize, Serialize, Default)]
 pub struct ColorScheme {
@@ -50,10 +60,14 @@ pub struct ColorScheme {
     pub primary_color: u32,
 }
 
-fn default_primary_color() -> u32 { 0x8F73E2 }
+fn default_primary_color() -> u32 {
+    0x8F73E2
+}
 
 pub fn deserialize_hex_color<'de, D>(deserializer: D) -> Result<u32, D::Error>
-where D: serde::Deserializer<'de> {
+where
+    D: serde::Deserializer<'de>,
+{
     let value: serde_yaml::Value = serde::Deserialize::deserialize(deserializer)?;
     match value {
         serde_yaml::Value::Number(n) => {
@@ -81,7 +95,9 @@ where D: serde::Deserializer<'de> {
 }
 
 pub fn serialize_hex_color<S>(value: &u32, serializer: S) -> Result<S::Ok, S::Error>
-where S: serde::Serializer {
+where
+    S: serde::Serializer,
+{
     serializer.serialize_str(&format!("0x{:06X}", value))
 }
 
