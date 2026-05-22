@@ -68,6 +68,7 @@ impl WaylandLoop {
         let mut smart_suggestion_visible = false;
         let mut last_committed_text = String::new();
         let mut smart_suggestion_candidates: Vec<String> = Vec::new();
+        let mut smart_suggestion_page: usize = 0;
 
         loop {
             use std::sync::mpsc::TryRecvError;
@@ -166,6 +167,7 @@ impl WaylandLoop {
                         smart_suggestion_visible = false;
                         last_committed_text.clear();
                         smart_suggestion_candidates.clear();
+                        smart_suggestion_page = 0;
                         continue;
                     }
                 }
@@ -184,6 +186,7 @@ impl WaylandLoop {
                         &mut predictor,
                         &mut last_committed_text,
                         &mut smart_suggestion_candidates,
+                        &mut smart_suggestion_page,
                     );
                 }
             }
@@ -207,6 +210,7 @@ impl WaylandLoop {
         predictor: &mut Option<Predictor>,
         last_committed_text: &mut String,
         smart_suggestion_candidates: &mut Vec<String>,
+        smart_suggestion_page: &mut usize,
     ) {
         if let Some(ref mut x) = xkb {
             if let Some((fd, size)) = c.get_keymap_pending() {
@@ -244,6 +248,7 @@ impl WaylandLoop {
                         predictor,
                         last_committed_text,
                         smart_suggestion_candidates,
+                        smart_suggestion_page,
                     );
                 }
             }
@@ -267,6 +272,7 @@ impl WaylandLoop {
         predictor: &mut Option<Predictor>,
         last_committed_text: &mut String,
         smart_suggestion_candidates: &mut Vec<String>,
+        smart_suggestion_page: &mut usize,
     ) {
         let modifiers = xkb.get_modifiers();
         let release_mask = if !event.pressed {
@@ -283,10 +289,44 @@ impl WaylandLoop {
 
         if *smart_suggestion_visible && event.pressed {
             let raw = sym.raw();
+            let page_size = xime_config.smart_suggestion.suggestion_count as usize;
+
+            let total_pages = (smart_suggestion_candidates.len() + page_size - 1) / page_size;
+
+            if raw == 0x005D && *smart_suggestion_page + 1 < total_pages {
+                *smart_suggestion_page += 1;
+                self.show_smart_suggestions(
+                    c,
+                    xime_config,
+                    predictor,
+                    smart_suggestion_visible,
+                    candidate_window_visible,
+                    last_committed_text,
+                    smart_suggestion_candidates,
+                    smart_suggestion_page,
+                );
+                return;
+            }
+            if raw == 0x005B && *smart_suggestion_page > 0 {
+                *smart_suggestion_page -= 1;
+                self.show_smart_suggestions(
+                    c,
+                    xime_config,
+                    predictor,
+                    smart_suggestion_visible,
+                    candidate_window_visible,
+                    last_committed_text,
+                    smart_suggestion_candidates,
+                    smart_suggestion_page,
+                );
+                return;
+            }
+
+            let page_offset = *smart_suggestion_page * page_size;
             let selected_idx = if raw == 0x0020 {
-                Some(0)
+                Some(page_offset)
             } else if raw >= 0x0031 && raw <= 0x0039 {
-                let idx = (raw - 0x0031) as usize;
+                let idx = page_offset + (raw - 0x0031) as usize;
                 Some(idx)
             } else {
                 None
@@ -303,11 +343,13 @@ impl WaylandLoop {
                 *smart_suggestion_visible = false;
                 smart_suggestion_candidates.clear();
                 *candidate_window_visible = false;
+                *smart_suggestion_page = 0;
                 return;
             }
 
             *smart_suggestion_visible = false;
             smart_suggestion_candidates.clear();
+            *smart_suggestion_page = 0;
             debug!("Smart suggestion dismissed by key press");
         }
 
@@ -383,6 +425,7 @@ impl WaylandLoop {
                 );
                 if xime_config.smart_suggestion.enabled && !*last_ascii_mode {
                     debug!("Calling show_smart_suggestions");
+                    *smart_suggestion_page = 0;
                     self.show_smart_suggestions(
                         c,
                         xime_config,
@@ -391,6 +434,7 @@ impl WaylandLoop {
                         candidate_window_visible,
                         last_committed_text,
                         smart_suggestion_candidates,
+                        smart_suggestion_page,
                     );
                 }
             }
@@ -453,6 +497,7 @@ impl WaylandLoop {
         candidate_window_visible: &mut bool,
         last_committed_text: &str,
         smart_suggestion_candidates: &mut Vec<String>,
+        smart_suggestion_page: &usize,
     ) {
         debug!(
             "show_smart_suggestions called, predictor.is_none={}, last_committed_text='{}'",
@@ -485,48 +530,51 @@ impl WaylandLoop {
             last_committed_text.to_string()
         };
 
-        if let Some(ref mut p) = predictor {
-            let result = p.predict(
-                &prefix,
-                xime_config.smart_suggestion.suggestion_count as usize,
-            );
-            match &result {
-                Ok(list) => debug!("predict OK, count={}", list.len()),
-                Err(e) => debug!("predict error: {}", e),
-            }
-            if let Ok(suggestions) = result {
-                if !suggestions.is_empty() {
-                    debug!("Smart suggestions for '{}': {:?}", prefix, suggestions);
+        let page_size = xime_config.smart_suggestion.suggestion_count as usize;
 
+        if smart_suggestion_candidates.is_empty() {
+            if let Some(ref mut p) = predictor {
+                let result = p.predict(&prefix, page_size * 10);
+                match &result {
+                    Ok(list) => debug!("predict OK, count={}", list.len()),
+                    Err(e) => debug!("predict error: {}", e),
+                }
+                if let Ok(suggestions) = result {
                     smart_suggestion_candidates.clear();
                     smart_suggestion_candidates.extend(suggestions.iter().map(|(t, _)| t.clone()));
-
-                    let candidate_items: Vec<xime_ui::CandidateItem> = suggestions
-                        .iter()
-                        .enumerate()
-                        .map(|(i, (text, _score))| xime_ui::CandidateItem {
-                            text: text.clone(),
-                            comment: String::new(),
-                            index: i,
-                        })
-                        .collect();
-
-                    let width = xime_ui::calculate_candidate_width(&candidate_items);
-                    let height = 36;
-                    let primary_color = xime_config.get_primary_color();
-
-                    if let Err(e) =
-                        c.show_candidate_window(width, height, &candidate_items, 0, primary_color)
-                    {
-                        debug!("Smart suggestion window error: {}", e);
-                    } else {
-                        *smart_suggestion_visible = true;
-                        *candidate_window_visible = true;
-                        if let Err(e) = c.flush() {
-                            debug!("Flush error: {}", e);
-                        }
-                    }
                 }
+            }
+        }
+
+        if smart_suggestion_candidates.is_empty() {
+            return;
+        }
+
+        let start = *smart_suggestion_page * page_size;
+        let end = std::cmp::min(start + page_size, smart_suggestion_candidates.len());
+        let page_items: Vec<String> = smart_suggestion_candidates[start..end].to_vec();
+
+        let candidate_items: Vec<xime_ui::CandidateItem> = page_items
+            .iter()
+            .enumerate()
+            .map(|(i, text)| xime_ui::CandidateItem {
+                text: text.clone(),
+                comment: String::new(),
+                index: start + i,
+            })
+            .collect();
+
+        let width = xime_ui::calculate_candidate_width(&candidate_items);
+        let height = 36;
+        let primary_color = xime_config.get_primary_color();
+
+        if let Err(e) = c.show_candidate_window(width, height, &candidate_items, 0, primary_color) {
+            debug!("Smart suggestion window error: {}", e);
+        } else {
+            *smart_suggestion_visible = true;
+            *candidate_window_visible = true;
+            if let Err(e) = c.flush() {
+                debug!("Flush error: {}", e);
             }
         }
     }
