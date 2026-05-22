@@ -2,13 +2,14 @@ use crate::components::{Radio, SettingsControl, SettingsGroup, SettingsItem, Set
 use crate::pages::SettingsApp;
 use crate::state::SettingsState;
 use gpui::{prelude::FluentBuilder, IntoElement, ParentElement, *};
+use xime_config::{SchemaConfig, SchemaManager};
 
 pub fn render(settings: Entity<SettingsState>, cx: &mut Context<SettingsApp>) -> AnyElement {
     let schemas_loaded = cx.read_entity(&settings, |state, _| state.schemas_loaded);
 
     if !schemas_loaded {
         cx.update_entity(&settings, |state: &mut SettingsState, cx| {
-            if let Ok(manager) = crate::rime_config::SchemaManager::new() {
+            if let Ok(manager) = SchemaManager::new() {
                 let schemas = manager.get_schema_list();
                 let selected_schema = manager
                     .get_selected_schema()
@@ -161,7 +162,7 @@ pub fn render(settings: Entity<SettingsState>, cx: &mut Context<SettingsApp>) ->
 
 fn render_schema_config(
     settings: Entity<SettingsState>,
-    config: &crate::rime_config::SchemaConfig,
+    config: &SchemaConfig,
     colors: &crate::theme::ThemeColors,
     schema_name: &str,
     _cx: &mut Context<SettingsApp>,
