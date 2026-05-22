@@ -53,7 +53,6 @@ wubi_radicals:
 style:
   font_size: 14
   candidate_count: 5
-  show_code_hint: true
   horizontal: true
   color_scheme: lavender_purple
 

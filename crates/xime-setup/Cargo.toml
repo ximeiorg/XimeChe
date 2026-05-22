@@ -8,8 +8,7 @@ repository.workspace = true
 
 [dependencies]
 gpui = { version = "0.2", default-features = false, features = ["wayland", "font-kit"] }
-librime = { path = "../librime" }
-librime-sys2 = { path = "../librime-sys" }
+xime-config = { path = "../xime-config" }
 anyhow = "1.0"
 rust-embed = { version = "8", features = ["interpolate-folder-path"] }
 serde_yaml = "0.9"

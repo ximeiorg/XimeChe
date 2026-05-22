@@ -7526,8 +7526,10 @@ dependencies = [
 name = "xime-config"
 version = "0.1.0"
 dependencies = [
+ "librime",
  "serde",
  "serde_yaml",
+ "tracing",
 ]
 
 [[package]]
@@ -7603,14 +7605,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "gpui",
- "librime",
- "librime-sys2",
  "nix 0.31.3",
  "reqwest",
  "rust-embed",
  "serde",
  "serde_yaml",
  "tracing",
+ "xime-config",
  "zbus 5.15.0",
 ]
 

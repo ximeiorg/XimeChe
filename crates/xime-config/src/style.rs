@@ -8,8 +8,6 @@ pub struct StyleConfig {
     pub font_size: f32,
     #[serde(default = "default_candidate_count")]
     pub candidate_count: i32,
-    #[serde(default)]
-    pub show_code_hint: bool,
     #[serde(default = "default_horizontal")]
     pub horizontal: bool,
     #[serde(default = "default_corner_radius")]
@@ -24,7 +22,6 @@ impl Default for StyleConfig {
             font_family: String::new(),
             font_size: default_font_size(),
             candidate_count: default_candidate_count(),
-            show_code_hint: false,
             horizontal: default_horizontal(),
             corner_radius: default_corner_radius(),
             color_scheme: default_color_scheme(),
