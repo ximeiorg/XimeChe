@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 xime-config.workspace = true
+xime-predict = { path = "../xime-predict" }
 xime-wayland.workspace = true
 xime-xkb.workspace = true
 xime-ui.workspace = true

@@ -7547,6 +7547,7 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "xime-config",
+ "xime-predict",
  "xime-server",
  "xime-tray",
  "xime-ui",

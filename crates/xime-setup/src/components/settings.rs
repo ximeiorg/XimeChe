@@ -49,7 +49,7 @@ impl SettingsItem {
     pub fn render(&self, colors: &ThemeColors) -> Div {
         let control_element: AnyElement = match &self.control {
             SettingsControl::Switch(s) => {
-                let themed = s.clone().theme(colors.primary, colors.disabled);
+                let themed = s.clone().theme(colors.clone());
                 themed.into_any_element()
             }
             SettingsControl::Dropdown(d) => d.clone().into_any_element(),
@@ -105,6 +105,7 @@ impl SettingsItem {
                     .when_some(self.description.clone(), |this: Div, desc| {
                         this.child(
                             div()
+                                .max_w(px(300.0))
                                 .text_size(px(12.0))
                                 .text_color(colors.foreground_muted)
                                 .child(desc),

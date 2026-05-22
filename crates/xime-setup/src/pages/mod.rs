@@ -18,20 +18,10 @@ impl SettingsApp {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let settings = cx.new(|cx| SettingsState::new(cx));
 
-        let this = Self {
+        Self {
             current_page: 0,
-            settings: settings.clone(),
-        };
-
-        cx.observe(
-            &settings,
-            |this: &mut SettingsApp, _settings, cx: &mut Context<SettingsApp>| {
-                cx.notify();
-            },
-        )
-        .detach();
-
-        this
+            settings,
+        }
     }
 }
 

@@ -7,8 +7,6 @@ pub struct SmartSuggestionConfig {
     #[serde(default = "default_suggestion_count")]
     pub suggestion_count: i32,
     #[serde(default)]
-    pub prefer_common_words: bool,
-    #[serde(default)]
     pub record_user_frequency: bool,
     #[serde(default)]
     pub auto_adjust_frequency: bool,
@@ -31,8 +29,6 @@ pub struct SmartSuggestionModelConfig {
     pub provider: String,
     #[serde(default = "default_model_name")]
     pub name: String,
-    #[serde(default)]
-    pub auto_download: bool,
     #[serde(default)]
     pub files: Vec<SmartSuggestionModelFile>,
 }
@@ -71,7 +67,6 @@ mod tests {
         let yaml = "
 enabled: true
 suggestion_count: 10
-prefer_common_words: true
 model:
   provider: custom
   name: my-model
@@ -84,7 +79,6 @@ model:
         let config: SmartSuggestionConfig = serde_yaml::from_str(yaml).unwrap();
         assert!(config.enabled);
         assert_eq!(config.suggestion_count, 10);
-        assert!(config.prefer_common_words);
         assert_eq!(config.model.provider, "custom");
         assert_eq!(config.model.name, "my-model");
         assert_eq!(config.model.files.len(), 2);
