@@ -136,7 +136,7 @@ impl Predictor {
 
         // Create input tensor following demo pattern
         let input =
-            TensorRef::from_array_view((vec![1i64, 1, tokens.len() as i64], tokens.as_slice()))?;
+            TensorRef::from_array_view((vec![1i64, tokens.len() as i64], tokens.as_slice()))?;
 
         // Run inference
         let outputs = self.session.run(inputs![input])?;
@@ -144,9 +144,12 @@ impl Predictor {
         // Extract logits - shape [B, _, S, V]
         let (dim, probabilities) = outputs[0].try_extract_tensor::<f32>()?;
 
-        // Get vocab size and sequence length
-        let seq_len = dim[2] as usize;
-        let vocab_size = dim[3] as usize;
+        info!("Output dims: {:?}", dim);
+
+        // Get vocab size and sequence length from last two dimensions
+        let num_dims = dim.len();
+        let vocab_size = dim[num_dims - 1] as usize;
+        let seq_len = dim[num_dims - 2] as usize;
 
         // Get probabilities for last token position
         let last_token_probs = &probabilities[(seq_len - 1) * vocab_size..];

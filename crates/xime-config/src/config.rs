@@ -78,6 +78,8 @@ impl XimeConfig {
     fn user_config_path() -> PathBuf {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
         let user_paths = [
+            PathBuf::from(&home).join(".config/xime/xime.custom.yaml"),
+            PathBuf::from(&home).join(".config/xime/rime/xime.custom.yaml"),
             PathBuf::from(&home).join(".config/xime/xime.yaml"),
             PathBuf::from(&home).join(".config/xime/rime/xime.yaml"),
         ];

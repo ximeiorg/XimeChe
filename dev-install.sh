@@ -41,9 +41,9 @@ update-desktop-database "${DATADIR}/applications" 2>/dev/null || true
 CONFIGDIR="${HOME}/.config/xime"
 RIMEDIR="${CONFIGDIR}/rime"
 
-if [ ! -f "${CONFIGDIR}/xime.yaml" ]; then
-    install -Dm644 "${PROJECT_ROOT}/resources/xime.yaml" "${CONFIGDIR}/xime.yaml"
-    echo "Installed default config to ${CONFIGDIR}/xime.yaml"
+if [ ! -f "${CONFIGDIR}/xime.custom.yaml" ]; then
+    install -Dm644 "${PROJECT_ROOT}/resources/xime.yaml" "${CONFIGDIR}/xime.custom.yaml"
+    echo "Installed default config to ${CONFIGDIR}/xime.custom.yaml"
 fi
 
 # Install rime-wubi schemas to user directory

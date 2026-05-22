@@ -1,9 +1,12 @@
+use std::fmt::Write;
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
 
+use chrono::Local;
 use tracing::{debug, error, info};
 use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::fmt::time::FormatTime;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use xime_server::{serve, PlatformProviders, ServerState};
 use xime_tray::{MenuAction, TrayManager};
@@ -33,17 +36,27 @@ fn init_tracing() -> WorkerGuard {
         std::fs::create_dir_all(&log_dir).ok();
     }
 
+    struct LocalTimer;
+    impl FormatTime for LocalTimer {
+        fn format_time(
+            &self,
+            w: &mut tracing_subscriber::fmt::format::Writer<'_>,
+        ) -> std::fmt::Result {
+            write!(w, "{}", Local::now().format("%Y-%m-%dT%H:%M:%S%.6f%:z"))
+        }
+    }
+
     let file_appender = tracing_appender::rolling::never(&log_dir, "xime.log");
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
-    let file_layer = fmt::layer().with_writer(non_blocking).with_ansi(false);
+    let file_layer = fmt::layer()
+        .with_writer(non_blocking)
+        .with_ansi(false)
+        .with_timer(LocalTimer);
 
     let stdout_layer = fmt::layer().with_writer(std::io::stderr).with_ansi(true);
 
-    #[cfg(debug_assertions)]
     let default_level = tracing::Level::DEBUG;
-    #[cfg(not(debug_assertions))]
-    let default_level = tracing::Level::INFO;
 
     tracing_subscriber::registry()
         .with(EnvFilter::from_default_env().add_directive(default_level.into()))

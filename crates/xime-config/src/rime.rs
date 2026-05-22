@@ -686,9 +686,9 @@ impl RimeConfigManager {
 
         let key_parts: Vec<&str> = key.split('/').collect();
         let formatted_key = if key_parts.len() > 1 {
-            format!("{}{}", "  ".repeat(key_parts.len()), key_parts.join("_"))
+            format!("    {}", key_parts.join("_"))
         } else {
-            format!("  {}", key)
+            format!("    {}", key)
         };
 
         let new_line = format!("{}: {}", formatted_key, value);
