@@ -92,7 +92,6 @@ color_schemes:
 smart_suggestion:
   enabled: true
   suggestion_count: 5
-  prefer_common_words: true
   record_user_frequency: true
   auto_adjust_frequency: true
   learning_threshold: 3
@@ -100,7 +99,6 @@ smart_suggestion:
   model:
     provider: "modelscope"
     name: "predictive-text-small"
-    auto_download: true
     files:
       - url: "https://modelscope.cn/models/bikeand/predictive-text-small/resolve/master/vocab.json"
         filename: "vocab.json"

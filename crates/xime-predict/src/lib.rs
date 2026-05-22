@@ -205,19 +205,264 @@ pub fn check_model_exists(model_name: Option<&str>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn get_unique_vocab_path() -> PathBuf {
+        let id = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
+        PathBuf::from(format!("test_vocab_{}.json", id))
+    }
+
+    fn create_test_vocab() -> (PathBuf, Vocab) {
+        let vocab_path = get_unique_vocab_path();
+        let test_vocab = r#"{"[PAD]":0,"[BOS]":1,"[EOS]":2,"[UNK]":3,"你":4,"好":5,"世":6,"界":7,"吗":8,"很":9,"棒":10}"#;
+        std::fs::write(&vocab_path, test_vocab).unwrap();
+        let vocab = Vocab::load(&vocab_path).unwrap();
+        (vocab_path, vocab)
+    }
+
+    fn cleanup_test_vocab(path: &PathBuf) {
+        std::fs::remove_file(path).ok();
+    }
+
+    fn has_valid_model() -> bool {
+        if !check_model_exists(None) {
+            return false;
+        }
+        let model_dir = get_model_dir(None);
+        let vocab_path = model_dir.join("vocab.json");
+        if let Ok(content) = std::fs::read_to_string(&vocab_path) {
+            content.starts_with("{") && !content.starts_with("<!DOCTYPE")
+        } else {
+            false
+        }
+    }
 
     #[test]
     fn test_vocab_load() {
-        let vocab_path = PathBuf::from("test_vocab.json");
-        let test_vocab = r#"{"[PAD]":0,"[BOS]":1,"[EOS]":2,"[UNK]":3,"你":4,"好":5,"世":6,"界":7}"#;
-        std::fs::write(&vocab_path, test_vocab).unwrap();
+        let (vocab_path, vocab) = create_test_vocab();
 
-        let vocab = Vocab::load(&vocab_path).unwrap();
-        assert_eq!(vocab.encode("你好"), vec![1, 4, 5]);
+        assert_eq!(vocab.vocab_size(), 11);
+        assert_eq!(vocab.bos_id, 1);
+        assert_eq!(vocab.eos_id, 2);
+        assert_eq!(vocab.unk_id, 3);
+        assert_eq!(vocab.pad_id, 0);
+
+        cleanup_test_vocab(&vocab_path);
+    }
+
+    #[test]
+    fn test_vocab_encode_basic() {
+        let (vocab_path, vocab) = create_test_vocab();
+
+        let encoded = vocab.encode("你好");
+        assert_eq!(encoded, vec![1, 4, 5]);
+
+        cleanup_test_vocab(&vocab_path);
+    }
+
+    #[test]
+    fn test_vocab_encode_with_unknown() {
+        let (vocab_path, vocab) = create_test_vocab();
+
+        let encoded = vocab.encode("你好X");
+        assert_eq!(encoded, vec![1, 4, 5, 3]);
+
+        cleanup_test_vocab(&vocab_path);
+    }
+
+    #[test]
+    fn test_vocab_encode_empty() {
+        let (vocab_path, vocab) = create_test_vocab();
+
+        let encoded = vocab.encode("");
+        assert_eq!(encoded, vec![1]);
+
+        cleanup_test_vocab(&vocab_path);
+    }
+
+    #[test]
+    fn test_vocab_decode() {
+        let (vocab_path, vocab) = create_test_vocab();
+
+        assert_eq!(vocab.decode(0), Some("[PAD]"));
+        assert_eq!(vocab.decode(1), Some("[BOS]"));
         assert_eq!(vocab.decode(4), Some("你"));
+        assert_eq!(vocab.decode(5), Some("好"));
+        assert_eq!(vocab.decode(99), None);
+
+        cleanup_test_vocab(&vocab_path);
+    }
+
+    #[test]
+    fn test_vocab_is_special() {
+        let (vocab_path, vocab) = create_test_vocab();
+
         assert!(vocab.is_special(0));
+        assert!(vocab.is_special(1));
+        assert!(vocab.is_special(2));
+        assert!(vocab.is_special(3));
         assert!(!vocab.is_special(4));
+        assert!(!vocab.is_special(5));
+
+        cleanup_test_vocab(&vocab_path);
+    }
+
+    #[test]
+    fn test_vocab_roundtrip() {
+        let (vocab_path, vocab) = create_test_vocab();
+
+        let text = "世界很棒";
+        let chars: Vec<char> = text.chars().collect();
+        let encoded = vocab.encode(text);
+
+        assert_eq!(encoded.len(), chars.len() + 1);
+        for (i, id) in encoded.iter().skip(1).enumerate() {
+            let decoded = vocab.decode(*id);
+            assert!(decoded.is_some());
+            assert_eq!(decoded.unwrap().chars().next(), Some(chars[i]));
+        }
+
+        cleanup_test_vocab(&vocab_path);
+    }
+
+    #[test]
+    fn test_vocab_file_not_found() {
+        let result = Vocab::load(&PathBuf::from("nonexistent_vocab.json"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_vocab_invalid_json() {
+        let vocab_path = PathBuf::from("invalid_vocab.json");
+        std::fs::write(&vocab_path, "not json").unwrap();
+
+        let result = Vocab::load(&vocab_path);
+        assert!(result.is_err());
 
         std::fs::remove_file(&vocab_path).ok();
+    }
+
+    #[test]
+    fn test_predictor_model_not_found() {
+        let result = Predictor::new(Some("nonexistent-model"));
+        assert!(result.is_err());
+        match result {
+            Err(PredictError::ModelNotFound(_)) => {}
+            _ => panic!("Expected ModelNotFound error"),
+        }
+    }
+
+    #[test]
+    fn test_predictor_new_with_existing_model() {
+        if !has_valid_model() {
+            return;
+        }
+
+        let predictor = Predictor::new(None).unwrap();
+        assert_eq!(predictor.model_name(), "predictive-text-small");
+        assert!(predictor.vocab_size() > 0);
+    }
+
+    #[test]
+    fn test_predict_basic() {
+        if !has_valid_model() {
+            return;
+        }
+
+        let mut predictor = Predictor::new(None).unwrap();
+        let results = predictor.predict("你好", 5).unwrap();
+
+        assert!(!results.is_empty());
+        assert!(results.len() <= 5);
+
+        for (token, score) in &results {
+            assert!(!token.is_empty());
+            assert!(*score >= 0.0 && *score <= 1.0);
+        }
+    }
+
+    #[test]
+    fn test_predict_empty_prefix() {
+        if !has_valid_model() {
+            return;
+        }
+
+        let mut predictor = Predictor::new(None).unwrap();
+        let results = predictor.predict("", 3).unwrap();
+
+        assert!(!results.is_empty());
+    }
+
+    #[test]
+    fn test_predict_filters_special_tokens() {
+        if !has_valid_model() {
+            return;
+        }
+
+        let mut predictor = Predictor::new(None).unwrap();
+        let results = predictor.predict("你好", 100).unwrap();
+
+        for (token, _) in &results {
+            assert_ne!(token, "[PAD]");
+            assert_ne!(token, "[BOS]");
+            assert_ne!(token, "[EOS]");
+            assert_ne!(token, "[UNK]");
+        }
+    }
+
+    #[test]
+    fn test_predict_scores_ordered() {
+        if !has_valid_model() {
+            return;
+        }
+
+        let mut predictor = Predictor::new(None).unwrap();
+        let results = predictor.predict("你好", 10).unwrap();
+
+        for i in 1..results.len() {
+            assert!(results[i - 1].1 >= results[i].1);
+        }
+    }
+
+    #[test]
+    fn test_get_model_dir() {
+        let dir = get_model_dir(None);
+        assert!(dir.to_string_lossy().contains(".config/xime/models"));
+        assert!(dir.to_string_lossy().contains("predictive-text-small"));
+
+        let dir = get_model_dir(Some("custom-model"));
+        assert!(dir.to_string_lossy().contains("custom-model"));
+    }
+
+    #[test]
+    fn test_check_model_exists() {
+        let exists = check_model_exists(None);
+        if exists {
+            let dir = get_model_dir(None);
+            assert!(dir.join("vocab.json").exists());
+            assert!(dir.join("model.onnx").exists());
+            assert!(dir.join("model.onnx.data").exists());
+        }
+    }
+
+    #[test]
+    fn test_predict_with_chinese_text() {
+        if !has_valid_model() {
+            return;
+        }
+
+        let mut predictor = Predictor::new(None).unwrap();
+
+        let test_cases = ["你好", "今天", "我想", "中国", "学习"];
+        for prefix in test_cases {
+            let results = predictor.predict(prefix, 5).unwrap();
+            assert!(
+                !results.is_empty(),
+                "Should have predictions for '{}'",
+                prefix
+            );
+        }
     }
 }

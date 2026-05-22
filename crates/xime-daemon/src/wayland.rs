@@ -4,6 +4,7 @@ use std::thread;
 
 use tracing::{debug, error, info, warn};
 use xime_config::XimeConfig;
+use xime_predict::{check_model_exists, Predictor};
 use xime_tray::{InputMode, TrayManager};
 use xime_wayland::{InputMethodV1State, WaylandConnectionV1};
 use xime_xkb::XkbContext;
@@ -37,6 +38,17 @@ impl WaylandLoop {
         let mut xkb: Option<XkbContext> = None;
         let mut rime = RimeEngine::new();
 
+        let mut predictor = if check_model_exists(None) {
+            Predictor::new(None).ok()
+        } else {
+            None
+        };
+        if predictor.is_some() {
+            info!("Smart suggestion model loaded successfully");
+        } else {
+            debug!("Smart suggestion model not available");
+        }
+
         let mut xime_config = XimeConfig::load();
         let _last_key_root_binding = xime_config.get_last_key_root_binding();
         let primary_color = xime_config.get_primary_color();
@@ -53,6 +65,8 @@ impl WaylandLoop {
         let mut ctrl_root_visible = false;
         let mut last_ascii_mode = false;
         let mut last_state = InputMethodV1State::Inactive;
+        let mut smart_suggestion_visible = false;
+        let mut last_committed_text = String::new();
 
         loop {
             use std::sync::mpsc::TryRecvError;
@@ -141,6 +155,8 @@ impl WaylandLoop {
 
                     if !is_active {
                         candidate_window_visible = false;
+                        smart_suggestion_visible = false;
+                        last_committed_text.clear();
                         continue;
                     }
                 }
@@ -155,6 +171,9 @@ impl WaylandLoop {
                         &mut last_input_keysym,
                         &mut ctrl_root_visible,
                         &mut last_ascii_mode,
+                        &mut smart_suggestion_visible,
+                        &mut predictor,
+                        &mut last_committed_text,
                     );
                 }
             }
@@ -174,6 +193,9 @@ impl WaylandLoop {
         last_input_keysym: &mut Option<u32>,
         ctrl_root_visible: &mut bool,
         last_ascii_mode: &mut bool,
+        smart_suggestion_visible: &mut bool,
+        predictor: &mut Option<Predictor>,
+        last_committed_text: &mut String,
     ) {
         if let Some(ref mut x) = xkb {
             if let Some((fd, size)) = c.get_keymap_pending() {
@@ -207,6 +229,9 @@ impl WaylandLoop {
                         last_input_keysym,
                         ctrl_root_visible,
                         last_ascii_mode,
+                        smart_suggestion_visible,
+                        predictor,
+                        last_committed_text,
                     );
                 }
             }
@@ -226,6 +251,9 @@ impl WaylandLoop {
         last_input_keysym: &mut Option<u32>,
         ctrl_root_visible: &mut bool,
         last_ascii_mode: &mut bool,
+        smart_suggestion_visible: &mut bool,
+        predictor: &mut Option<Predictor>,
+        last_committed_text: &mut String,
     ) {
         let modifiers = xkb.get_modifiers();
         let release_mask = if !event.pressed {
@@ -299,9 +327,22 @@ impl WaylandLoop {
             }
 
             if let Some(commit) = session.commit() {
-                c.commit_string(commit.text());
+                let committed = commit.text();
+                c.commit_string(committed);
                 let _ = c.flush();
-                debug!("Committed: {}", commit.text());
+                debug!("Committed: {}", committed);
+
+                *last_committed_text = committed.to_string();
+
+                if xime_config.smart_suggestion.enabled && !*last_ascii_mode {
+                    self.show_smart_suggestions(
+                        c,
+                        xime_config,
+                        predictor,
+                        smart_suggestion_visible,
+                        last_committed_text,
+                    );
+                }
             }
 
             if let Some(ctx) = session.context() {
@@ -343,10 +384,71 @@ impl WaylandLoop {
                         debug!("Candidate window error: {}", e);
                     }
                     *candidate_window_visible = true;
+                    *smart_suggestion_visible = false;
                 } else if *candidate_window_visible {
                     c.hide_candidate_window();
                     let _ = c.flush();
                     *candidate_window_visible = false;
+                }
+            }
+        }
+    }
+
+    fn show_smart_suggestions(
+        &self,
+        c: &mut WaylandConnectionV1,
+        xime_config: &XimeConfig,
+        predictor: &mut Option<Predictor>,
+        smart_suggestion_visible: &mut bool,
+        last_committed_text: &str,
+    ) {
+        if predictor.is_none() || last_committed_text.is_empty() {
+            return;
+        }
+
+        let prefix = if last_committed_text.len() > 4 {
+            last_committed_text
+                .chars()
+                .rev()
+                .take(4)
+                .collect::<String>()
+        } else {
+            last_committed_text.to_string()
+        };
+
+        if let Some(ref mut p) = predictor {
+            let suggestions = p.predict(
+                &prefix,
+                xime_config.smart_suggestion.suggestion_count as usize,
+            );
+            if let Ok(suggestions) = suggestions {
+                if !suggestions.is_empty() {
+                    debug!("Smart suggestions for '{}': {:?}", prefix, suggestions);
+
+                    let candidate_items: Vec<xime_ui::CandidateItem> = suggestions
+                        .iter()
+                        .enumerate()
+                        .map(|(i, (text, _score))| xime_ui::CandidateItem {
+                            text: text.clone(),
+                            comment: String::new(),
+                            index: i,
+                        })
+                        .collect();
+
+                    let width = xime_ui::calculate_candidate_width(&candidate_items);
+                    let height = 36;
+                    let primary_color = xime_config.get_primary_color();
+
+                    if let Err(e) =
+                        c.show_candidate_window(width, height, &candidate_items, 0, primary_color)
+                    {
+                        debug!("Smart suggestion window error: {}", e);
+                    } else {
+                        *smart_suggestion_visible = true;
+                        if let Err(e) = c.flush() {
+                            debug!("Flush error: {}", e);
+                        }
+                    }
                 }
             }
         }

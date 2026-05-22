@@ -1,3 +1,4 @@
+use crate::theme::ThemeColors;
 use gpui::prelude::FluentBuilder;
 use gpui::*;
 use std::sync::Arc;
@@ -6,8 +7,7 @@ use std::sync::Arc;
 pub struct Switch {
     checked: bool,
     on_change: Option<Arc<dyn Fn(bool, &mut Window, &mut App) + 'static>>,
-    primary: Option<Hsla>,
-    bg_off: Option<Hsla>,
+    colors: Option<ThemeColors>,
 }
 
 impl Switch {
@@ -15,8 +15,7 @@ impl Switch {
         Self {
             checked,
             on_change: None,
-            primary: None,
-            bg_off: None,
+            colors: None,
         }
     }
 
@@ -25,9 +24,8 @@ impl Switch {
         self
     }
 
-    pub fn theme(mut self, primary: Hsla, bg_off: Hsla) -> Self {
-        self.primary = Some(primary);
-        self.bg_off = Some(bg_off);
+    pub fn theme(mut self, colors: ThemeColors) -> Self {
+        self.colors = Some(colors);
         self
     }
 }
@@ -38,8 +36,9 @@ impl IntoElement for Switch {
     fn into_element(self) -> Self::Element {
         let checked = self.checked;
         let on_change = self.on_change;
-        let primary = self.primary.unwrap_or(rgb(0x8F73E2).into());
-        let bg_off = self.bg_off.unwrap_or(rgb(0x4d4d4d).into());
+        let colors = self.colors.unwrap_or_else(|| {
+            ThemeColors::from_theme(&crate::theme::SystemTheme::Light, 0x8F73E2)
+        });
         let toggle_width = px(44.0);
         let toggle_height = px(24.0);
         let knob_size = px(18.0);
@@ -53,10 +52,10 @@ impl IntoElement for Switch {
             .flex()
             .items_center()
             .when(checked, |this: Stateful<Div>| {
-                this.bg(primary).justify_end().pr(padding)
+                this.bg(colors.primary).justify_end().pr(padding)
             })
             .when(!checked, |this: Stateful<Div>| {
-                this.bg(bg_off).justify_start().pl(padding)
+                this.bg(colors.disabled).justify_start().pl(padding)
             })
             .cursor_pointer()
             .when_some(on_change, |this: Stateful<Div>, cb| {
@@ -69,7 +68,7 @@ impl IntoElement for Switch {
                     .w(knob_size)
                     .h(knob_size)
                     .rounded(px(10.0))
-                    .bg(white()),
+                    .bg(colors.on_primary),
             )
     }
 }

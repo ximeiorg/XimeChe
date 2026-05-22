@@ -196,10 +196,6 @@ impl SettingsState {
             self.smart_suggestion.suggestion_count,
         )?;
         manager.set_bool(
-            "smart_suggestion/prefer_common_words",
-            self.smart_suggestion.prefer_common_words,
-        )?;
-        manager.set_bool(
             "smart_suggestion/record_user_frequency",
             self.smart_suggestion.record_user_frequency,
         )?;
@@ -219,18 +215,6 @@ impl SettingsState {
         manager.set_string(
             "smart_suggestion/model/name",
             &self.smart_suggestion.model_name,
-        )?;
-        manager.set_bool(
-            "smart_suggestion/model/auto_download",
-            self.smart_suggestion.auto_download,
-        )?;
-        manager.set_string(
-            "smart_suggestion/model/files/vocab/url",
-            &self.smart_suggestion.vocab_url,
-        )?;
-        manager.set_string(
-            "smart_suggestion/model/files/onnx/url",
-            &self.smart_suggestion.onnx_url,
         )?;
 
         manager.save()?;
@@ -308,16 +292,12 @@ pub struct InputSchemaState {
 pub struct SmartSuggestionState {
     pub enabled: bool,
     pub suggestion_count: i32,
-    pub prefer_common_words: bool,
     pub record_user_frequency: bool,
     pub auto_adjust_frequency: bool,
     pub learning_threshold: i32,
     pub model_provider: String,
     pub model_name: String,
-    pub auto_download: bool,
-    pub vocab_url: String,
-    pub onnx_url: String,
-    pub model_downloaded: bool,
+    pub downloading: bool,
 }
 
 impl Default for SmartSuggestionState {
@@ -325,16 +305,12 @@ impl Default for SmartSuggestionState {
         Self {
             enabled: false,
             suggestion_count: 5,
-            prefer_common_words: true,
             record_user_frequency: true,
             auto_adjust_frequency: true,
             learning_threshold: 3,
             model_provider: "modelscope".to_string(),
             model_name: "predictive-text-small".to_string(),
-            auto_download: true,
-            vocab_url: "".to_string(),
-            onnx_url: "".to_string(),
-            model_downloaded: false,
+            downloading: false,
         }
     }
 }
