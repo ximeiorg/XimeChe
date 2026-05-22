@@ -16,10 +16,20 @@ pub struct SettingsState {
 
 impl SettingsState {
     pub fn new(cx: &mut Context<Self>) -> Self {
+        let config = XimeConfig::load();
         let mut state = Self {
             appearance: AppearanceState::default(),
             input_schema: InputSchemaState::default(),
-            smart_suggestion: SmartSuggestionState::default(),
+            smart_suggestion: SmartSuggestionState {
+                enabled: config.smart_suggestion.enabled,
+                suggestion_count: config.smart_suggestion.suggestion_count,
+                record_user_frequency: config.smart_suggestion.record_user_frequency,
+                auto_adjust_frequency: config.smart_suggestion.auto_adjust_frequency,
+                learning_threshold: config.smart_suggestion.learning_threshold,
+                model_provider: config.smart_suggestion.model.provider.clone(),
+                model_name: config.smart_suggestion.model.name.clone(),
+                ..Default::default()
+            },
             system_theme: SystemTheme::detect(),
             deploy_message: None,
             schemas_loaded: false,
@@ -188,37 +198,16 @@ impl SettingsState {
     }
 
     pub fn save_smart_suggestion(&self) -> Result<(), String> {
-        let manager = RimeConfigManager::new()?;
-
-        manager.set_bool("smart_suggestion/enabled", self.smart_suggestion.enabled)?;
-        manager.set_int(
-            "smart_suggestion/suggestion_count",
-            self.smart_suggestion.suggestion_count,
-        )?;
-        manager.set_bool(
-            "smart_suggestion/record_user_frequency",
-            self.smart_suggestion.record_user_frequency,
-        )?;
-        manager.set_bool(
-            "smart_suggestion/auto_adjust_frequency",
-            self.smart_suggestion.auto_adjust_frequency,
-        )?;
-        manager.set_int(
-            "smart_suggestion/learning_threshold",
-            self.smart_suggestion.learning_threshold,
-        )?;
-
-        manager.set_string(
-            "smart_suggestion/model/provider",
-            &self.smart_suggestion.model_provider,
-        )?;
-        manager.set_string(
-            "smart_suggestion/model/name",
-            &self.smart_suggestion.model_name,
-        )?;
-
-        manager.save()?;
-
+        let mut config = XimeConfig::load();
+        config.smart_suggestion.enabled = self.smart_suggestion.enabled;
+        config.smart_suggestion.suggestion_count = self.smart_suggestion.suggestion_count;
+        config.smart_suggestion.record_user_frequency = self.smart_suggestion.record_user_frequency;
+        config.smart_suggestion.auto_adjust_frequency = self.smart_suggestion.auto_adjust_frequency;
+        config.smart_suggestion.learning_threshold = self.smart_suggestion.learning_threshold;
+        config.smart_suggestion.model.provider = self.smart_suggestion.model_provider.clone();
+        config.smart_suggestion.model.name = self.smart_suggestion.model_name.clone();
+        config.save()?;
+        notify_daemon_reload_style();
         Ok(())
     }
 

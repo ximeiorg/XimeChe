@@ -7537,6 +7537,7 @@ name = "xime-daemon"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "librime",
  "nix 0.31.3",
  "serde",
