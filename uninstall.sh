@@ -30,7 +30,7 @@ rm -f ~/.local/share/applications/xime-launcher.desktop
 # 5. 清理日志文件
 echo "清理日志文件..."
 rm -rf ~/.config/xime/xime*.log
-rm ~/.config/xime/xime-setup.lock
+rm -rf ~/.config/xime/xime-setup.lock
 rm -rf ~/.local/share/sddm/xime*.log 2>/dev/null || true
 find ~/.config/xime/rime -name "*.log" -type f -delete 2>/dev/null || true
 # 清理 Rime 构建缓存日志
