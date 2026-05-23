@@ -26,8 +26,15 @@ impl AuthConfig {
     }
 }
 
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AuthToken {
+    #[allow(dead_code)]
     device_id: String,
     token: String,
     expires_at: DateTime<Utc>,
@@ -154,7 +161,15 @@ impl AuthState {
             config: Arc::new(config),
         }
     }
+}
 
+impl Default for AuthState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AuthState {
     pub fn generate_token(&self, device_id: &str) -> AuthToken {
         AuthToken::generate(device_id, &self.config)
     }

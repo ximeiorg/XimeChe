@@ -163,6 +163,7 @@ impl CandidateRenderer {
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn draw_highlight(
         &mut self,
         pixmap: &mut Pixmap,
@@ -178,10 +179,7 @@ impl CandidateRenderer {
         }
 
         // Calculate x offset for highlighted candidate using precomputed widths
-        let mut x_offset: f32 = 15.0;
-        for i in 0..highlighted_index {
-            x_offset += widths[i];
-        }
+        let x_offset: f32 = 15.0 + widths.iter().take(highlighted_index).sum::<f32>();
 
         let candidate = &candidates[highlighted_index];
         let main_text = format!("{}. {}", highlighted_index + 1, candidate.text);
@@ -276,6 +274,7 @@ impl CandidateRenderer {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn draw_text_item(
         &mut self,
         text: &str,
@@ -304,7 +303,7 @@ impl CandidateRenderer {
             |x, y, w, h, color| {
                 blend_glyph(
                     pixmap_data,
-                    x as i32 + x_start,
+                    x + x_start,
                     y + y_offset,
                     w as i32,
                     h as i32,
@@ -337,6 +336,7 @@ impl Default for CandidateRenderer {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn blend_glyph(
     pixmap_data: &mut [u8],
     x: i32,

@@ -40,9 +40,6 @@ impl ClipboardProvider for InMemoryClipboard {
 }
 
 #[cfg(feature = "linux")]
-pub use linux::*;
-
-#[cfg(feature = "linux")]
 mod linux {
     use super::*;
     use std::sync::Mutex;
@@ -82,10 +79,7 @@ mod linux {
     }
 }
 
-#[cfg(feature = "windows")]
-pub use windows::*;
-
-#[cfg(feature = "windows")]
+#[cfg(all(feature = "windows", not(feature = "linux")))]
 mod windows {
     use super::*;
     use std::sync::Mutex;
@@ -166,16 +160,16 @@ impl PlatformProviders {
     #[cfg(feature = "linux")]
     pub fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         Ok(Self {
-            clipboard: std::sync::Arc::new(SystemClipboard::new()?),
-            config_dir: std::sync::Arc::new(DefaultConfigDir::new(get_config_dir())),
+            clipboard: std::sync::Arc::new(linux::SystemClipboard::new()?),
+            config_dir: std::sync::Arc::new(DefaultConfigDir::new(linux::get_config_dir())),
         })
     }
 
-    #[cfg(feature = "windows")]
+    #[cfg(all(feature = "windows", not(feature = "linux")))]
     pub fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         Ok(Self {
-            clipboard: std::sync::Arc::new(SystemClipboard::new()?),
-            config_dir: std::sync::Arc::new(DefaultConfigDir::new(get_config_dir())),
+            clipboard: std::sync::Arc::new(windows::SystemClipboard::new()?),
+            config_dir: std::sync::Arc::new(DefaultConfigDir::new(windows::get_config_dir())),
         })
     }
 }

@@ -3,11 +3,13 @@ use crate::pages::SettingsApp;
 use crate::state::SettingsState;
 use gpui::*;
 
+#[allow(dead_code)]
 fn get_user_data_dir() -> String {
     let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
     format!("{}/.config/xime/rime", home)
 }
 
+#[allow(dead_code)]
 pub fn render(settings: Entity<SettingsState>, cx: &mut Context<SettingsApp>) -> AnyElement {
     let colors = cx.read_entity(&settings, |state, _| state.colors());
     let path_str = get_user_data_dir();

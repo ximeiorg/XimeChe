@@ -111,6 +111,12 @@ impl RimeEngine {
     }
 }
 
+impl Default for RimeEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Drop for RimeEngine {
     fn drop(&mut self) {
         librime::finalize();

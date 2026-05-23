@@ -211,7 +211,7 @@ impl RootRenderer {
             |x, y, w, h, color| {
                 blend_glyph(
                     pixmap_data,
-                    x as i32 + key_x_offset,
+                    x + key_x_offset,
                     y + key_y_offset,
                     w as i32,
                     h as i32,
@@ -233,7 +233,7 @@ impl RootRenderer {
             |x, y, w, h, color| {
                 blend_glyph(
                     pixmap_data,
-                    x as i32 + root_x_start as i32,
+                    x + root_x_start as i32,
                     y + root_y_offset,
                     w as i32,
                     h as i32,
@@ -269,6 +269,7 @@ pub fn calculate_root_width(key: char, root: &str, primary_color: (u8, u8, u8)) 
     RootRenderer::calculate_width(key, root, primary_color)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn blend_glyph(
     pixmap_data: &mut [u8],
     x: i32,

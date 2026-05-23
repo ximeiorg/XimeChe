@@ -292,8 +292,7 @@ fn extract_author(lines: &[&str], start_idx: usize) -> String {
     let indent = line.len() - line.trim_start().len();
     let mut authors = Vec::new();
 
-    for i in (start_idx + 1)..lines.len() {
-        let next_line = lines[i];
+    for next_line in lines.iter().skip(start_idx + 1) {
         let next_trimmed = next_line.trim();
         let next_indent = next_line.len() - next_line.trim_start().len();
 
@@ -333,8 +332,7 @@ fn extract_description(lines: &[&str], start_idx: usize) -> String {
         let indent = line.len() - line.trim_start().len();
         let mut desc_lines = Vec::new();
 
-        for i in (start_idx + 1)..lines.len() {
-            let next_line = lines[i];
+        for next_line in lines.iter().skip(start_idx + 1) {
             let next_trimmed = next_line.trim();
             let next_indent = next_line.len() - next_line.trim_start().len();
 

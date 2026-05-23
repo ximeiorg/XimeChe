@@ -38,6 +38,7 @@ impl SettingsState {
         state
     }
 
+    #[allow(dead_code)]
     pub fn load_schemas(&mut self, cx: &mut Context<Self>) {
         if self.schemas_loaded {
             return;

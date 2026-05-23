@@ -28,6 +28,7 @@ fn build_rounded_rect(x: f32, y: f32, w: f32, h: f32, r: f32) -> tiny_skia::Path
     pb.finish().unwrap()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn blend_glyph(
     pixmap_data: &mut [u8],
     x: i32,
@@ -126,8 +127,8 @@ fn render_text_icon(text: &str, bg_color: Color, size: i32) -> Vec<u8> {
         |x, y, w, h, color| {
             blend_glyph(
                 pixmap.data_mut(),
-                x as i32 + x_offset,
-                y as i32 + y_offset,
+                x + x_offset,
+                y + y_offset,
                 w as i32,
                 h as i32,
                 color,
@@ -166,7 +167,15 @@ impl StatusNotifierItem {
             toggle_tx: None,
         }
     }
+}
 
+impl Default for StatusNotifierItem {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl StatusNotifierItem {
     pub fn with_toggle_channel(toggle_tx: Sender<()>) -> Self {
         Self {
             mode: Arc::new(Mutex::new(InputMode::Chinese)),
@@ -319,6 +328,7 @@ impl StatusNotifierItem {
     }
 
     #[zbus(property)]
+    #[allow(clippy::type_complexity)]
     fn tooltip(&self) -> (String, Vec<(i32, i32, Vec<u8>)>, String, String) {
         let title = match self.get_mode() {
             InputMode::Chinese => "中文输入",
@@ -343,6 +353,7 @@ impl StatusNotifierItem {
     }
 }
 
+#[allow(dead_code)]
 impl StatusNotifierItem {
     fn toggle_mode(&self) {
         let new_mode = match self.get_mode() {

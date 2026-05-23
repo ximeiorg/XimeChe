@@ -53,6 +53,7 @@ impl SystemTheme {
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct ThemeColors {
     pub background: Hsla,
     pub surface: Hsla,

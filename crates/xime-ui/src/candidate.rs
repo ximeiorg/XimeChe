@@ -58,7 +58,7 @@ impl CandidateList {
     }
 
     pub fn page_down(&mut self) {
-        let total_pages = (self.items.len() + self.page_size - 1) / self.page_size;
+        let total_pages = self.items.len().div_ceil(self.page_size);
         if self.current_page < total_pages - 1 {
             self.current_page += 1;
             self.highlighted_index = 0;
@@ -110,7 +110,7 @@ impl CandidateList {
         let total_pages = if self.items.is_empty() {
             0
         } else {
-            (self.items.len() + self.page_size - 1) / self.page_size
+            self.items.len().div_ceil(self.page_size)
         };
         let is_last_page = if total_pages == 0 {
             true
