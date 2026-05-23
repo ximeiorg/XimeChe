@@ -6,6 +6,7 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct Switch {
     checked: bool,
+    #[allow(clippy::type_complexity)]
     on_change: Option<Arc<dyn Fn(bool, &mut Window, &mut App) + 'static>>,
     colors: Option<ThemeColors>,
 }

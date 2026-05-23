@@ -15,6 +15,7 @@ use tracing::info;
 #[folder = "$CARGO_MANIFEST_DIR/assets"]
 #[include = "image/*.png"]
 #[include = "icons/*.svg"]
+#[allow(dead_code)]
 struct Assets;
 
 impl AssetSource for Assets {
@@ -97,7 +98,7 @@ fn main() {
                 window_decorations: Some(WindowDecorations::Client),
                 ..Default::default()
             },
-            |_window, cx| cx.new(|cx| SettingsApp::new(cx)),
+            |_window, cx| cx.new(SettingsApp::new),
         );
     });
 }

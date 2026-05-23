@@ -378,6 +378,7 @@ pub struct WaylandConnectionV1 {
     input_panel: Option<ZwpInputPanelV1>,
     compositor: Option<WlCompositor>,
     shm: Option<WlShm>,
+    #[allow(dead_code)]
     output: Option<WlOutput>,
     has_v1_global: bool,
     panel_surface: Option<ZwpInputPanelSurfaceV1>,
@@ -458,21 +459,21 @@ impl WaylandConnectionV1 {
         // Blocking dispatch - wait for at least one event
         self.event_queue
             .roundtrip(&mut self.state)
-            .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+            .map_err(|e| Error::Io(std::io::Error::other(e)))?;
         Ok(())
     }
 
     pub fn dispatch_pending(&mut self) -> Result<()> {
         self.event_queue
             .dispatch_pending(&mut self.state)
-            .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+            .map_err(|e| Error::Io(std::io::Error::other(e)))?;
         Ok(())
     }
 
     pub fn sync_roundtrip(&mut self) -> Result<()> {
         self.event_queue
             .roundtrip(&mut self.state)
-            .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+            .map_err(|e| Error::Io(std::io::Error::other(e)))?;
         Ok(())
     }
 
@@ -540,7 +541,7 @@ impl WaylandConnectionV1 {
     pub fn flush(&self) -> Result<()> {
         self.connection
             .flush()
-            .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+            .map_err(|e| Error::Io(std::io::Error::other(e)))?;
         Ok(())
     }
 
@@ -571,7 +572,7 @@ impl WaylandConnectionV1 {
 
         self.connection
             .flush()
-            .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+            .map_err(|e| Error::Io(std::io::Error::other(e)))?;
 
         eprintln!("DEBUG: Created candidate panel surface with overlay_panel");
         Ok(())
@@ -730,10 +731,7 @@ impl WaylandConnectionV1 {
         let surface = self
             .candidate_surface
             .as_ref()
-            .ok_or(Error::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "No candidate surface",
-            )))?;
+            .ok_or(Error::Io(std::io::Error::other("No candidate surface")))?;
 
         // Destroy old buffer and pool
         if let Some(buffer) = self.current_buffer.take() {
@@ -770,7 +768,7 @@ impl WaylandConnectionV1 {
 
         self.connection
             .flush()
-            .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+            .map_err(|e| Error::Io(std::io::Error::other(e)))?;
 
         eprintln!(
             "DEBUG: Showed root window {}x{} for key {} (on candidate surface)",

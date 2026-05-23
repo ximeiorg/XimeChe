@@ -8,6 +8,7 @@ pub struct NumberInput {
     min: f64,
     max: f64,
     step: f64,
+    #[allow(clippy::type_complexity)]
     on_change: Option<Arc<dyn Fn(f64, &mut Window, &mut App) + 'static>>,
     bg: Option<Hsla>,
     border_color: Option<Hsla>,
@@ -17,6 +18,7 @@ pub struct NumberInput {
     disabled_color: Option<Hsla>,
 }
 
+#[allow(dead_code)]
 impl NumberInput {
     pub fn new(value: f64) -> Self {
         Self {

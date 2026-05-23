@@ -95,7 +95,7 @@ impl WaylandLoop {
                 }
                 Ok(DaemonCommand::ToggleMode) => {
                     debug!("ToggleMode command received");
-                    if let Some(_) = rime.session() {
+                    if rime.session().is_some() {
                         let new_ascii = rime.toggle_ascii_mode();
                         last_ascii_mode = new_ascii;
                         let tray_mode = if new_ascii {
@@ -291,7 +291,7 @@ impl WaylandLoop {
             let raw = sym.raw();
             let page_size = xime_config.smart_suggestion.suggestion_count as usize;
 
-            let total_pages = (smart_suggestion_candidates.len() + page_size - 1) / page_size;
+            let total_pages = smart_suggestion_candidates.len().div_ceil(page_size);
 
             if raw == 0x005D && *smart_suggestion_page + 1 < total_pages {
                 *smart_suggestion_page += 1;
@@ -325,7 +325,7 @@ impl WaylandLoop {
             let page_offset = *smart_suggestion_page * page_size;
             let selected_idx = if raw == 0x0020 {
                 Some(page_offset)
-            } else if raw >= 0x0031 && raw <= 0x0039 {
+            } else if (0x0031..=0x0039).contains(&raw) {
                 let idx = page_offset + (raw - 0x0031) as usize;
                 Some(idx)
             } else {
@@ -359,8 +359,9 @@ impl WaylandLoop {
             is_ctrl, candidate_window_visible, last_input_keysym
         );
 
-        if *candidate_window_visible && is_ctrl {
-            if self.handle_ctrl_key(
+        if *candidate_window_visible
+            && is_ctrl
+            && self.handle_ctrl_key(
                 c,
                 xime_config,
                 &event,
@@ -370,9 +371,9 @@ impl WaylandLoop {
                 last_input_keysym,
                 ctrl_root_visible,
                 rime,
-            ) {
-                return;
-            }
+            )
+        {
+            return;
         }
 
         if let Some(session) = rime.session() {
@@ -488,6 +489,7 @@ impl WaylandLoop {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn show_smart_suggestions(
         &self,
         c: &mut WaylandConnectionV1,

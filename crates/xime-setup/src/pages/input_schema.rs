@@ -58,8 +58,8 @@ pub fn render(settings: Entity<SettingsState>, cx: &mut Context<SettingsApp>) ->
         .map(|(i, schema)| {
             let is_selected = i == selected;
             let settings_item = settings_clone.clone();
-            let primary = colors.primary.clone();
-            let surface_variant = colors.surface_variant.clone();
+            let primary = colors.primary;
+            let surface_variant = colors.surface_variant;
             let radio_colors = colors.clone();
 
             div()
@@ -73,9 +73,7 @@ pub fn render(settings: Entity<SettingsState>, cx: &mut Context<SettingsApp>) ->
                 .cursor_pointer()
                 .hover(|style| style.bg(surface_variant))
                 .when(is_selected, |this| {
-                    this.border_1()
-                        .border_color(primary.clone())
-                        .bg(colors.selection)
+                    this.border_1().border_color(primary).bg(colors.selection)
                 })
                 .on_click(move |_event, _window, cx| {
                     settings_item.update(cx, |s: &mut SettingsState, cx| {

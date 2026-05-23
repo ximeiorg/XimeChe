@@ -8,6 +8,7 @@ pub struct SettingsItem {
     description: Option<String>,
 }
 
+#[allow(dead_code)]
 impl SettingsItem {
     pub fn new(label: impl Into<String>, control: SettingsControl) -> Self {
         Self {
@@ -154,6 +155,7 @@ impl SettingsItem {
     }
 }
 
+#[allow(dead_code)]
 pub enum SettingsControl {
     Switch(Switch),
     Dropdown(Dropdown),
@@ -164,6 +166,7 @@ pub enum SettingsControl {
     Custom,
 }
 
+#[allow(dead_code)]
 impl SettingsControl {
     pub fn is_custom(&self) -> bool {
         matches!(self, SettingsControl::Custom)
@@ -300,6 +303,7 @@ pub struct SettingsPage {
     colors: ThemeColors,
 }
 
+#[allow(dead_code)]
 impl SettingsPage {
     pub fn new(title: impl Into<String>, colors: ThemeColors) -> Self {
         Self {

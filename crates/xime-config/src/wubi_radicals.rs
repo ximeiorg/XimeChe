@@ -148,9 +148,11 @@ mod tests {
     #[test]
     fn test_get_root_for_key() {
         let mut config = WubiRadicalsConfig::default();
-        let mut radicals = KeyRadicalsConfig::default();
-        radicals.g = "王龶五一戋".to_string();
-        radicals.a = "工匚戈艹廿龷七弋戈".to_string();
+        let radicals = KeyRadicalsConfig {
+            g: "王龶五一戋".to_string(),
+            a: "工匚戈艹廿龷七弋戈".to_string(),
+            ..Default::default()
+        };
         config
             .schema_radicals
             .insert("wubi86".to_string(), radicals);

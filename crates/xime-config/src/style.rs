@@ -79,8 +79,8 @@ where
             if s.starts_with("0x") || s.starts_with("0X") {
                 u32::from_str_radix(&s[2..], 16)
                     .map_err(|_| serde::de::Error::custom("Invalid hex color"))
-            } else if s.starts_with('#') {
-                u32::from_str_radix(&s[1..], 16)
+            } else if let Some(stripped) = s.strip_prefix('#') {
+                u32::from_str_radix(stripped, 16)
                     .map_err(|_| serde::de::Error::custom("Invalid hex color"))
             } else {
                 s.parse::<u32>()

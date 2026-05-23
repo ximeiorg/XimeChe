@@ -129,19 +129,15 @@ impl XkbContext {
     }
 
     pub fn key_from_keycode(&self, keycode: u32) -> Option<Keysym> {
-        if let Some(state) = &self.state {
-            Some(state.key_get_one_sym(Keycode::new(keycode)))
-        } else {
-            None
-        }
+        self.state
+            .as_ref()
+            .map(|state| state.key_get_one_sym(Keycode::new(keycode)))
     }
 
     pub fn key_is_modifier(&self, _keycode: u32, modifier: ModIndex) -> Option<bool> {
-        if let Some(state) = &self.state {
-            Some(state.mod_index_is_active(modifier, xkbcommon::xkb::STATE_MODS_EFFECTIVE))
-        } else {
-            None
-        }
+        self.state
+            .as_ref()
+            .map(|state| state.mod_index_is_active(modifier, xkbcommon::xkb::STATE_MODS_EFFECTIVE))
     }
 
     pub fn get_modifiers(&self) -> ModifierState {
@@ -208,13 +204,14 @@ pub fn keysym_to_rime_keycode(keysym: Keysym) -> i32 {
     keysym.raw() as i32
 }
 
+#[allow(clippy::if_same_then_else)]
 pub fn keysym_to_char(keysym: Keysym) -> Option<char> {
     let raw = keysym.raw();
-    if raw >= 0x61 && raw <= 0x7a {
+    if (0x61..=0x7a).contains(&raw) {
         Some((raw as u8) as char)
-    } else if raw >= 0x41 && raw <= 0x5a {
+    } else if (0x41..=0x5a).contains(&raw) {
         Some((raw as u8) as char)
-    } else if raw >= 0x30 && raw <= 0x39 {
+    } else if (0x30..=0x39).contains(&raw) {
         Some((raw as u8) as char)
     } else if raw == 0x20 {
         Some(' ')
@@ -224,13 +221,14 @@ pub fn keysym_to_char(keysym: Keysym) -> Option<char> {
 }
 
 /// Convert keysym raw value to lowercase letter (for hotkey matching)
+#[allow(clippy::if_same_then_else)]
 pub fn keysym_to_letter(keysym_raw: u32) -> Option<char> {
     // Lowercase letters: 0x61-0x7a (a-z)
-    if keysym_raw >= 0x61 && keysym_raw <= 0x7a {
+    if (0x61..=0x7a).contains(&keysym_raw) {
         Some((keysym_raw as u8 as char).to_ascii_lowercase())
     }
     // Uppercase letters: 0x41-0x5a (A-Z)
-    else if keysym_raw >= 0x41 && keysym_raw <= 0x5a {
+    else if (0x41..=0x5a).contains(&keysym_raw) {
         Some((keysym_raw as u8 as char).to_ascii_lowercase())
     } else {
         None

@@ -6,12 +6,14 @@ use std::sync::Arc;
 pub struct Button {
     label: String,
     id: String,
+    #[allow(clippy::type_complexity)]
     on_click: Option<Arc<dyn Fn(&mut Window, &mut App) + 'static>>,
     primary: Option<Hsla>,
     primary_hover: Option<Hsla>,
     on_primary: Option<Hsla>,
 }
 
+#[allow(dead_code)]
 impl Button {
     pub fn new(label: impl Into<String>) -> Self {
         let label_str = label.into();
@@ -49,7 +51,7 @@ impl IntoElement for Button {
     fn into_element(self) -> Self::Element {
         let primary = self.primary.unwrap_or(rgb(0x8F73E2).into());
         let hover = self.primary_hover.unwrap_or(rgb(0x7A5FD0).into());
-        let text_color = self.on_primary.unwrap_or(white().into());
+        let text_color = self.on_primary.unwrap_or(white());
         let on_click = self.on_click;
         let id: SharedString = self.id.into();
 

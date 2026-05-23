@@ -24,7 +24,15 @@ impl DBusMenu {
             action_tx: None,
         }
     }
+}
 
+impl Default for DBusMenu {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl DBusMenu {
     pub fn with_action_channel(action_tx: Sender<MenuAction>) -> Self {
         Self {
             revision: 0,
@@ -71,6 +79,7 @@ impl DBusMenu {
         Err(zbus::fdo::Error::NotSupported("Not implemented".into()))
     }
 
+    #[allow(clippy::type_complexity)]
     #[zbus(out_args("revision", "layout"))]
     fn get_layout(
         &self,

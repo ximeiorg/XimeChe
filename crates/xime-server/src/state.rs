@@ -1,4 +1,4 @@
-use crate::auth::{compute_hash, AuthConfig, AuthState};
+use crate::auth::{compute_hash, AuthState};
 use crate::pair_store::PairStore;
 use crate::platform::PlatformProviders;
 use std::sync::Arc;
@@ -21,7 +21,7 @@ impl Default for ClipboardState {
     fn default() -> Self {
         Self {
             content: String::new(),
-            hash: compute_hash(&String::new()),
+            hash: compute_hash(""),
         }
     }
 }

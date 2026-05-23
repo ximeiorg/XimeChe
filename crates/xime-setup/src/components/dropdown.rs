@@ -5,6 +5,7 @@ pub struct Dropdown {
     selected_label: String,
 }
 
+#[allow(dead_code)]
 impl Dropdown {
     pub fn new(options: Vec<(String, String)>, selected: String) -> Self {
         let selected_label = options

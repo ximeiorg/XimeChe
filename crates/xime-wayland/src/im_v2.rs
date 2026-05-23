@@ -197,21 +197,21 @@ impl WaylandConnection {
         // Blocking dispatch - wait for at least one event
         self.event_queue
             .roundtrip(&mut self.state)
-            .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+            .map_err(|e| Error::Io(std::io::Error::other(e)))?;
         Ok(())
     }
 
     pub fn dispatch_pending(&mut self) -> Result<()> {
         self.event_queue
             .dispatch_pending(&mut self.state)
-            .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+            .map_err(|e| Error::Io(std::io::Error::other(e)))?;
         Ok(())
     }
 
     pub fn sync_roundtrip(&mut self) -> Result<()> {
         self.event_queue
             .roundtrip(&mut self.state)
-            .map_err(|e| Error::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?;
+            .map_err(|e| Error::Io(std::io::Error::other(e)))?;
         Ok(())
     }
 

@@ -16,7 +16,7 @@ pub struct SettingsApp {
 
 impl SettingsApp {
     pub fn new(cx: &mut Context<Self>) -> Self {
-        let settings = cx.new(|cx| SettingsState::new(cx));
+        let settings = cx.new(SettingsState::new);
 
         Self {
             current_page: 0,
