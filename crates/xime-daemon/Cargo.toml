@@ -12,7 +12,6 @@ xime-wayland.workspace = true
 xime-xkb.workspace = true
 xime-ui.workspace = true
 xime-tray.workspace = true
-xime-server.workspace = true
 librime.workspace = true
 thiserror.workspace = true
 anyhow.workspace = true
@@ -25,3 +24,4 @@ zbus = "5"
 nix = { version = "0.31.3", features = ["fs", "mman"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 chrono = "0.4"
+ximed = { version = "0.1", git = "https://github.com/ximeiorg/ximed.git" }
