@@ -438,4 +438,141 @@ mod tests {
         sni.set_visible(false);
         assert!(!sni.is_visible());
     }
+
+    #[test]
+    fn test_render_text_icon_zh() {
+        let bg_color = Color::from_rgba8(0x8F, 0x73, 0xE2, 255);
+        let data = render_text_icon("ZH", bg_color, 22);
+        // ARGB data: 4 bytes per pixel, 22x22 = 484 pixels, 1936 bytes
+        assert_eq!(data.len(), 22 * 22 * 4);
+        // Should have non-zero alpha
+        assert!(
+            data.iter().step_by(4).any(|&a| a > 0),
+            "Should have some non-zero alpha"
+        );
+    }
+
+    #[test]
+    fn test_render_text_icon_en() {
+        let bg_color = Color::from_rgba8(0x60, 0x60, 0x60, 255);
+        let data = render_text_icon("EN", bg_color, 22);
+        assert_eq!(data.len(), 22 * 22 * 4);
+    }
+
+    #[test]
+    fn test_render_text_icon_different_sizes() {
+        let bg_color = Color::from_rgba8(0x8F, 0x73, 0xE2, 255);
+        let data_16 = render_text_icon("ZH", bg_color, 16);
+        let data_22 = render_text_icon("ZH", bg_color, 22);
+        let data_32 = render_text_icon("ZH", bg_color, 32);
+        assert_eq!(data_16.len(), 16 * 16 * 4);
+        assert_eq!(data_22.len(), 22 * 22 * 4);
+        assert_eq!(data_32.len(), 32 * 32 * 4);
+    }
+
+    #[test]
+    fn test_render_text_icon_same_size_different_text() {
+        let bg_color = Color::from_rgba8(0x8F, 0x73, 0xE2, 255);
+        let data_zh = render_text_icon("ZH", bg_color, 22);
+        let data_en = render_text_icon("EN", bg_color, 22);
+        // Different text should produce different pixel data
+        assert_ne!(data_zh, data_en, "ZH and EN icons should differ");
+    }
+
+    #[test]
+    fn test_render_text_icon_same_text_different_color() {
+        let bg_purple = Color::from_rgba8(0x8F, 0x73, 0xE2, 255);
+        let bg_gray = Color::from_rgba8(0x60, 0x60, 0x60, 255);
+        let data_purple = render_text_icon("ZH", bg_purple, 22);
+        let data_gray = render_text_icon("ZH", bg_gray, 22);
+        // Different background colors should produce different pixel data
+        assert_ne!(
+            data_purple, data_gray,
+            "ZH icons with different bg should differ"
+        );
+    }
+
+    #[test]
+    fn test_build_rounded_rect_valid() {
+        let path = build_rounded_rect(0.0, 0.0, 22.0, 22.0, 3.0);
+        assert!(!path.points().is_empty());
+    }
+
+    #[test]
+    fn test_build_rounded_rect_zero_radius() {
+        let path = build_rounded_rect(0.0, 0.0, 22.0, 22.0, 0.0);
+        assert!(!path.points().is_empty());
+    }
+
+    #[test]
+    fn test_build_rounded_rect_large() {
+        let path = build_rounded_rect(0.0, 0.0, 100.0, 100.0, 10.0);
+        assert!(!path.points().is_empty());
+    }
+
+    #[test]
+    fn test_blend_glyph_bounds_check() {
+        let mut pixels = vec![0u8; 32 * 32 * 4];
+        // Test partially out-of-bounds (right/bottom edge) - should not panic
+        blend_glyph(
+            &mut pixels,
+            30,
+            30,
+            10,
+            10,
+            CosmicColor::rgba(255, 0, 0, 255),
+            32,
+            32,
+        );
+        // Test completely outside - should not panic either
+        blend_glyph(
+            &mut pixels,
+            50,
+            50,
+            10,
+            10,
+            CosmicColor::rgba(255, 0, 0, 255),
+            32,
+            32,
+        );
+    }
+
+    #[test]
+    fn test_blend_glyph_inside_bounds() {
+        let mut pixels = vec![0u8; 10 * 10 * 4];
+        // Glyph completely inside
+        blend_glyph(
+            &mut pixels,
+            2,
+            2,
+            3,
+            3,
+            CosmicColor::rgba(255, 0, 0, 255),
+            10,
+            10,
+        );
+        // Pixel at (2,2) should be modified
+        let offset = (2 * 10 * 4) + (2 * 4);
+        assert!(pixels[offset] > 0 || pixels[offset + 1] > 0 || pixels[offset + 2] > 0);
+    }
+
+    #[test]
+    fn test_blend_glyph_transparent_does_nothing() {
+        let mut pixels = vec![0u8; 10 * 10 * 4];
+        let original = pixels.clone();
+        blend_glyph(
+            &mut pixels,
+            0,
+            0,
+            5,
+            5,
+            CosmicColor::rgba(255, 0, 0, 0),
+            10,
+            10,
+        );
+        assert_eq!(
+            pixels, original,
+            "Fully transparent glyph should not modify pixels"
+        );
+    }
 }

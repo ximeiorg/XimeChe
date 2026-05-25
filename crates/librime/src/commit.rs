@@ -31,3 +31,19 @@ impl Drop for Commit {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_commit_new_with_null_text() {
+        // Create a RimeCommit with null text pointer (simulating empty commit)
+        let inner = librime_sys2::RimeCommit {
+            data_size: std::mem::size_of::<librime_sys2::RimeCommit>() as std::os::raw::c_int,
+            text: std::ptr::null_mut(),
+        };
+        let commit = Commit::new(inner);
+        assert_eq!(commit.text(), "");
+    }
+}

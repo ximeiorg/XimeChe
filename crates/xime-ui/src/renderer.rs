@@ -525,4 +525,160 @@ mod tests {
         assert_eq!(g, 40);
         assert_eq!(b, 40);
     }
+
+    #[test]
+    fn test_calculate_width_empty() {
+        let mut renderer = CandidateRenderer::new();
+        let candidates: Vec<CandidateItem> = vec![];
+        let width = renderer.calculate_width(&candidates);
+        assert_eq!(
+            width, 100,
+            "Empty candidates should return default width 100"
+        );
+    }
+
+    #[test]
+    fn test_calculate_width_with_multiple_candidates() {
+        let mut renderer = CandidateRenderer::new();
+        let candidates: Vec<CandidateItem> = vec![
+            CandidateItem {
+                text: "我".to_string(),
+                comment: "".to_string(),
+                index: 0,
+            },
+            CandidateItem {
+                text: "你".to_string(),
+                comment: "".to_string(),
+                index: 1,
+            },
+            CandidateItem {
+                text: "他".to_string(),
+                comment: "".to_string(),
+                index: 2,
+            },
+        ];
+        let width = renderer.calculate_width(&candidates);
+        let single_width = renderer.calculate_width(&candidates[..1]);
+        assert!(
+            width > single_width,
+            "More candidates should produce larger width"
+        );
+    }
+
+    #[test]
+    fn test_candidate_renderer_new() {
+        let _renderer = CandidateRenderer::new();
+        // Just verify it doesn't panic
+    }
+
+    #[test]
+    fn test_candidate_renderer_default() {
+        let _renderer = CandidateRenderer::default();
+        // Just verify it doesn't panic
+    }
+
+    #[test]
+    fn test_draw_candidates_multiple_highlighted() {
+        let mut renderer = CandidateRenderer::new();
+        let candidates: Vec<CandidateItem> = vec![
+            CandidateItem {
+                text: "第一".to_string(),
+                comment: "".to_string(),
+                index: 0,
+            },
+            CandidateItem {
+                text: "第二".to_string(),
+                comment: "".to_string(),
+                index: 1,
+            },
+            CandidateItem {
+                text: "第三".to_string(),
+                comment: "".to_string(),
+                index: 2,
+            },
+        ];
+        let width = 300;
+        let height = 36;
+        let pixels = vec![0u8; width as usize * height as usize * 4];
+
+        // Highlight different indices should produce different results
+        let mut pixels_hl0 = pixels.clone();
+        renderer.draw_candidates(
+            &mut pixels_hl0,
+            width,
+            height,
+            &candidates,
+            0,
+            (0x8F, 0x73, 0xE2),
+        );
+
+        let mut pixels_hl1 = pixels.clone();
+        renderer.draw_candidates(
+            &mut pixels_hl1,
+            width,
+            height,
+            &candidates,
+            1,
+            (0x8F, 0x73, 0xE2),
+        );
+
+        assert_ne!(
+            pixels_hl0, pixels_hl1,
+            "Different highlighted indices should produce different buffers"
+        );
+    }
+
+    #[test]
+    fn test_draw_candidates_minimal_size() {
+        let mut renderer = CandidateRenderer::new();
+        let candidates: Vec<CandidateItem> = vec![CandidateItem {
+            text: "A".to_string(),
+            comment: "".to_string(),
+            index: 0,
+        }];
+        // Use renderer's own calculated width
+        let width = renderer.calculate_width(&candidates);
+        let height = 36;
+        let mut pixels = vec![0u8; width as usize * height as usize * 4];
+
+        renderer.draw_candidates(
+            &mut pixels,
+            width,
+            height,
+            &candidates,
+            0,
+            (0x8F, 0x73, 0xE2),
+        );
+        assert!(
+            pixels.iter().any(|&b| b != 0),
+            "Buffer should have non-zero pixels"
+        );
+    }
+
+    #[test]
+    fn test_measure_text_width_different_sizes() {
+        let mut renderer = CandidateRenderer::new();
+        let w_small = renderer.measure_text_width("测试", 12.0);
+        let w_large = renderer.measure_text_width("测试", 24.0);
+        assert!(w_large > w_small, "Larger font should produce larger width");
+    }
+
+    #[test]
+    fn test_measure_text_width_english() {
+        let mut renderer = CandidateRenderer::new();
+        let w = renderer.measure_text_width("Hello", 16.0);
+        assert!(w > 0.0, "English text width should be > 0");
+    }
+
+    #[test]
+    fn test_build_rounded_rect_valid() {
+        let path = build_rounded_rect(0.0, 0.0, 100.0, 36.0, 8.0);
+        assert!(!path.points().is_empty());
+    }
+
+    #[test]
+    fn test_build_rounded_rect_zero_radius() {
+        let path = build_rounded_rect(0.0, 0.0, 50.0, 20.0, 0.0);
+        assert!(!path.points().is_empty());
+    }
 }

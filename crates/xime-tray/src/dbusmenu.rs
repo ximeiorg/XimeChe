@@ -160,3 +160,63 @@ impl DBusMenu {
         "normal"
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_menu_action_toggle_mode() {
+        assert_eq!(MenuAction::ToggleMode as i32, 0);
+    }
+
+    #[test]
+    fn test_menu_action_settings() {
+        assert_eq!(MenuAction::Settings as i32, 1);
+    }
+
+    #[test]
+    fn test_menu_action_deploy() {
+        assert_eq!(MenuAction::Deploy as i32, 2);
+    }
+
+    #[test]
+    fn test_menu_action_exit() {
+        assert_eq!(MenuAction::Exit as i32, 3);
+    }
+
+    #[test]
+    fn test_menu_action_debug() {
+        let action = MenuAction::ToggleMode;
+        let debug = format!("{:?}", action);
+        assert_eq!(debug, "ToggleMode");
+    }
+
+    #[test]
+    fn test_menu_action_equality() {
+        assert_eq!(MenuAction::ToggleMode, MenuAction::ToggleMode);
+        assert_ne!(MenuAction::ToggleMode, MenuAction::Exit);
+        assert_ne!(MenuAction::Deploy, MenuAction::Settings);
+    }
+
+    #[test]
+    fn test_menu_action_clone() {
+        let original = MenuAction::Exit;
+        let cloned = original;
+        assert_eq!(original, cloned);
+    }
+
+    #[test]
+    fn test_dbusmenu_new() {
+        let menu = DBusMenu::new();
+        assert!(menu.action_tx.is_none());
+        assert_eq!(menu.revision, 0);
+    }
+
+    #[test]
+    fn test_dbusmenu_default() {
+        let menu = DBusMenu::default();
+        assert!(menu.action_tx.is_none());
+        assert_eq!(menu.revision, 0);
+    }
+}

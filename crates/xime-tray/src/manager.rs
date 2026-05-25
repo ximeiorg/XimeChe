@@ -89,3 +89,48 @@ impl TrayManager {
         self.sni_ref.new_icon().await.ok();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sni_watcher_constants() {
+        assert_eq!(SNI_WATCHER_SERVICE, "org.kde.StatusNotifierWatcher");
+        assert_eq!(SNI_WATCHER_OBJECT, "/StatusNotifierWatcher");
+        assert_eq!(SNI_WATCHER_INTERFACE, "org.kde.StatusNotifierWatcher");
+    }
+
+    #[test]
+    fn test_sni_path_constants() {
+        assert_eq!(SNI_OBJECT, "/StatusNotifierItem");
+        assert_eq!(MENU_OBJECT, "/MenuBar");
+    }
+
+    #[test]
+    fn test_input_mode_constants() {
+        // Verify InputMode enum values
+        assert_eq!(InputMode::Chinese as i32, 0);
+        assert_eq!(InputMode::English as i32, 1);
+    }
+
+    #[test]
+    fn test_input_mode_debug() {
+        assert_eq!(format!("{:?}", InputMode::Chinese), "Chinese");
+        assert_eq!(format!("{:?}", InputMode::English), "English");
+    }
+
+    #[test]
+    fn test_input_mode_clone() {
+        let mode = InputMode::Chinese;
+        let cloned = mode;
+        assert_eq!(mode, cloned);
+    }
+
+    #[test]
+    fn test_input_mode_equality() {
+        assert_eq!(InputMode::Chinese, InputMode::Chinese);
+        assert_eq!(InputMode::English, InputMode::English);
+        assert_ne!(InputMode::Chinese, InputMode::English);
+    }
+}
