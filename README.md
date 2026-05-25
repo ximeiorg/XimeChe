@@ -1,6 +1,13 @@
 # XIME-Wayland
 
-一个用纯 Rust 实现的 Linux 五笔输入法，不依赖ibus和fcitx,直接对接 Wayland 和 librime 实现。
+一个用 Rust 实现的 Linux 输入法，不依赖ibus和fcitx,直接对接 Wayland 和 librime 实现。 
+
+当前输入法不是 ibus 和 fcitx 的插件，而是一个独立的输入法程序。也就是说，xime 和 ibus 和 fcitx 没有任何关系。
+
+> 目前还在开发中...
+>
+> 注意： 当前输入法只支持 wayland 应用和 KDE（KWin）桌面，不支持 Gnome 。因此你在登录KDE桌面时，需要选择 wayland 模式登录。
+
 
 ## 特性
 
@@ -48,6 +55,7 @@ sudo apt install librime libxkbcommon
 ```
 
 五笔方案数据由项目自带（`rime-wubi` 子模块），安装时会自动部署到 `~/.config/xime/rime/`。
+理论上，也支持其他方案。
 
 ## 安装
 
@@ -115,7 +123,7 @@ cargo deb -p xime
 ### TODO
 
 1. [ ] xime-setup 完成 Rime 配置界面
-2. [ ] 智能联想功能
+2. [x] 智能联想功能
 3. [ ] 词条管理（编辑）
 4. [ ] 跨平台剪切板 
 
