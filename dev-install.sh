@@ -36,6 +36,7 @@ fi
 export RIME_LIB_DIR="${RIME_LIB_DIR}"
 export LD_LIBRARY_PATH="${RIME_LIB_DIR}:${LD_LIBRARY_PATH:-}"
 
+cargo clippy --all-targets --all-features -- -D warnings
 # Build release
 cargo build --release -p xime-daemon -p xime-launcher -p xime-setup
 
