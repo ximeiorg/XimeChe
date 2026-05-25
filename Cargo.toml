@@ -12,7 +12,6 @@ members = [
     "crates/xime-tray",
     "crates/xime-setup",
     "crates/xime-pack",
-    "crates/xime-server",
     "crates/xime-predict",
 ]
 
@@ -31,7 +30,6 @@ xime-wayland = { path = "crates/xime-wayland" }
 xime-xkb = { path = "crates/xime-xkb" }
 xime-ui = { path = "crates/xime-ui" }
 xime-tray = { path = "crates/xime-tray" }
-xime-server = { path = "crates/xime-server" }
 xime-predict = { path = "crates/xime-predict" }
 thiserror = "2.0.18"
 once_cell = "1.17"

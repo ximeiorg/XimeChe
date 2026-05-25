@@ -6,7 +6,7 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
-zbus = "4"
+zbus = "5.15.0"
 nix = { version = "0.29", features = ["fs", "process"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 thiserror.workspace = true
