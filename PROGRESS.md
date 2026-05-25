@@ -99,17 +99,23 @@
 - `hmac` + `sha2` - Token 签名认证
 
 ## 测试覆盖
-- **xime-xkb**: 34 tests - KeyBinding 解析、keysym 转换
-- **librime**: 21 tests - KeyEvent、Traits builder
-- **xime-config**: 17 tests - 配置解析、合并逻辑
-- **xime-ui**: 23 tests - CandidateList 状态机
-- **xime-tray**: 8 tests - 状态切换、颜色设置
-- **总计**: 103 tests
+- **xime-xkb**: 45 tests - KeyBinding 解析、keysym 转换、XKB Error 类型
+- **librime**: 51 tests - KeyEvent、Traits builder、Error 类型、Status/Context/Commit 结构化测试
+- **xime-config**: 46 tests - 配置解析、合并逻辑、schema 解析、config 合并、rime 配置提取
+- **xime-ui**: 37 tests - CandidateList 状态机、渲染器、root_display 绘制、blend 边界
+- **xime-tray**: 28 tests - 状态切换、颜色设置、文字图标渲染、MenuAction、rounded_rect
+- **xime-wayland**: 17 tests - IM 状态机、错误类型、KeyEvent 数据
+- **xime-daemon**: 6 tests - DaemonCommand 枚举、get_config_dir
+- **xime-predict**: 17 tests (1 个预先存在失败：test_predict_basic 分数断言)
+- **xime-setup/launcher/pack**: 0 tests (UI 密集型，需集成测试)
+- **总计**: ~247 tests
 
 ## 下一步
 1. 测试主题颜色实时更新功能（重新安装后验证）
 2. 测试 Ctrl 键字根显示功能
 3. 考虑为 xime-daemon/xime-launcher 添加集成测试
+4. 修复 xime-predict 中 test_predict_basic 的分数范围断言
+5. 添加 xime-setup 组件测试（state.rs, theme.rs）
 
 ## 剪切板同步待完成功能
 1. **托盘集成**：在 `xime-tray` 添加配对确认菜单

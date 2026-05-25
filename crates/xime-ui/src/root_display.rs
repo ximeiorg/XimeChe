@@ -330,3 +330,161 @@ fn build_rounded_rect(x: f32, y: f32, w: f32, h: f32, r: f32) -> tiny_skia::Path
 
     pb.finish().unwrap()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_calculate_root_width_basic() {
+        let width = RootRenderer::calculate_width('a', "工匚戈艹廿龷七弋戈", (0x8F, 0x73, 0xE2));
+        assert!(width > 80, "Width should be at least 80, got {}", width);
+    }
+
+    #[test]
+    fn test_calculate_root_width_minimum() {
+        let width = RootRenderer::calculate_width('a', "", (0x8F, 0x73, 0xE2));
+        assert!(
+            width >= 80,
+            "Width should be at least 80 for empty root, got {}",
+            width
+        );
+    }
+
+    #[test]
+    fn test_calculate_root_width_different_colors() {
+        let width1 = RootRenderer::calculate_width('g', "王龶五一戋", (0x8F, 0x73, 0xE2));
+        let width2 = RootRenderer::calculate_width('g', "王龶五一戋", (0x1A, 0x73, 0xE8));
+        assert_eq!(width1, width2, "Width should not depend on primary color");
+    }
+
+    #[test]
+    fn test_calculate_root_width_single_char() {
+        let width_single = RootRenderer::calculate_width('a', "工", (0x8F, 0x73, 0xE2));
+        assert!(
+            width_single >= 80,
+            "Single char root width should be >= 80, got {}",
+            width_single
+        );
+    }
+
+    #[test]
+    fn test_calculate_root_width_long_root() {
+        let width = RootRenderer::calculate_width(
+            'a',
+            "工匚戈艹廿龷七弋戈艹廿龷七弋戈艹廿龷",
+            (0x8F, 0x73, 0xE2),
+        );
+        let width_short = RootRenderer::calculate_width('a', "工", (0x8F, 0x73, 0xE2));
+        assert!(
+            width > width_short,
+            "Longer root should produce wider width"
+        );
+    }
+
+    #[test]
+    fn test_blend_glyph_partial_inside() {
+        let mut pixels = vec![0u8; 10 * 10 * 4];
+        // Partially inside (right edge)
+        blend_glyph(&mut pixels, 8, 8, 5, 5, Color::rgba(255, 0, 0, 255), 10, 10);
+        // Pixel at (8,8) should be modified (inside bounds)
+        let offset = (8 * 10 * 4) + (8 * 4);
+        assert!(pixels[offset] > 0 || pixels[offset + 1] > 0 || pixels[offset + 2] > 0);
+    }
+
+    #[test]
+    fn test_blend_glyph_fully_transparent() {
+        let mut pixels = vec![0u8; 10 * 10 * 4];
+        let original = pixels.clone();
+        // Fully transparent glyph
+        blend_glyph(&mut pixels, 0, 0, 5, 5, Color::rgba(255, 0, 0, 0), 10, 10);
+        assert_eq!(
+            pixels, original,
+            "Transparent glyph should not modify pixels"
+        );
+    }
+
+    #[test]
+    fn test_draw_root_to_buffer_creates_output() {
+        let width = 200;
+        let height = 36;
+        let mut pixels = vec![0u8; width as usize * height as usize * 4];
+        draw_root_to_buffer(
+            &mut pixels,
+            width,
+            height,
+            'a',
+            "工匚戈艹廿龷七弋戈",
+            (0x8F, 0x73, 0xE2),
+        );
+        // Buffer should have been modified
+        assert!(
+            pixels.iter().any(|&b| b != 0),
+            "Buffer should have non-zero pixels"
+        );
+        assert_eq!(pixels.len(), width as usize * height as usize * 4);
+    }
+
+    #[test]
+    fn test_draw_root_to_buffer_different_keys() {
+        let width = 200;
+        let height = 36;
+        let mut pixels_a = vec![0u8; width as usize * height as usize * 4];
+        let mut pixels_b = vec![0u8; width as usize * height as usize * 4];
+        draw_root_to_buffer(
+            &mut pixels_a,
+            width,
+            height,
+            'a',
+            "工匚戈",
+            (0x8F, 0x73, 0xE2),
+        );
+        draw_root_to_buffer(
+            &mut pixels_b,
+            width,
+            height,
+            'b',
+            "子孑孓",
+            (0x8F, 0x73, 0xE2),
+        );
+        // Different keys with different roots should produce different buffers
+        assert!(
+            pixels_a != pixels_b,
+            "Different roots should produce different buffers"
+        );
+    }
+
+    #[test]
+    fn test_draw_root_to_buffer_with_ocean_blue() {
+        let width = 200;
+        let height = 36;
+        let mut pixels = vec![0u8; width as usize * height as usize * 4];
+        draw_root_to_buffer(
+            &mut pixels,
+            width,
+            height,
+            'a',
+            "工匚戈",
+            (0x1A, 0x73, 0xE8),
+        );
+        assert!(pixels.iter().any(|&b| b != 0));
+    }
+
+    #[test]
+    fn test_build_rounded_rect_valid() {
+        let path = build_rounded_rect(0.0, 0.0, 100.0, 36.0, 8.0);
+        assert!(!path.points().is_empty(), "Rounded rect should have points");
+    }
+
+    #[test]
+    fn test_build_rounded_rect_zero_radius() {
+        let path = build_rounded_rect(0.0, 0.0, 50.0, 20.0, 0.0);
+        assert!(!path.points().is_empty());
+    }
+
+    #[test]
+    fn test_build_rounded_rect_minimal() {
+        let path = build_rounded_rect(0.0, 0.0, 10.0, 10.0, 2.0);
+        assert!(!path.points().is_empty());
+    }
+}

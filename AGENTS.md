@@ -83,6 +83,7 @@ sudo ./install.sh
 2. 读 DECISIONS.md 了解重要决策
 3. 跑 `cargo build --quiet && cargo fmt --all` 确认仓库处于一致状态
 4. 从 PROGRESS.md 的"下一步"部分继续工作
+5. 使用`cargo clippy --all-targets --all-features -- -D warnings` 保证代码的质量
 
 ## 每次会话结束前（下班打卡）
 1. 更新 PROGRESS.md

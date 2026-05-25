@@ -734,3 +734,266 @@ fn get_yaml_value(content: &str, key: &str) -> Option<String> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_schema_info_basic() {
+        let content = r#"schema:
+  name: 五笔86
+  version: "0.1"
+  author: Kor1
+  description: 五笔86方案"#;
+        let info = extract_schema_info(content, "wubi86");
+        assert_eq!(info.schema_id, "wubi86");
+        assert_eq!(info.name, "五笔86");
+        assert_eq!(info.version, "0.1");
+        assert_eq!(info.author, "Kor1");
+        assert_eq!(info.description, "五笔86方案");
+    }
+
+    #[test]
+    fn test_extract_schema_info_no_metadata() {
+        let content = "schema:\n  name: TestSchema";
+        let info = extract_schema_info(content, "test");
+        assert_eq!(info.schema_id, "test");
+        assert_eq!(info.name, "TestSchema");
+    }
+
+    #[test]
+    fn test_extract_schema_info_empty_content() {
+        let info = extract_schema_info("", "empty");
+        assert_eq!(info.schema_id, "empty");
+        assert_eq!(info.name, "empty");
+    }
+
+    #[test]
+    fn test_extract_schema_info_author_list() {
+        let content = "schema:\n  name: Test\n  author:\n    - Alice\n    - Bob\n";
+        let info = extract_schema_info(content, "test");
+        assert_eq!(info.author, "Alice, Bob");
+    }
+
+    #[test]
+    fn test_extract_schema_info_author_single_line() {
+        let content = "schema:\n  name: Test\n  author: Alice\n";
+        let info = extract_schema_info(content, "test");
+        assert_eq!(info.author, "Alice");
+    }
+
+    #[test]
+    fn test_extract_schema_info_description_multiline() {
+        let content = "schema:\n  name: Test\n  description: |\n    Line 1\n    Line 2\n";
+        let info = extract_schema_info(content, "test");
+        assert_eq!(info.description, "Line 1 Line 2");
+    }
+
+    #[test]
+    fn test_extract_schema_info_description_single_line() {
+        let content = "schema:\n  name: Test\n  description: Single line\n";
+        let info = extract_schema_info(content, "test");
+        assert_eq!(info.description, "Single line");
+    }
+
+    #[test]
+    fn test_extract_schema_info_empty_author_list() {
+        let content = "schema:\n  name: Test\n  author:\n";
+        let info = extract_schema_info(content, "test");
+        assert_eq!(info.author, "未知");
+    }
+
+    #[test]
+    fn test_extract_schema_info_author_with_quotes() {
+        let content = "schema:\n  name: Test\n  author: \"Kor1 <kingzcheung@gmail.com>\"\n";
+        let info = extract_schema_info(content, "test");
+        assert_eq!(info.author, "Kor1 <kingzcheung@gmail.com>");
+    }
+
+    #[test]
+    fn test_extract_selected_schema_basic() {
+        let content = "patch:\n  schema_list:\n    - schema: wubi86\n";
+        let selected = extract_selected_schema(content);
+        assert_eq!(selected, Some("wubi86".to_string()));
+    }
+
+    #[test]
+    fn test_extract_selected_schema_none() {
+        let content = "key: value\n";
+        let selected = extract_selected_schema(content);
+        assert_eq!(selected, None);
+    }
+
+    #[test]
+    fn test_extract_selected_schema_empty() {
+        let content = "";
+        let selected = extract_selected_schema(content);
+        assert_eq!(selected, None);
+    }
+
+    #[test]
+    fn test_extract_selected_schema_multiple() {
+        let content = "patch:\n  schema_list:\n    - schema: wubi86\n    - schema: luna_pinyin\n";
+        let selected = extract_selected_schema(content);
+        assert_eq!(selected, Some("wubi86".to_string()));
+    }
+
+    #[test]
+    fn test_extract_selected_schema_with_quotes() {
+        let content = "patch:\n  schema_list:\n    - schema: \"wubi86_jidian\"\n";
+        let selected = extract_selected_schema(content);
+        assert_eq!(selected, Some("wubi86_jidian".to_string()));
+    }
+
+    #[test]
+    fn test_extract_selected_schema_with_quotes_single() {
+        let content = "patch:\n  schema_list:\n    - schema: 'wubi86'\n";
+        let selected = extract_selected_schema(content);
+        assert_eq!(selected, Some("wubi86".to_string()));
+    }
+
+    #[test]
+    fn test_parse_schema_config_basic() {
+        let content = r#"
+speller:
+  max_code_length: 4
+  auto_select: true
+translator:
+  enable_completion: true
+  max_phrase_length: 4
+"#;
+        let config = parse_schema_config(content).unwrap();
+        assert_eq!(config.speller.max_code_length, Some(4));
+        assert_eq!(config.speller.auto_select, Some(true));
+        assert_eq!(config.translator.enable_completion, Some(true));
+        assert_eq!(config.translator.max_phrase_length, Some(4));
+    }
+
+    #[test]
+    fn test_parse_schema_config_empty() {
+        let config = parse_schema_config("");
+        // Empty string parses as Null YAML value, returns default SchemaConfig
+        assert!(config.is_some());
+        assert_eq!(config.unwrap().speller.max_code_length, None);
+    }
+
+    #[test]
+    fn test_parse_schema_config_partial() {
+        let content = "speller:\n  max_code_length: 4\n";
+        let config = parse_schema_config(content).unwrap();
+        assert_eq!(config.speller.max_code_length, Some(4));
+        assert!(config.speller.auto_select.is_none());
+        assert!(config.translator.enable_completion.is_none());
+    }
+
+    #[test]
+    fn test_parse_custom_patch_basic() {
+        let content = "patch:\n  speller:\n    max_code_length: 6\n";
+        let config = parse_custom_patch(content).unwrap();
+        assert_eq!(config.speller.max_code_length, Some(6));
+    }
+
+    #[test]
+    fn test_parse_custom_patch_no_patch() {
+        let content = "key: value\n";
+        let config = parse_custom_patch(content);
+        assert!(config.is_none());
+    }
+
+    #[test]
+    fn test_merge_configs_base_only() {
+        let base = SchemaConfig {
+            speller: SpellerConfig {
+                max_code_length: Some(4),
+                auto_select: Some(true),
+                auto_clear: None,
+            },
+            translator: TranslatorConfig::default(),
+            reverse_lookup: ReverseLookupConfig::default(),
+            tradition: TraditionConfig::default(),
+        };
+        let merged = merge_configs(Some(base.clone()), None);
+        assert_eq!(merged.speller.max_code_length, Some(4));
+        assert_eq!(merged.speller.auto_select, Some(true));
+    }
+
+    #[test]
+    fn test_merge_configs_custom_overrides() {
+        let base = SchemaConfig {
+            speller: SpellerConfig {
+                max_code_length: Some(4),
+                auto_select: Some(true),
+                auto_clear: None,
+            },
+            translator: TranslatorConfig::default(),
+            reverse_lookup: ReverseLookupConfig::default(),
+            tradition: TraditionConfig::default(),
+        };
+        let custom = SchemaConfig {
+            speller: SpellerConfig {
+                max_code_length: Some(6),
+                auto_select: None,
+                auto_clear: Some("auto".to_string()),
+            },
+            translator: TranslatorConfig::default(),
+            reverse_lookup: ReverseLookupConfig::default(),
+            tradition: TraditionConfig::default(),
+        };
+        let merged = merge_configs(Some(base), Some(custom));
+        // Custom should override base
+        assert_eq!(merged.speller.max_code_length, Some(6));
+        // Custom None should fall back to base
+        assert_eq!(merged.speller.auto_select, Some(true));
+        // Custom new value
+        assert_eq!(merged.speller.auto_clear, Some("auto".to_string()));
+    }
+
+    #[test]
+    fn test_merge_configs_both_none_returns_default() {
+        let merged = merge_configs(None, None);
+        assert_eq!(merged.speller.max_code_length, None);
+        assert_eq!(merged.speller.auto_select, None);
+    }
+
+    #[test]
+    fn test_translator_config_default() {
+        let config = TranslatorConfig::default();
+        assert!(config.enable_charset_filter.is_none());
+        assert!(config.enable_completion.is_none());
+        assert!(config.enable_sentence.is_none());
+        assert!(config.enable_user_dict.is_none());
+        assert!(config.enable_encoder.is_none());
+        assert!(config.encode_commit_history.is_none());
+        assert!(config.max_phrase_length.is_none());
+    }
+
+    #[test]
+    fn test_speller_config_default() {
+        let config = SpellerConfig::default();
+        assert!(config.max_code_length.is_none());
+        assert!(config.auto_select.is_none());
+        assert!(config.auto_clear.is_none());
+    }
+
+    #[test]
+    fn test_reverse_lookup_config_default() {
+        let config = ReverseLookupConfig::default();
+        assert!(config.prefix.is_none());
+        assert!(config.suffix.is_none());
+    }
+
+    #[test]
+    fn test_tradition_config_default() {
+        let config = TraditionConfig::default();
+        assert!(config.opencc_config.is_none());
+    }
+
+    #[test]
+    fn test_schema_config_debug() {
+        let config = SchemaConfig::default();
+        let debug = format!("{:?}", config);
+        assert!(debug.contains("speller"));
+        assert!(debug.contains("translator"));
+    }
+}
