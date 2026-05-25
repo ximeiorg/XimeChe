@@ -104,7 +104,7 @@ mod tests {
 
     #[test]
     fn test_style_config_defaults() {
-        let yaml = "style:\n  font_size: 20";
+        let yaml = "font_size: 20";
         let config: StyleConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.font_size, 20.0);
         assert_eq!(config.candidate_count, 5);

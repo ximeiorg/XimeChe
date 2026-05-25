@@ -140,7 +140,7 @@ mod tests {
         let config = WubiRadicalsConfig::default();
         assert_eq!(config.hotkeys.show_key, "Ctrl");
 
-        let yaml = "hotkeys:\n  show_key: Alt";
+        let yaml = "show_key: Alt";
         let config: WubiRadicalsHotkeyConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.show_key, "Alt");
     }

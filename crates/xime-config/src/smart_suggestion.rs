@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Serialize, Default)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct SmartSuggestionConfig {
     #[serde(default)]
     pub enabled: bool,
@@ -16,6 +16,19 @@ pub struct SmartSuggestionConfig {
     pub model: SmartSuggestionModelConfig,
 }
 
+impl Default for SmartSuggestionConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            suggestion_count: default_suggestion_count(),
+            record_user_frequency: false,
+            auto_adjust_frequency: false,
+            learning_threshold: default_learning_threshold(),
+            model: SmartSuggestionModelConfig::default(),
+        }
+    }
+}
+
 fn default_suggestion_count() -> i32 {
     5
 }
@@ -23,7 +36,7 @@ fn default_learning_threshold() -> i32 {
     3
 }
 
-#[derive(Debug, Deserialize, Serialize, Default)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct SmartSuggestionModelConfig {
     #[serde(default = "default_model_provider")]
     pub provider: String,
@@ -31,6 +44,16 @@ pub struct SmartSuggestionModelConfig {
     pub name: String,
     #[serde(default)]
     pub files: Vec<SmartSuggestionModelFile>,
+}
+
+impl Default for SmartSuggestionModelConfig {
+    fn default() -> Self {
+        Self {
+            provider: default_model_provider(),
+            name: default_model_name(),
+            files: Vec::new(),
+        }
+    }
 }
 
 fn default_model_provider() -> String {
