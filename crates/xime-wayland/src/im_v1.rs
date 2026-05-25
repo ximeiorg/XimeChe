@@ -589,7 +589,7 @@ impl WaylandConnectionV1 {
         let height = 36u32;
 
         // Take renderer out of self for width calculation (will be used for drawing too)
-        let mut renderer = self.renderer.take().unwrap_or_else(CandidateRenderer::new);
+        let mut renderer = self.renderer.take().unwrap_or_default();
         let width = renderer.calculate_width(candidates);
 
         eprintln!("DEBUG: show_candidate_window called with width={}, height={}, candidates={}, highlighted={}", width, height, candidates.len(), highlighted_index);
