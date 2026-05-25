@@ -61,6 +61,18 @@ sudo dpkg -i xime_0.1.0-1_amd64.deb
 
 ### 开发安装
 
+构建依赖（Debian/Ubuntu）：
+
+```bash
+sudo apt install -y \
+  build-essential cmake pkg-config \
+  libboost-dev libboost-regex-dev libboost-filesystem-dev \
+  libboost-locale-dev libboost-program-options-dev \
+  libgoogle-glog-dev libgflags-dev \
+  libyaml-cpp-dev libleveldb-dev libmarisa-dev libopencc-dev \
+  libx11-dev libwayland-dev libxkbcommon-dev
+```
+
 ```bash
 ./dev-install.sh
 ```

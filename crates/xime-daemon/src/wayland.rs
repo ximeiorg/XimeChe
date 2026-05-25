@@ -466,16 +466,10 @@ impl WaylandLoop {
                         .collect();
                     let highlighted_index = menu.highlighted_candidate_index;
                     debug!("highlighted_index={}", highlighted_index);
-                    let width = xime_ui::calculate_candidate_width(&candidate_items);
-                    let height = 36;
                     let primary_color = xime_config.get_primary_color();
-                    if let Err(e) = c.show_candidate_window(
-                        width,
-                        height,
-                        &candidate_items,
-                        highlighted_index,
-                        primary_color,
-                    ) {
+                    if let Err(e) =
+                        c.show_candidate_window(&candidate_items, highlighted_index, primary_color)
+                    {
                         debug!("Candidate window error: {}", e);
                     }
                     *candidate_window_visible = true;
@@ -566,11 +560,9 @@ impl WaylandLoop {
             })
             .collect();
 
-        let width = xime_ui::calculate_candidate_width(&candidate_items);
-        let height = 36;
         let primary_color = xime_config.get_primary_color();
 
-        if let Err(e) = c.show_candidate_window(width, height, &candidate_items, 0, primary_color) {
+        if let Err(e) = c.show_candidate_window(&candidate_items, 0, primary_color) {
             debug!("Smart suggestion window error: {}", e);
         } else {
             *smart_suggestion_visible = true;
@@ -643,12 +635,8 @@ impl WaylandLoop {
                             })
                             .collect();
                         let highlighted_index = menu.highlighted_candidate_index;
-                        let width = xime_ui::calculate_candidate_width(&candidate_items);
-                        let height = 36;
                         let primary_color = xime_config.get_primary_color();
                         if let Err(e) = c.show_candidate_window(
-                            width,
-                            height,
                             &candidate_items,
                             highlighted_index,
                             primary_color,

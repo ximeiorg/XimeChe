@@ -19,9 +19,9 @@ use wayland_client::protocol::*;
 use wayland_client::{event_created_child, globals::registry_queue_init, Connection, EventQueue};
 use wayland_client::{Dispatch, Proxy, QueueHandle};
 use xime_ui::calculate_root_width;
-use xime_ui::draw_candidates_to_buffer;
 use xime_ui::draw_root_to_buffer;
 use xime_ui::CandidateItem;
+use xime_ui::CandidateRenderer;
 
 pub mod __interfaces {
     use wayland_client::protocol::__interfaces::*;
@@ -385,6 +385,7 @@ pub struct WaylandConnectionV1 {
     candidate_surface: Option<WlSurface>,
     current_buffer: Option<WlBuffer>,
     current_pool: Option<WlShmPool>,
+    renderer: Option<CandidateRenderer>,
 }
 
 impl WaylandConnectionV1 {
@@ -440,6 +441,7 @@ impl WaylandConnectionV1 {
             candidate_surface: None,
             current_buffer: None,
             current_pool: None,
+            renderer: None,
         })
     }
 
@@ -580,12 +582,16 @@ impl WaylandConnectionV1 {
 
     pub fn show_candidate_window(
         &mut self,
-        width: u32,
-        height: u32,
         candidates: &[CandidateItem],
         highlighted_index: usize,
         primary_color: (u8, u8, u8),
     ) -> Result<()> {
+        let height = 36u32;
+
+        // Take renderer out of self for width calculation (will be used for drawing too)
+        let mut renderer = self.renderer.take().unwrap_or_else(CandidateRenderer::new);
+        let width = renderer.calculate_width(candidates);
+
         eprintln!("DEBUG: show_candidate_window called with width={}, height={}, candidates={}, highlighted={}", width, height, candidates.len(), highlighted_index);
 
         if self.candidate_surface.is_none() {
@@ -599,26 +605,55 @@ impl WaylandConnectionV1 {
             pool.destroy();
         }
 
-        let shm = self.shm.as_ref().ok_or(Error::NoShm)?;
-        let surface = self.candidate_surface.as_ref().unwrap();
-
+        // Clone needed resources out of self before mutable operations
+        let shm = self.shm.clone().ok_or(Error::NoShm)?;
+        let surface = self.candidate_surface.clone().unwrap();
         let qh = self.event_queue.handle();
 
         let stride = width * 4;
-        let size = stride * height;
-        eprintln!("DEBUG: stride={}, size={}", stride, size);
+        let shm_size = stride * height;
+        eprintln!("DEBUG: stride={}, size={}", stride, shm_size);
 
-        let (pool, fd) = self.create_shm_pool_with_fd(shm, size)?;
+        // Create SHM pool (doesn't borrow self since we pass cloned resources)
+        let fd = Self::create_anonymous_file(shm_size)?;
+        let pool = shm.create_pool(fd.as_fd(), shm_size as i32, &qh, self.state.clone());
         self.current_pool = Some(pool.clone());
 
-        self.draw_candidates(
-            &fd,
+        // mmap SHM buffer and draw candidates using cached renderer
+        let buf_size = (width * height * 4) as usize;
+        let size_nonzero = std::num::NonZero::new(buf_size).expect("size should be non-zero");
+
+        let ptr = unsafe {
+            nix::sys::mman::mmap(
+                None,
+                size_nonzero,
+                nix::sys::mman::ProtFlags::PROT_READ | nix::sys::mman::ProtFlags::PROT_WRITE,
+                nix::sys::mman::MapFlags::MAP_SHARED,
+                &fd,
+                0,
+            )
+            .map_err(|e| Error::Io(std::io::Error::from_raw_os_error(e as i32)))?
+        };
+
+        let pixels: &mut [u8] =
+            unsafe { slice::from_raw_parts_mut(ptr.as_ptr() as *mut u8, buf_size) };
+
+        renderer.draw_candidates(
+            pixels,
             width,
             height,
             candidates,
             highlighted_index,
             primary_color,
-        )?;
+        );
+
+        unsafe {
+            nix::sys::mman::munmap(ptr, buf_size)
+                .map_err(|e| Error::Io(std::io::Error::from_raw_os_error(e as i32)))?;
+        }
+
+        // Put renderer back into self
+        self.renderer = Some(renderer);
 
         eprintln!(
             "DEBUG: About to create_buffer: offset=0, width={}, height={}, stride={}",
@@ -649,59 +684,6 @@ impl WaylandConnectionV1 {
         Ok(())
     }
 
-    fn draw_candidates(
-        &self,
-        fd: &OwnedFd,
-        width: u32,
-        height: u32,
-        candidates: &[CandidateItem],
-        highlighted_index: usize,
-        primary_color: (u8, u8, u8),
-    ) -> Result<()> {
-        let size = (width * height * 4) as usize;
-        let size_nonzero = std::num::NonZero::new(size).expect("size should be non-zero");
-
-        let ptr = unsafe {
-            nix::sys::mman::mmap(
-                None,
-                size_nonzero,
-                nix::sys::mman::ProtFlags::PROT_READ | nix::sys::mman::ProtFlags::PROT_WRITE,
-                nix::sys::mman::MapFlags::MAP_SHARED,
-                fd,
-                0,
-            )
-            .map_err(|e| Error::Io(std::io::Error::from_raw_os_error(e as i32)))?
-        };
-
-        let pixels: &mut [u8] = unsafe { slice::from_raw_parts_mut(ptr.as_ptr() as *mut u8, size) };
-
-        draw_candidates_to_buffer(
-            pixels,
-            width,
-            height,
-            candidates,
-            highlighted_index,
-            primary_color,
-        );
-
-        unsafe {
-            nix::sys::mman::munmap(ptr, size)
-                .map_err(|e| Error::Io(std::io::Error::from_raw_os_error(e as i32)))?;
-        }
-
-        Ok(())
-    }
-
-    fn create_shm_pool_with_fd(&self, shm: &WlShm, size: u32) -> Result<(WlShmPool, OwnedFd)> {
-        eprintln!("DEBUG: create_shm_pool_with_fd size={}", size);
-        let qh = self.event_queue.handle();
-
-        let fd = Self::create_anonymous_file(size)?;
-
-        let pool = shm.create_pool(fd.as_fd(), size as i32, &qh, self.state.clone());
-        Ok((pool, fd))
-    }
-
     pub fn hide_candidate_window(&mut self) {
         if let Some(surface) = &self.candidate_surface {
             surface.attach(None::<&WlBuffer>, 0, 0);
@@ -727,10 +709,10 @@ impl WaylandConnectionV1 {
         let height = 36;
 
         // Use candidate_surface to display root (same surface, different content)
-        let shm = self.shm.as_ref().ok_or(Error::NoShm)?;
+        let shm = self.shm.clone().ok_or(Error::NoShm)?;
         let surface = self
             .candidate_surface
-            .as_ref()
+            .clone()
             .ok_or(Error::Io(std::io::Error::other("No candidate surface")))?;
 
         // Destroy old buffer and pool
@@ -746,7 +728,8 @@ impl WaylandConnectionV1 {
         let stride = width * 4;
         let size = stride * height;
 
-        let (pool, fd) = self.create_shm_pool_with_fd(shm, size)?;
+        let fd = Self::create_anonymous_file(size)?;
+        let pool = shm.create_pool(fd.as_fd(), size as i32, &qh, self.state.clone());
         self.current_pool = Some(pool.clone());
 
         self.draw_root(&fd, width, height, key, root, primary_color)?;
