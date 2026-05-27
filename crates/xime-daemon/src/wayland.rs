@@ -305,7 +305,6 @@ impl WaylandLoop {
                 c.commit_string(committed);
                 let _ = c.flush();
                 debug!("Committed: {}", committed);
-
             }
 
             if let Some(ctx) = session.context() {
@@ -349,8 +348,6 @@ impl WaylandLoop {
             }
         }
     }
-
-
 
     #[allow(clippy::too_many_arguments)]
     fn handle_ctrl_key(
