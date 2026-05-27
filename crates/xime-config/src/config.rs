@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
-use crate::smart_suggestion::SmartSuggestionConfig;
 use crate::style::{ColorScheme, StyleConfig};
 use crate::wubi_radicals::WubiRadicalsConfig;
 
@@ -15,8 +14,6 @@ pub struct XimeConfig {
     pub style: StyleConfig,
     #[serde(default)]
     pub color_schemes: HashMap<String, ColorScheme>,
-    #[serde(default)]
-    pub smart_suggestion: SmartSuggestionConfig,
 }
 
 impl XimeConfig {
@@ -69,7 +66,6 @@ impl XimeConfig {
                 } else {
                     user.color_schemes
                 },
-                smart_suggestion: user.smart_suggestion,
             },
             None => system,
         }
@@ -226,9 +222,6 @@ style:
   color_scheme: ocean_blue
   font_size: 18
 
-smart_suggestion:
-  enabled: true
-
 color_schemes:
   ocean_blue:
     name: \"海洋蔚蓝\"
@@ -243,7 +236,6 @@ color_schemes:
         assert_eq!(merged.style.color_scheme, "ocean_blue");
         assert_eq!(merged.style.font_size, 18.0);
         assert!(!merged.color_schemes.is_empty());
-        assert!(merged.smart_suggestion.enabled);
     }
 
     #[test]
