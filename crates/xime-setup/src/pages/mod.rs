@@ -3,7 +3,6 @@ pub mod appearance;
 pub mod dictionary;
 pub mod hotkeys;
 pub mod input_schema;
-pub mod smart_suggestion;
 
 use crate::components::TitleBar;
 use crate::state::SettingsState;
@@ -40,7 +39,7 @@ impl Render for SettingsApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         window.set_background_appearance(WindowBackgroundAppearance::Blurred);
 
-        let pages = ["输入方案", "外观", "快捷键", "智能联想", "关于"];
+        let pages = ["输入方案", "外观", "快捷键", "关于"];
         let current = self.current_page;
         let settings = self.settings.clone();
         let settings_for_title = settings.clone();
@@ -95,7 +94,7 @@ impl Render for SettingsApp {
             0 => input_schema::render(settings, cx),
             1 => appearance::render(settings, cx),
             2 => hotkeys::render(settings, cx),
-            3 => smart_suggestion::render(settings, cx),
+            3 => about::render(settings, cx),
             4 => about::render(settings, cx),
             _ => input_schema::render(settings, cx),
         };

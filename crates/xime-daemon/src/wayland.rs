@@ -4,7 +4,6 @@ use std::thread;
 
 use tracing::{debug, error, info, warn};
 use xime_config::XimeConfig;
-use xime_predict::{check_model_exists, Predictor};
 use xime_tray::{InputMode, TrayManager};
 use xime_wayland::{InputMethodV1State, WaylandConnectionV1};
 use xime_xkb::XkbContext;
@@ -38,17 +37,6 @@ impl WaylandLoop {
         let mut xkb: Option<XkbContext> = None;
         let mut rime = RimeEngine::new();
 
-        let mut predictor = if check_model_exists(None) {
-            Predictor::new(None).ok()
-        } else {
-            None
-        };
-        if predictor.is_some() {
-            info!("Smart suggestion model loaded successfully");
-        } else {
-            debug!("Smart suggestion model not available");
-        }
-
         let mut xime_config = XimeConfig::load();
         let _last_key_root_binding = xime_config.get_last_key_root_binding();
         let primary_color = xime_config.get_primary_color();
@@ -65,10 +53,6 @@ impl WaylandLoop {
         let mut ctrl_root_visible = false;
         let mut last_ascii_mode = false;
         let mut last_state = InputMethodV1State::Inactive;
-        let mut smart_suggestion_visible = false;
-        let mut last_committed_text = String::new();
-        let mut smart_suggestion_candidates: Vec<String> = Vec::new();
-        let mut smart_suggestion_page: usize = 0;
 
         loop {
             use std::sync::mpsc::TryRecvError;
@@ -122,12 +106,6 @@ impl WaylandLoop {
                     });
                     xime_config = new_config;
 
-                    if predictor.is_none() && check_model_exists(None) {
-                        predictor = Predictor::new(None).ok();
-                        if predictor.is_some() {
-                            info!("Smart suggestion model loaded after reload");
-                        }
-                    }
                     debug!("Style config reloaded, new primary_color={:?}", new_color);
                 }
                 Ok(DaemonCommand::Shutdown) => {
@@ -164,10 +142,6 @@ impl WaylandLoop {
 
                     if !is_active {
                         candidate_window_visible = false;
-                        smart_suggestion_visible = false;
-                        last_committed_text.clear();
-                        smart_suggestion_candidates.clear();
-                        smart_suggestion_page = 0;
                         continue;
                     }
                 }
@@ -182,11 +156,6 @@ impl WaylandLoop {
                         &mut last_input_keysym,
                         &mut ctrl_root_visible,
                         &mut last_ascii_mode,
-                        &mut smart_suggestion_visible,
-                        &mut predictor,
-                        &mut last_committed_text,
-                        &mut smart_suggestion_candidates,
-                        &mut smart_suggestion_page,
                     );
                 }
             }
@@ -206,11 +175,6 @@ impl WaylandLoop {
         last_input_keysym: &mut Option<u32>,
         ctrl_root_visible: &mut bool,
         last_ascii_mode: &mut bool,
-        smart_suggestion_visible: &mut bool,
-        predictor: &mut Option<Predictor>,
-        last_committed_text: &mut String,
-        smart_suggestion_candidates: &mut Vec<String>,
-        smart_suggestion_page: &mut usize,
     ) {
         if let Some(ref mut x) = xkb {
             if let Some((fd, size)) = c.get_keymap_pending() {
@@ -244,11 +208,6 @@ impl WaylandLoop {
                         last_input_keysym,
                         ctrl_root_visible,
                         last_ascii_mode,
-                        smart_suggestion_visible,
-                        predictor,
-                        last_committed_text,
-                        smart_suggestion_candidates,
-                        smart_suggestion_page,
                     );
                 }
             }
@@ -268,11 +227,6 @@ impl WaylandLoop {
         last_input_keysym: &mut Option<u32>,
         ctrl_root_visible: &mut bool,
         last_ascii_mode: &mut bool,
-        smart_suggestion_visible: &mut bool,
-        predictor: &mut Option<Predictor>,
-        last_committed_text: &mut String,
-        smart_suggestion_candidates: &mut Vec<String>,
-        smart_suggestion_page: &mut usize,
     ) {
         let modifiers = xkb.get_modifiers();
         let release_mask = if !event.pressed {
@@ -286,72 +240,6 @@ impl WaylandLoop {
             modifiers.effective,
             release_mask
         );
-
-        if *smart_suggestion_visible && event.pressed {
-            let raw = sym.raw();
-            let page_size = xime_config.smart_suggestion.suggestion_count as usize;
-
-            let total_pages = smart_suggestion_candidates.len().div_ceil(page_size);
-
-            if raw == 0x005D && *smart_suggestion_page + 1 < total_pages {
-                *smart_suggestion_page += 1;
-                self.show_smart_suggestions(
-                    c,
-                    xime_config,
-                    predictor,
-                    smart_suggestion_visible,
-                    candidate_window_visible,
-                    last_committed_text,
-                    smart_suggestion_candidates,
-                    smart_suggestion_page,
-                );
-                return;
-            }
-            if raw == 0x005B && *smart_suggestion_page > 0 {
-                *smart_suggestion_page -= 1;
-                self.show_smart_suggestions(
-                    c,
-                    xime_config,
-                    predictor,
-                    smart_suggestion_visible,
-                    candidate_window_visible,
-                    last_committed_text,
-                    smart_suggestion_candidates,
-                    smart_suggestion_page,
-                );
-                return;
-            }
-
-            let page_offset = *smart_suggestion_page * page_size;
-            let selected_idx = if raw == 0x0020 {
-                Some(page_offset)
-            } else if (0x0031..=0x0039).contains(&raw) {
-                let idx = page_offset + (raw - 0x0031) as usize;
-                Some(idx)
-            } else {
-                None
-            };
-
-            if let Some(idx) = selected_idx {
-                if idx < smart_suggestion_candidates.len() {
-                    let text = smart_suggestion_candidates[idx].clone();
-                    c.commit_string(&text);
-                    c.hide_candidate_window();
-                    let _ = c.flush();
-                    debug!("Smart suggestion selected: '{}'", text);
-                }
-                *smart_suggestion_visible = false;
-                smart_suggestion_candidates.clear();
-                *candidate_window_visible = false;
-                *smart_suggestion_page = 0;
-                return;
-            }
-
-            *smart_suggestion_visible = false;
-            smart_suggestion_candidates.clear();
-            *smart_suggestion_page = 0;
-            debug!("Smart suggestion dismissed by key press");
-        }
 
         let is_ctrl = sym.raw() == 0xFFE3 || sym.raw() == 0xFFE4;
         debug!(
@@ -418,26 +306,6 @@ impl WaylandLoop {
                 let _ = c.flush();
                 debug!("Committed: {}", committed);
 
-                *last_committed_text = committed.to_string();
-
-                debug!(
-                    "smart_suggestion.enabled={}, last_ascii_mode={}",
-                    xime_config.smart_suggestion.enabled, *last_ascii_mode
-                );
-                if xime_config.smart_suggestion.enabled && !*last_ascii_mode {
-                    debug!("Calling show_smart_suggestions");
-                    *smart_suggestion_page = 0;
-                    self.show_smart_suggestions(
-                        c,
-                        xime_config,
-                        predictor,
-                        smart_suggestion_visible,
-                        candidate_window_visible,
-                        last_committed_text,
-                        smart_suggestion_candidates,
-                        smart_suggestion_page,
-                    );
-                }
             }
 
             if let Some(ctx) = session.context() {
@@ -473,8 +341,7 @@ impl WaylandLoop {
                         debug!("Candidate window error: {}", e);
                     }
                     *candidate_window_visible = true;
-                    *smart_suggestion_visible = false;
-                } else if *candidate_window_visible && !*smart_suggestion_visible {
+                } else if *candidate_window_visible {
                     c.hide_candidate_window();
                     let _ = c.flush();
                     *candidate_window_visible = false;
@@ -483,95 +350,7 @@ impl WaylandLoop {
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn show_smart_suggestions(
-        &self,
-        c: &mut WaylandConnectionV1,
-        xime_config: &XimeConfig,
-        predictor: &mut Option<Predictor>,
-        smart_suggestion_visible: &mut bool,
-        candidate_window_visible: &mut bool,
-        last_committed_text: &str,
-        smart_suggestion_candidates: &mut Vec<String>,
-        smart_suggestion_page: &usize,
-    ) {
-        debug!(
-            "show_smart_suggestions called, predictor.is_none={}, last_committed_text='{}'",
-            predictor.is_none(),
-            last_committed_text
-        );
 
-        if last_committed_text.is_empty() {
-            return;
-        }
-
-        if predictor.is_none() && check_model_exists(None) {
-            *predictor = Predictor::new(None).ok();
-            if predictor.is_some() {
-                info!("Smart suggestion model loaded lazily");
-            }
-        }
-
-        if predictor.is_none() {
-            return;
-        }
-
-        let prefix = if last_committed_text.len() > 4 {
-            last_committed_text
-                .chars()
-                .rev()
-                .take(4)
-                .collect::<String>()
-        } else {
-            last_committed_text.to_string()
-        };
-
-        let page_size = xime_config.smart_suggestion.suggestion_count as usize;
-
-        if smart_suggestion_candidates.is_empty() {
-            if let Some(ref mut p) = predictor {
-                let result = p.predict(&prefix, page_size * 10);
-                match &result {
-                    Ok(list) => debug!("predict OK, count={}", list.len()),
-                    Err(e) => debug!("predict error: {}", e),
-                }
-                if let Ok(suggestions) = result {
-                    smart_suggestion_candidates.clear();
-                    smart_suggestion_candidates.extend(suggestions.iter().map(|(t, _)| t.clone()));
-                }
-            }
-        }
-
-        if smart_suggestion_candidates.is_empty() {
-            return;
-        }
-
-        let start = *smart_suggestion_page * page_size;
-        let end = std::cmp::min(start + page_size, smart_suggestion_candidates.len());
-        let page_items: Vec<String> = smart_suggestion_candidates[start..end].to_vec();
-
-        let candidate_items: Vec<xime_ui::CandidateItem> = page_items
-            .iter()
-            .enumerate()
-            .map(|(i, text)| xime_ui::CandidateItem {
-                text: text.clone(),
-                comment: String::new(),
-                index: start + i,
-            })
-            .collect();
-
-        let primary_color = xime_config.get_primary_color();
-
-        if let Err(e) = c.show_candidate_window(&candidate_items, 0, primary_color) {
-            debug!("Smart suggestion window error: {}", e);
-        } else {
-            *smart_suggestion_visible = true;
-            *candidate_window_visible = true;
-            if let Err(e) = c.flush() {
-                debug!("Flush error: {}", e);
-            }
-        }
-    }
 
     #[allow(clippy::too_many_arguments)]
     fn handle_ctrl_key(
