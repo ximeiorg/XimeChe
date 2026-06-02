@@ -379,7 +379,8 @@ mod tests {
         assert!(
             width >= width_short,
             "Longer root should not be narrower, got width={}, width_short={}",
-            width, width_short
+            width,
+            width_short
         );
     }
 
