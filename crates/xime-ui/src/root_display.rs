@@ -1,7 +1,7 @@
 use cosmic_text::{fontdb, Attrs, Buffer, Color, Family, FontSystem, Metrics, Shaping, SwashCache};
 use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap};
 
-const CORNER_RADIUS: f32 = 8.0;
+const CORNER_RADIUS: f32 = 12.0;
 const KEY_BG_CORNER_RADIUS: f32 = 4.0;
 
 // Embed ChaiPUA font for root display

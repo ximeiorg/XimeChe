@@ -51,7 +51,7 @@ pub fn render(settings: Entity<SettingsState>, cx: &mut Context<SettingsApp>) ->
                                     div()
                                         .text_size(px(14.0))
                                         .text_color(colors.foreground_muted)
-                                        .child("基于 Rime 引擎的 Linux 五笔输入法"),
+                                        .child("基于 Rime 引擎的 Linux 输入法"),
                                 ),
                         ),
                 ),
