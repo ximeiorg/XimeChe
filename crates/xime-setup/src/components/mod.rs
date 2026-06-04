@@ -6,6 +6,7 @@ pub mod number_input;
 pub mod radio;
 pub mod settings;
 pub mod switch;
+pub mod text_input;
 pub mod title_bar;
 
 pub use button::Button;
@@ -16,4 +17,5 @@ pub use number_input::NumberInput;
 pub use radio::Radio;
 pub use settings::{SettingsControl, SettingsGroup, SettingsItem, SettingsPage};
 pub use switch::Switch;
+pub use text_input::TextInput;
 pub use title_bar::TitleBar;

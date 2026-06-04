@@ -8,6 +8,7 @@ use xime_config::{
 pub struct SettingsState {
     pub appearance: AppearanceState,
     pub input_schema: InputSchemaState,
+    pub sync: SyncState,
     pub system_theme: SystemTheme,
     pub deploy_message: Option<String>,
     pub schemas_loaded: bool,
@@ -18,7 +19,7 @@ impl SettingsState {
         let mut state = Self {
             appearance: AppearanceState::default(),
             input_schema: InputSchemaState::default(),
-
+            sync: SyncState::default(),
             system_theme: SystemTheme::detect(),
             deploy_message: None,
             schemas_loaded: false,
@@ -233,6 +234,40 @@ fn notify_daemon_reload_style() {
         )
         .ok()
     });
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum SyncStatus {
+    #[default]
+    Idle,
+    Success,
+    Error,
+}
+
+#[derive(Clone)]
+pub struct SyncState {
+    #[allow(dead_code)]
+    pub url: String,
+    #[allow(dead_code)]
+    pub username: String,
+    #[allow(dead_code)]
+    pub password: String,
+    pub is_syncing: bool,
+    pub status: SyncStatus,
+    pub status_message: Option<String>,
+}
+
+impl Default for SyncState {
+    fn default() -> Self {
+        Self {
+            url: String::new(),
+            username: String::new(),
+            password: String::new(),
+            is_syncing: false,
+            status: SyncStatus::Idle,
+            status_message: None,
+        }
+    }
 }
 
 #[derive(Clone, Default)]

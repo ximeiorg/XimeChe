@@ -2,6 +2,7 @@ mod components;
 mod pages;
 mod state;
 mod theme;
+mod webdav;
 
 use gpui::*;
 use pages::SettingsApp;
@@ -87,6 +88,8 @@ fn main() {
     }
 
     Application::new().run(|cx: &mut App| {
+        components::text_input::register_key_bindings(cx);
+
         let _ = cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::centered(size(px(800.0), px(640.0)), cx)),

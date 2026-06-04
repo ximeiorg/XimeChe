@@ -67,6 +67,16 @@
     - 基于 Axum 的 HTTP REST API 服务
     - 配对功能：6 位配对码 + HMAC-SHA256 Token 认证
     - 剪切板读写：hash 去重防循环
+12. **WebDAV 配置同步 (xime-setup)**
+    - 新增"同步"设置页，位于侧边栏"快捷键"和"关于"之间
+    - 提供 WebDAV 配置表单：服务器地址、用户名、密码
+    - 配置保存到 `~/.config/xime/webdav.yaml`（权限 600）
+    - "上传到服务器"按钮：将 `~/.config/xime/rime/` 打包为 tar.gz 上传
+    - "从服务器下载"按钮：下载 tar.gz 并解压到 rime 目录
+    - 下载前自动备份旧配置，解压失败自动恢复
+    - 使用 `tar` 命令打包/解压，`reqwest::blocking` 进行 HTTP 请求
+    - 文本输入通过 `zenity` 对话框实现
+
     - 配对持久化：`~/.config/xime/pairs.json`
     - 端口：16888（硬编码，待配置化）
     - API Endpoints：
