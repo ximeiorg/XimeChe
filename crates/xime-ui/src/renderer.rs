@@ -105,7 +105,7 @@ impl CandidateRenderer {
     }
 
     fn draw_shadow(&self, pixmap: &mut Pixmap, width: u32, height: u32) {
-        let corner_radius = 8.0f32;
+        let corner_radius = 12.0f32;
 
         let shadow_rect = build_rounded_rect(
             SHADOW_OFFSET_X,
@@ -129,7 +129,7 @@ impl CandidateRenderer {
     }
 
     fn draw_background(&self, pixmap: &mut Pixmap, width: u32, height: u32) {
-        let corner_radius = 8.0f32;
+        let corner_radius = 12.0f32;
         let border_width = 2.0f32;
 
         let rounded_rect = build_rounded_rect(0.0, 0.0, width as f32, height as f32, corner_radius);
