@@ -23,6 +23,14 @@
   - 通过 DBus 将 fd 传递给 daemon
   - 保持运行（KWin 要求）
 
+## 外部依赖
+
+共享基础设施来自 [libximecore](https://github.com/ximeiorg/libximecore)（本地路径 `../libximecore`）：
+- `librime-sys2` — 原始 FFI 绑定
+- `librime` — 安全 Rust 封装
+- `xime-config` — 配置模型
+- `xime-setup-lib` — 设置程序 gpui 组件库（本项目的 `xime-setup` 是只含 `main.rs` 的薄壳二进制）
+
 数据流:
 ```
 KWin → WAYLAND_SOCKET fd → launcher → DBus → daemon →
