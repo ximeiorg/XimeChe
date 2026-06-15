@@ -7,6 +7,7 @@ BINDIR="${HOME}/.local/bin"
 DATADIR="${HOME}/.local/share"
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIBXIMECORE="${PROJECT_ROOT}/../libximecore"
 
 echo "Installing xime-wayland for development to ${HOME}/.local"
 
@@ -16,28 +17,16 @@ pkill -9 xime-daemon 2>/dev/null || true
 pkill -9 xime-launcher 2>/dev/null || true
 sleep 1
 
-# Initialize git submodules (librime, rime-wubi)
+# Initialize git submodules (rime-wubi for data, libximecore for librime)
 if [ -f "${PROJECT_ROOT}/.gitmodules" ]; then
     git submodule update --init --recursive
 fi
-
-# Build local librime if not already built
-RIME_LIB_DIR="${PROJECT_ROOT}/librime/build/lib"
-if [ ! -f "${RIME_LIB_DIR}/librime.so" ]; then
-    echo "Building local librime..."
-    cmake -S "${PROJECT_ROOT}/librime" -B "${PROJECT_ROOT}/librime/build" \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DBUILD_TEST=OFF \
-        -DBUILD_MERGED_PLUGINS=OFF \
-        -DENABLE_EXTERNAL_PLUGINS=ON
-    cmake --build "${PROJECT_ROOT}/librime/build" -j"$(nproc)"
-    echo "librime built successfully"
+if [ -f "${LIBXIMECORE}/.gitmodules" ]; then
+    git -C "${LIBXIMECORE}" submodule update --init --recursive
 fi
-export RIME_LIB_DIR="${RIME_LIB_DIR}"
-export LD_LIBRARY_PATH="${RIME_LIB_DIR}:${LD_LIBRARY_PATH:-}"
 
 cargo clippy --all-targets --all-features -- -D warnings
-# Build release
+# Build release (librime build is handled by librime-sys2/build.rs)
 cargo build --release -p xime-daemon -p xime-launcher -p xime-setup
 
 # Install binaries
@@ -70,7 +59,9 @@ fi
 # Install rime-wubi schemas to user directory
 if [ -d "${PROJECT_ROOT}/rime-wubi" ]; then
     mkdir -p "${RIMEDIR}"
-    cp -r "${PROJECT_ROOT}/rime-wubi"/*.schema.yaml "${PROJECT_ROOT}/rime-wubi"/*.dict.yaml "${PROJECT_ROOT}/rime-wubi"/*.lua "${RIMEDIR}/" 2>/dev/null || true
+    cp -r "${PROJECT_ROOT}/rime-wubi"/*.schema.yaml \
+          "${PROJECT_ROOT}/rime-wubi"/*.dict.yaml \
+          "${PROJECT_ROOT}/rime-wubi"/*.lua "${RIMEDIR}/" 2>/dev/null || true
     cp "${PROJECT_ROOT}/rime-wubi"/default.custom.yaml "${RIMEDIR}/" 2>/dev/null || true
     cp "${PROJECT_ROOT}/rime-wubi"/xime.custom.yaml "${RIMEDIR}/" 2>/dev/null || true
     echo "Installed rime-wubi schemas to ${RIMEDIR}"
@@ -88,6 +79,6 @@ echo "To test:"
 echo "1. Restart KDE Plasma (logout/login) OR restart KWin"
 echo "2. Open Kate and type to trigger VirtualKeyboard"
 echo ""
-echo "To manually test daemon:"
-echo "  LD_LIBRARY_PATH=\"${RIME_LIB_DIR}:\${LD_LIBRARY_PATH:-}\" ${BINDIR}/xime-daemon"
-echo "  qdbus org.xime.Xime"
+echo "If librime was built from the submodule, you may need:"
+echo "  export LD_LIBRARY_PATH=\"${LIBXIMECORE}/librime/dist/lib:\${LD_LIBRARY_PATH:-}\""
+echo "Or install librime system-wide: sudo make install -C ${LIBXIMECORE}/librime/build"
