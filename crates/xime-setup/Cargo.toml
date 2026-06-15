@@ -10,7 +10,6 @@ repository.workspace = true
 xime-setup-lib = { path = "../../../libximecore/crates/xime-setup" }
 gpui = { version = "0.2.2", default-features = false, features = ["wayland", "font-kit"] }
 anyhow = "1.0"
-rust-embed = { version = "8", features = ["interpolate-folder-path"] }
 tracing.workspace = true
 nix = { version = "0.31.3", features = ["fs"] }
 zbus = "5"

@@ -7356,7 +7356,6 @@ dependencies = [
  "anyhow",
  "gpui",
  "nix 0.31.3",
- "rust-embed",
  "tracing",
  "xime-setup-lib",
  "zbus",
@@ -7366,7 +7365,9 @@ dependencies = [
 name = "xime-setup-lib"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "gpui",
+ "rust-embed",
  "serde",
  "serde_yaml",
  "tracing",
