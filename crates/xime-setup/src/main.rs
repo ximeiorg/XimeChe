@@ -1,22 +1,13 @@
-mod components;
-mod pages;
-mod state;
-mod theme;
-mod webdav;
-
 use gpui::*;
-use pages::SettingsApp;
 use rust_embed::RustEmbed;
 use std::borrow::Cow;
 use std::fs::File;
 use std::path::PathBuf;
-use tracing::info;
+use xime_setup_lib::{set_notify_deploy, set_notify_reload_style, SettingsApp};
 
 #[derive(RustEmbed)]
 #[folder = "$CARGO_MANIFEST_DIR/assets"]
-#[include = "image/*.png"]
 #[include = "icons/*.svg"]
-#[allow(dead_code)]
 struct Assets;
 
 impl AssetSource for Assets {
@@ -24,9 +15,7 @@ impl AssetSource for Assets {
         if path.is_empty() {
             return Ok(None);
         }
-        Assets::get(path)
-            .map(|x| Some(x.data))
-            .ok_or_else(|| anyhow::anyhow!("Asset not found"))
+        Ok(Assets::get(path).map(|x| x.data))
     }
 
     fn list(&self, path: &str) -> Result<Vec<SharedString>> {
@@ -57,18 +46,14 @@ fn get_lock_file_path() -> PathBuf {
 
 fn try_acquire_singleton_lock() -> bool {
     let lock_path = get_lock_file_path();
-
     if let Some(parent) = lock_path.parent() {
         std::fs::create_dir_all(parent).ok();
     }
 
-    let file = File::create(&lock_path);
-
-    match file {
+    match File::create(&lock_path) {
         Ok(f) => {
             use nix::fcntl::{Flock, FlockArg};
             use std::mem::forget;
-
             match Flock::lock(f, FlockArg::LockExclusiveNonblock) {
                 Ok(flock) => {
                     forget(flock);
@@ -83,13 +68,35 @@ fn try_acquire_singleton_lock() -> bool {
 
 fn main() {
     if !try_acquire_singleton_lock() {
-        info!("xime-setup is already running, exiting...");
+        tracing::info!("xime-setup is already running, exiting...");
         return;
     }
 
-    Application::new().run(|cx: &mut App| {
-        components::text_input::register_key_bindings(cx);
+    // Inject IPC notify callbacks (Linux: DBus to xime-daemon)
+    set_notify_deploy(|| {
+        if let Ok(conn) = zbus::blocking::Connection::session() {
+            let _ = conn.call_method(
+                Some("org.xime.Xime"),
+                "/org/xime/Xime",
+                Some("org.xime.Xime.Controller"),
+                "Deploy",
+                &(),
+            );
+        }
+    });
+    set_notify_reload_style(|| {
+        if let Ok(conn) = zbus::blocking::Connection::session() {
+            let _ = conn.call_method(
+                Some("org.xime.Xime"),
+                "/org/xime/Xime",
+                Some("org.xime.Xime.Controller"),
+                "ReloadStyle",
+                &(),
+            );
+        }
+    });
 
+    Application::new().run(|cx: &mut App| {
         let _ = cx.open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::centered(size(px(800.0), px(640.0)), cx)),

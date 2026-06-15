@@ -7,14 +7,10 @@ license = "GPL-3.0"
 repository.workspace = true
 
 [dependencies]
+xime-setup-lib = { path = "../../../libximecore/crates/xime-setup" }
 gpui = { version = "0.2.2", default-features = false, features = ["wayland", "font-kit"] }
-xime-config = { path = "../xime-config" }
 anyhow = "1.0"
 rust-embed = { version = "8", features = ["interpolate-folder-path"] }
-serde_yaml = "0.9"
-serde = { version = "1.0", features = ["derive"] }
-zbus = "5"
-nix = { version = "0.31.3", features = ["fs"] }
 tracing.workspace = true
-reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls"] }
-unicode-segmentation = "1.12"
+nix = { version = "0.31.3", features = ["fs"] }
+zbus = "5"

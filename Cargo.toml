@@ -1,9 +1,6 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/librime-sys",
-    "crates/librime",
-    "crates/xime-config",
     "crates/xime-wayland",
     "crates/xime-xkb",
     "crates/xime-ui",
@@ -22,14 +19,20 @@ license = "GPL-3.0-or-later"
 repository = "https://github.com/ximeiorg/xime-wayland"
 
 [workspace.dependencies]
-librime-sys2 = { path = "crates/librime-sys" }
-librime = { path = "crates/librime" }
-xime-config = { path = "crates/xime-config" }
+# libximecore — shared crates
+librime-sys2 = { path = "../libximecore/crates/librime-sys2" }
+librime = { path = "../libximecore/crates/librime" }
+xime-config = { path = "../libximecore/crates/xime-config" }
+xime-ipc = { path = "../libximecore/crates/xime-ipc" }
+xime-rime = { path = "../libximecore/crates/xime-rime" }
+xime-setup-lib = { path = "../libximecore/crates/xime-setup" }
+
+# local crates
 xime-wayland = { path = "crates/xime-wayland" }
 xime-xkb = { path = "crates/xime-xkb" }
 xime-ui = { path = "crates/xime-ui" }
 xime-tray = { path = "crates/xime-tray" }
-# xime-predict = { path = "crates/xime-predict" }
+
 thiserror = "2.0.18"
 once_cell = "1.17"
 anyhow = "1.0"
