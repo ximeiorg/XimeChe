@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use xime_setup_lib::{set_notify_deploy, set_notify_reload_style, SettingsApp};
 
 #[derive(RustEmbed)]
-#[folder = "$CARGO_MANIFEST_DIR/assets"]
+#[folder = "$CARGO_MANIFEST_DIR/../../../libximecore/crates/xime-setup/assets"]
 #[include = "icons/*.svg"]
 struct Assets;
 
