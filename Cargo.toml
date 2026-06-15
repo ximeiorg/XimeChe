@@ -19,10 +19,10 @@ license = "GPL-3.0-or-later"
 repository = "https://github.com/ximeiorg/xime-wayland"
 
 [workspace.dependencies]
-# libximecore — shared crates
-librime = { path = "../libximecore/crates/librime" }
-xime-config = { path = "../libximecore/crates/xime-config" }
-xime-setup-lib = { path = "../libximecore/crates/xime-setup" }
+# libximecore — shared crates (git dep, patched to local for development)
+librime = { git = "https://github.com/ximeiorg/libximecore.git", package = "librime" }
+xime-config = { git = "https://github.com/ximeiorg/libximecore.git", package = "xime-config" }
+xime-setup-lib = { git = "https://github.com/ximeiorg/libximecore.git", package = "xime-setup-lib" }
 
 # local crates
 xime-wayland = { path = "crates/xime-wayland" }
@@ -40,3 +40,9 @@ serde_yaml = "0.9"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.19", features = ["fmt", "env-filter"] }
 tracing-appender = "0.2.3"
+
+# Local development override — remove after pushing libximecore
+[patch."https://github.com/ximeiorg/libximecore"]
+librime = { path = "../libximecore/crates/librime" }
+xime-config = { path = "../libximecore/crates/xime-config" }
+xime-setup-lib = { path = "../libximecore/crates/xime-setup" }
