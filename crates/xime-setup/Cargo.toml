@@ -7,7 +7,7 @@ license = "GPL-3.0"
 repository.workspace = true
 
 [dependencies]
-xime-setup-lib = { path = "../../../libximecore/crates/xime-setup" }
+xime-setup-lib.workspace = true
 gpui = { version = "0.2.2", default-features = false, features = ["wayland", "font-kit"] }
 anyhow = "1.0"
 tracing.workspace = true
