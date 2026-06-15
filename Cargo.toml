@@ -20,11 +20,8 @@ repository = "https://github.com/ximeiorg/xime-wayland"
 
 [workspace.dependencies]
 # libximecore — shared crates
-librime-sys2 = { path = "../libximecore/crates/librime-sys2" }
 librime = { path = "../libximecore/crates/librime" }
 xime-config = { path = "../libximecore/crates/xime-config" }
-xime-ipc = { path = "../libximecore/crates/xime-ipc" }
-xime-rime = { path = "../libximecore/crates/xime-rime" }
 xime-setup-lib = { path = "../libximecore/crates/xime-setup" }
 
 # local crates
