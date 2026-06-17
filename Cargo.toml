@@ -41,8 +41,3 @@ tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.19", features = ["fmt", "env-filter"] }
 tracing-appender = "0.2.3"
 
-# Local development override — remove after pushing libximecore
-[patch."https://github.com/ximeiorg/libximecore"]
-librime = { path = "../libximecore/crates/librime" }
-xime-config = { path = "../libximecore/crates/xime-config" }
-xime-setup-lib = { path = "../libximecore/crates/xime-setup" }
