@@ -1,2 +1,3 @@
 /target
-fcitx5-master
+# Local cargo config (created by dev-install.sh for libximecore patch)
+.cargo/config.toml

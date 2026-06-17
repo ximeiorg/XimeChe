@@ -11,6 +11,21 @@ LIBXIMECORE="${PROJECT_ROOT}/../libximecore"
 
 echo "Installing xime-wayland for development to ${HOME}/.local"
 
+# Ensure .cargo/config.toml exists with local libximecore patch
+CARGO_CONF="${PROJECT_ROOT}/.cargo/config.toml"
+if [ ! -f "${CARGO_CONF}" ]; then
+    mkdir -p "${PROJECT_ROOT}/.cargo"
+    cat > "${CARGO_CONF}" << 'EOF'
+# Local development override — use local libximecore checkout.
+# Remove this file to use git dependencies (CI, release builds).
+[patch."https://github.com/ximeiorg/libximecore"]
+librime = { path = "../libximecore/crates/librime" }
+xime-config = { path = "../libximecore/crates/xime-config" }
+xime-setup-lib = { path = "../libximecore/crates/xime-setup" }
+EOF
+    echo "Created ${CARGO_CONF} with local libximecore patch"
+fi
+
 # Stop existing xime processes to refresh
 echo "Stopping existing xime processes..."
 pkill -9 xime-daemon 2>/dev/null || true
@@ -62,6 +77,11 @@ if [ -d "${PROJECT_ROOT}/rime-wubi" ]; then
     cp -r "${PROJECT_ROOT}/rime-wubi"/*.schema.yaml \
           "${PROJECT_ROOT}/rime-wubi"/*.dict.yaml \
           "${PROJECT_ROOT}/rime-wubi"/*.lua "${RIMEDIR}/" 2>/dev/null || true
+    # Copy lua/ subdirectory (uuid, date_translator, etc.)
+    if [ -d "${PROJECT_ROOT}/rime-wubi/lua" ]; then
+        cp -r "${PROJECT_ROOT}/rime-wubi/lua" "${RIMEDIR}/"
+        echo "Installed lua scripts to ${RIMEDIR}/lua"
+    fi
     cp "${PROJECT_ROOT}/rime-wubi"/default.custom.yaml "${RIMEDIR}/" 2>/dev/null || true
     cp "${PROJECT_ROOT}/rime-wubi"/xime.custom.yaml "${RIMEDIR}/" 2>/dev/null || true
     echo "Installed rime-wubi schemas to ${RIMEDIR}"
