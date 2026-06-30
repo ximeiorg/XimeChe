@@ -67,19 +67,21 @@ fn main() {
         }
     });
 
-    Application::new().with_assets(Assets).run(|cx: &mut App| {
-        let _ = cx.open_window(
-            WindowOptions {
-                window_bounds: Some(WindowBounds::centered(size(px(800.0), px(640.0)), cx)),
-                titlebar: Some(TitlebarOptions {
-                    title: Some("Xime 设置".into()),
-                    appears_transparent: true,
-                    traffic_light_position: None,
-                }),
-                window_decorations: Some(WindowDecorations::Client),
-                ..Default::default()
-            },
-            |_window, cx| cx.new(SettingsApp::new),
-        );
-    });
+    gpui_platform::application()
+        .with_assets(Assets)
+        .run(|cx: &mut App| {
+            let _ = cx.open_window(
+                WindowOptions {
+                    window_bounds: Some(WindowBounds::centered(size(px(800.0), px(640.0)), cx)),
+                    titlebar: Some(TitlebarOptions {
+                        title: Some("Xime 设置".into()),
+                        appears_transparent: true,
+                        traffic_light_position: None,
+                    }),
+                    window_decorations: Some(WindowDecorations::Client),
+                    ..Default::default()
+                },
+                |_window, cx| cx.new(SettingsApp::new),
+            );
+        });
 }
