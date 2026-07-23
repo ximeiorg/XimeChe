@@ -83,7 +83,7 @@ fn main() -> anyhow::Result<()> {
         let ximed_port = 8370;
 
         rt_handle.spawn(async move {
-            if let Err(e) = serve(ximed_port).await {
+            if let Err(e) = serve(ximed_port, None).await {
                 error!("ximed server error: {}", e);
             }
         });

@@ -1,5 +1,10 @@
 # XIME-Wayland
 
+[logo](./image.png)
+<p align="center">
+  <img src="docs/image.png" alt="Xime Logo" width="800">
+</p>
+
 一个用 Rust 实现的 Linux 输入法，不依赖ibus和fcitx,直接对接 Wayland 和 librime 实现。 
 
 当前输入法不是 ibus 和 fcitx 的插件，而是一个独立的输入法程序。也就是说，xime 和 ibus 和 fcitx 没有任何关系。
