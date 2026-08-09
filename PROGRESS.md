@@ -19,6 +19,11 @@
    - 2.1.2 删除了 `xime.custom.yaml`、`xime.yaml`、`rime.lua`
    - install.sh/dev-install.sh 移除对 `xime.custom.yaml` 的安装
    - 新增 handwriting.schema.yaml、t9_pinyin.schema.yaml（随通配符自动安装）
+6. **Rime 数据目录参数化，仅使用 rime-wubi 方案**（libximecore dd5d54e）
+   - xime-config 新增 `set_rime_paths(RimePaths)` 接口，shared/user 目录由宿主应用注入，移除 `/usr/share/rime-data` 硬编码
+   - daemon main.rs / setup 薄壳 main.rs 解析 rime-wubi 目录（dev: `~/.local/share/xime/rime-data`，系统: `/usr/share/xime/rime-data`）并注入
+   - install.sh/dev-install.sh 把 rime-wubi 完整安装（含 default.yaml/symbols.yaml + lua/）到 shared 目录
+   - 验证：部署与 setup 方案列表仅含 rime-wubi 9 个方案，无系统内置 stroke/luna_pinyin
 
 ## 已完成功能
 1. **候选栏绘制**

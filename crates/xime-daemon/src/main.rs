@@ -59,6 +59,25 @@ fn main() -> anyhow::Result<()> {
     let _guard = init_tracing();
     info!("xime-daemon starting");
 
+    // 注入 Rime 数据目录（由本应用决定，libximecore 只提供接口）。
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+    let shared_candidates = [
+        // 开发安装：~/.local/share/xime/rime-data
+        std::path::PathBuf::from(&home).join(".local/share/xime/rime-data"),
+        // 系统安装：/usr/share/xime/rime-data
+        std::path::PathBuf::from("/usr/share/xime/rime-data"),
+    ];
+    let shared_data_dir = shared_candidates
+        .iter()
+        .find(|dir| dir.join("default.yaml").exists())
+        .cloned()
+        .unwrap_or_else(|| shared_candidates[0].clone());
+    let user_data_dir = std::path::PathBuf::from(&home).join(".config/xime/rime");
+    let _ = xime_config::set_rime_paths(xime_config::RimePaths {
+        shared_data_dir,
+        user_data_dir,
+    });
+
     let rt = tokio::runtime::Runtime::new()?;
     let rt_handle = rt.handle().clone();
 

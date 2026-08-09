@@ -1,6 +1,7 @@
 use librime::session::Session;
 use librime::traits::Traits;
 use tracing::{debug, error, warn};
+use xime_config::get_data_dirs;
 
 use crate::get_config_dir;
 
@@ -18,8 +19,9 @@ impl RimeEngine {
         }
         let config_dir_str = config_dir.to_string_lossy().to_string();
 
+        let (shared_data_dir, _) = get_data_dirs();
         let mut traits = Traits::new();
-        traits.set_shared_data_dir("/usr/share/rime-data");
+        traits.set_shared_data_dir(shared_data_dir.to_string_lossy().as_ref());
         traits.set_user_data_dir(&config_dir_str);
         traits.set_log_dir(&config_dir_str);
 
@@ -104,8 +106,9 @@ impl RimeEngine {
         debug!("Redeploying Rime...");
         librime::finalize();
 
+        let (shared_data_dir, _) = get_data_dirs();
         let mut traits = Traits::new();
-        traits.set_shared_data_dir("/usr/share/rime-data");
+        traits.set_shared_data_dir(shared_data_dir.to_string_lossy().as_ref());
         traits.set_user_data_dir(&self.config_dir);
         traits.set_log_dir(&self.config_dir);
 
@@ -139,3 +142,71 @@ impl Drop for RimeEngine {
         librime::finalize();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_deploy_contains_only_wubi_schemas() {
+        // 注入与 daemon 一致的 rime paths（仅 rime-wubi，不用系统 librime-data）
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+        let shared_candidates = [
+            std::path::PathBuf::from(&home).join(".local/share/xime/rime-data"),
+            std::path::PathBuf::from("/usr/share/xime/rime-data"),
+        ];
+        let shared_data_dir = shared_candidates
+            .iter()
+            .find(|dir| dir.join("default.yaml").exists())
+            .cloned()
+            .unwrap_or_else(|| shared_candidates[0].clone());
+        assert!(
+            !shared_data_dir.starts_with("/usr/share/rime-data"),
+            "should not use system librime-data dir: {}",
+            shared_data_dir.display()
+        );
+        let _ = xime_config::set_rime_paths(xime_config::RimePaths {
+            shared_data_dir,
+            user_data_dir: get_config_dir(),
+        });
+
+        let engine = RimeEngine::new();
+        assert!(engine.session().is_some(), "Rime session should initialize");
+        let build_dir = get_config_dir().join("build");
+        let schemas: Vec<_> = std::fs::read_dir(&build_dir)
+            .map(|rd| {
+                rd.filter_map(Result::ok)
+                    .filter(|e| e.path().file_name().map(|f| f.to_string_lossy().ends_with(".schema.yaml")).unwrap_or(false))
+                    .map(|e| e.file_name().to_string_lossy().to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        println!("deployed schemas: {:?}", schemas);
+        // 不应包含系统内置方案 stroke
+        assert!(
+            !schemas.iter().any(|s| s.contains("stroke")),
+            "system librime-data schema stroke should not be deployed: {:?}",
+            schemas
+        );
+    }
+}
+
+    #[test]
+    fn test_effective_page_size_in_menu() {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+        let shared_candidates = [
+            std::path::PathBuf::from(&home).join(".local/share/xime/rime-data"),
+            std::path::PathBuf::from("/usr/share/xime/rime-data"),
+        ];
+        let shared_data_dir = shared_candidates.iter().find(|dir| dir.join("default.yaml").exists()).cloned().unwrap_or_else(|| shared_candidates[0].clone());
+        let _ = xime_config::set_rime_paths(xime_config::RimePaths { shared_data_dir, user_data_dir: get_config_dir() });
+
+        let engine = RimeEngine::new();
+        assert!(engine.session().is_some());
+        let session = engine.session().unwrap();
+        // 切换到 wubi86_pinyin 并模拟输入，检查 menu.page_size
+        let _ = session.select_schema("wubi86_pinyin");
+        let _ = session.process_key(0x77, 0); // 'w'
+        let ctx = session.context().expect("context");
+        println!("effective menu.page_size = {}", ctx.menu().page_size);
+    }

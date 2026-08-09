@@ -88,18 +88,18 @@ if [ ! -f "${CONFIGDIR}/xime.custom.yaml" ]; then
     echo "Installed default config to ${CONFIGDIR}/xime.custom.yaml"
 fi
 
-# Install rime-wubi schemas to user directory
+# Install rime-wubi schemas to shared data directory (only rime-wubi schemas,
+# not system librime-data builtin schemas)
+SHAREDRIMEDIR="${DATADIR}/xime/rime-data"
 if [ -d "${PROJECT_ROOT}/rime-wubi" ]; then
-    mkdir -p "${RIMEDIR}"
-    cp -r "${PROJECT_ROOT}/rime-wubi"/*.schema.yaml \
-          "${PROJECT_ROOT}/rime-wubi"/*.dict.yaml "${RIMEDIR}/" 2>/dev/null || true
+    mkdir -p "${SHAREDRIMEDIR}"
+    cp -r "${PROJECT_ROOT}/rime-wubi"/*.yaml "${SHAREDRIMEDIR}/" 2>/dev/null || true
     # Copy lua/ subdirectory (uuid, date_translator, etc.)
     if [ -d "${PROJECT_ROOT}/rime-wubi/lua" ]; then
-        cp -r "${PROJECT_ROOT}/rime-wubi/lua" "${RIMEDIR}/"
-        echo "Installed lua scripts to ${RIMEDIR}/lua"
+        cp -r "${PROJECT_ROOT}/rime-wubi/lua" "${SHAREDRIMEDIR}/"
+        echo "Installed lua scripts to ${SHAREDRIMEDIR}/lua"
     fi
-    cp "${PROJECT_ROOT}/rime-wubi"/default.custom.yaml "${RIMEDIR}/" 2>/dev/null || true
-    echo "Installed rime-wubi schemas to ${RIMEDIR}"
+    echo "Installed rime-wubi schemas to ${SHAREDRIMEDIR}"
 fi
 
 # Configure KWin
