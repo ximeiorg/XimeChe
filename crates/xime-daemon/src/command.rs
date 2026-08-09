@@ -1,10 +1,12 @@
 use std::os::unix::io::OwnedFd;
+use tokio::sync::oneshot;
 
 pub enum DaemonCommand {
     OpenWaylandSocket(OwnedFd, String),
     ToggleMode,
     Deploy,
     ReloadStyle,
+    SelectSchema(String, oneshot::Sender<bool>),
     Shutdown,
 }
 
@@ -36,6 +38,16 @@ mod tests {
         match cmd {
             DaemonCommand::ReloadStyle => {} // expected
             _ => panic!("Expected ReloadStyle"),
+        }
+    }
+
+    #[test]
+    fn test_daemon_command_select_schema() {
+        let (tx, _rx) = tokio::sync::oneshot::channel();
+        let cmd = DaemonCommand::SelectSchema("wubi86".into(), tx);
+        match cmd {
+            DaemonCommand::SelectSchema(id, _) => assert_eq!(id, "wubi86"),
+            _ => panic!("Expected SelectSchema"),
         }
     }
 

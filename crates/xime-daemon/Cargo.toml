@@ -23,4 +23,3 @@ zbus = "5"
 nix = { version = "0.31.3", features = ["fs", "mman"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 chrono = "0.4"
-ximed = { version = "0.1", git = "https://github.com/ximeiorg/ximed.git" }

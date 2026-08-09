@@ -8,7 +8,6 @@ use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::fmt::time::FormatTime;
 use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 use xime_tray::{MenuAction, TrayManager};
-use ximed::serve;
 use zbus::Connection;
 
 use xime_daemon::{DaemonCommand, WaylandLoop, XimeDaemon};
@@ -79,16 +78,6 @@ fn main() -> anyhow::Result<()> {
                 wayland_loop.run();
             }
         });
-
-        let ximed_port = 8370;
-
-        rt_handle.spawn(async move {
-            if let Err(e) = serve(ximed_port).await {
-                error!("ximed server error: {}", e);
-            }
-        });
-
-        info!("ximed server started on port {}", ximed_port);
 
         let daemon = XimeDaemon::new(command_tx.clone());
 

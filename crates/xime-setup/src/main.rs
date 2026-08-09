@@ -1,7 +1,6 @@
-use gpui::*;
 use std::fs::File;
 use std::path::PathBuf;
-use xime_setup_lib::{set_notify_deploy, set_notify_reload_style, Assets, SettingsApp};
+use xime_setup_lib::{set_notify_deploy, set_notify_reload_style, set_notify_select_schema};
 
 fn get_lock_file_path() -> PathBuf {
     std::env::var("XDG_RUNTIME_DIR")
@@ -38,10 +37,10 @@ fn try_acquire_singleton_lock() -> bool {
     }
 }
 
-fn main() {
+fn main() -> iced::Result {
     if !try_acquire_singleton_lock() {
         tracing::info!("xime-setup is already running, exiting...");
-        return;
+        return Ok(());
     }
 
     set_notify_deploy(|| {
@@ -66,22 +65,21 @@ fn main() {
             );
         }
     });
+    set_notify_select_schema(|schema_id| {
+        let Ok(conn) = zbus::blocking::Connection::session() else {
+            return false;
+        };
+        let Ok(reply) = conn.call_method(
+            Some("org.xime.Xime"),
+            "/org/xime/Xime",
+            Some("org.xime.Xime.Controller"),
+            "SelectSchema",
+            &(schema_id,),
+        ) else {
+            return false;
+        };
+        reply.body().deserialize::<bool>().unwrap_or(false)
+    });
 
-    gpui_platform::application()
-        .with_assets(Assets)
-        .run(|cx: &mut App| {
-            let _ = cx.open_window(
-                WindowOptions {
-                    window_bounds: Some(WindowBounds::centered(size(px(800.0), px(640.0)), cx)),
-                    titlebar: Some(TitlebarOptions {
-                        title: Some("Xime 设置".into()),
-                        appears_transparent: true,
-                        traffic_light_position: None,
-                    }),
-                    window_decorations: Some(WindowDecorations::Client),
-                    ..Default::default()
-                },
-                |_window, cx| cx.new(SettingsApp::new),
-            );
-        });
+    xime_setup_lib::run()
 }

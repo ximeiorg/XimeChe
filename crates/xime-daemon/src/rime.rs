@@ -83,6 +83,23 @@ impl RimeEngine {
         }
     }
 
+    pub fn select_schema(&mut self, schema_id: &str) -> bool {
+        if let Some(session) = self.session.as_ref() {
+            match session.select_schema(schema_id) {
+                Ok(_) => {
+                    debug!("Selected schema: {}", schema_id);
+                    true
+                }
+                Err(e) => {
+                    error!("Failed to select schema {}: {}", schema_id, e);
+                    false
+                }
+            }
+        } else {
+            false
+        }
+    }
+
     pub fn redeploy(&mut self) {
         debug!("Redeploying Rime...");
         librime::finalize();

@@ -59,8 +59,25 @@ install -Dm644 "${PROJECT_ROOT}/resources/applications/xime-launcher.desktop.in"
     "${DATADIR}/applications/xime-launcher.desktop"
 sed -i "s|@BINDIR@|${BINDIR}|g" "${DATADIR}/applications/xime-launcher.desktop"
 
+install -Dm644 "${PROJECT_ROOT}/resources/applications/xime-setup.desktop.in" \
+    "${DATADIR}/applications/xime-setup.desktop"
+sed -i "s|@BINDIR@|${BINDIR}|g" "${DATADIR}/applications/xime-setup.desktop"
+
 # Update desktop database
 update-desktop-database "${DATADIR}/applications" 2>/dev/null || true
+
+# Install application icons
+ICONDIR="${DATADIR}/icons/hicolor"
+if [ -d "${PROJECT_ROOT}/resources/icons" ]; then
+    for size in 48x48 64x64 128x128 256x256 512x512; do
+        if [ -f "${PROJECT_ROOT}/resources/icons/${size}/apps/xime.png" ]; then
+            install -Dm644 "${PROJECT_ROOT}/resources/icons/${size}/apps/xime.png" \
+                "${ICONDIR}/${size}/apps/xime.png"
+        fi
+    done
+    echo "Installed application icons to ${ICONDIR}"
+    gtk-update-icon-cache -f -t "${ICONDIR}" 2>/dev/null || true
+fi
 
 # Install default config file (if not exists)
 CONFIGDIR="${HOME}/.config/xime"
@@ -83,7 +100,6 @@ if [ -d "${PROJECT_ROOT}/rime-wubi" ]; then
         echo "Installed lua scripts to ${RIMEDIR}/lua"
     fi
     cp "${PROJECT_ROOT}/rime-wubi"/default.custom.yaml "${RIMEDIR}/" 2>/dev/null || true
-    cp "${PROJECT_ROOT}/rime-wubi"/xime.custom.yaml "${RIMEDIR}/" 2>/dev/null || true
     echo "Installed rime-wubi schemas to ${RIMEDIR}"
 fi
 

@@ -8,8 +8,15 @@ repository.workspace = true
 
 [dependencies]
 xime-setup-lib.workspace = true
-gpui = { git = "https://github.com/zed-industries/zed" }
-gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["wayland"] }
+iced = { version = "0.14", default-features = false, features = [
+    "tokio",
+    "wgpu",
+    "tiny-skia",
+    "image",
+    "svg",
+    "x11",
+    "wayland",
+] }
 anyhow = "1.0"
 tracing.workspace = true
 nix = { version = "0.31.3", features = ["fs"] }

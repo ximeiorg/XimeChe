@@ -60,4 +60,15 @@ impl XimeDaemon {
             .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
         Ok(())
     }
+
+    async fn select_schema(&self, schema_id: String) -> zbus::fdo::Result<bool> {
+        debug!("Received SelectSchema request: {}", schema_id);
+        let (result_tx, result_rx) = tokio::sync::oneshot::channel();
+        self.command_tx
+            .send(DaemonCommand::SelectSchema(schema_id, result_tx))
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
+        result_rx
+            .await
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
+    }
 }

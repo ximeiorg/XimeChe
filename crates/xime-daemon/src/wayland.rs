@@ -108,6 +108,12 @@ impl WaylandLoop {
 
                     debug!("Style config reloaded, new primary_color={:?}", new_color);
                 }
+                Ok(DaemonCommand::SelectSchema(schema_id, result_tx)) => {
+                    debug!("SelectSchema command received: {}", schema_id);
+                    let ok = rime.select_schema(&schema_id);
+                    let _ = result_tx.send(ok);
+                    debug!("SelectSchema result: {}", ok);
+                }
                 Ok(DaemonCommand::Shutdown) => {
                     debug!("Shutdown requested");
                     break;

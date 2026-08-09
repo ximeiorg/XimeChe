@@ -1,7 +1,24 @@
 # XIME-Wayland 开发进度
 
 ## 当前状态
-**xime-server HTTP API 服务已实现，支持局域网剪切板同步。**
+**xime-setup 已迁移到 Iced（libximecore 侧），本项目适配薄壳二进制；ximed 已删除；rime-wubi 更新到 2.1.2。**
+
+## 本次变更（2026-08-09）
+1. **libximecore 同步到 Iced 版本**（`xime-setup-lib` 用 `iced` 重写，自带 `[[bin]]`）
+   - 本地 libximecore pull 到 origin/main
+   - 修复 libximecore `Cargo.toml`：`windows` 依赖改为 `[target.'cfg(windows)']`，解决 Linux 上 windows-future 0.3.2 编译失败
+2. **xime-setup 薄壳适配**（crates/xime-setup）
+   - 移除 gpui/gpui_platform 依赖，改用 `iced` + `xime_setup_lib::run()`
+   - main.rs 保留单例锁和 DBus 通知，新增 `set_notify_select_schema` 回调
+3. **daemon 新增 SelectSchema DBus 方法**（`org.xime.Xime.Controller`）
+   - `DaemonCommand::SelectSchema(String, oneshot::Sender<bool>)`
+   - `RimeEngine::select_schema()` 调用 librime `session.select_schema()`
+4. **删除 ximed**（剪切板同步 HTTP 服务）
+   - xime-daemon 移除 `ximed` 依赖和 server 启动代码（端口 8370）
+5. **rime-wubi 子模块更新到 2.1.2**
+   - 2.1.2 删除了 `xime.custom.yaml`、`xime.yaml`、`rime.lua`
+   - install.sh/dev-install.sh 移除对 `xime.custom.yaml` 的安装
+   - 新增 handwriting.schema.yaml、t9_pinyin.schema.yaml（随通配符自动安装）
 
 ## 已完成功能
 1. **候选栏绘制**
@@ -121,11 +138,12 @@
 - **总计**: ~247 tests
 
 ## 下一步
-1. 测试主题颜色实时更新功能（重新安装后验证）
-2. 测试 Ctrl 键字根显示功能
-3. 考虑为 xime-daemon/xime-launcher 添加集成测试
-4. 修复 xime-predict 中 test_predict_basic 的分数范围断言
-5. 添加 xime-setup 组件测试（state.rs, theme.rs）
+1. 测试 xime-setup（Iced 版）单例锁 + DBus 通知 + SelectSchema 切换方案
+2. 测试主题颜色实时更新功能（重新安装后验证）
+3. 测试 Ctrl 键字根显示功能
+4. 考虑为 xime-daemon/xime-launcher 添加集成测试
+5. 修复 xime-predict 中 test_predict_basic 的分数范围断言
+6. 添加 xime-setup 组件测试（state.rs, theme.rs）
 
 ## 剪切板同步待完成功能
 1. **托盘集成**：在 `xime-tray` 添加配对确认菜单
