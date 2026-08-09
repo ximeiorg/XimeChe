@@ -176,7 +176,12 @@ mod tests {
         let schemas: Vec<_> = std::fs::read_dir(&build_dir)
             .map(|rd| {
                 rd.filter_map(Result::ok)
-                    .filter(|e| e.path().file_name().map(|f| f.to_string_lossy().ends_with(".schema.yaml")).unwrap_or(false))
+                    .filter(|e| {
+                        e.path()
+                            .file_name()
+                            .map(|f| f.to_string_lossy().ends_with(".schema.yaml"))
+                            .unwrap_or(false)
+                    })
                     .map(|e| e.file_name().to_string_lossy().to_string())
                     .collect()
             })
@@ -190,23 +195,3 @@ mod tests {
         );
     }
 }
-
-    #[test]
-    fn test_effective_page_size_in_menu() {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
-        let shared_candidates = [
-            std::path::PathBuf::from(&home).join(".local/share/xime/rime-data"),
-            std::path::PathBuf::from("/usr/share/xime/rime-data"),
-        ];
-        let shared_data_dir = shared_candidates.iter().find(|dir| dir.join("default.yaml").exists()).cloned().unwrap_or_else(|| shared_candidates[0].clone());
-        let _ = xime_config::set_rime_paths(xime_config::RimePaths { shared_data_dir, user_data_dir: get_config_dir() });
-
-        let engine = RimeEngine::new();
-        assert!(engine.session().is_some());
-        let session = engine.session().unwrap();
-        // 切换到 wubi86_pinyin 并模拟输入，检查 menu.page_size
-        let _ = session.select_schema("wubi86_pinyin");
-        let _ = session.process_key(0x77, 0); // 'w'
-        let ctx = session.context().expect("context");
-        println!("effective menu.page_size = {}", ctx.menu().page_size);
-    }
