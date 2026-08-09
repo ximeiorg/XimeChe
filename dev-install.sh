@@ -92,8 +92,7 @@ fi
 if [ -d "${PROJECT_ROOT}/rime-wubi" ]; then
     mkdir -p "${RIMEDIR}"
     cp -r "${PROJECT_ROOT}/rime-wubi"/*.schema.yaml \
-          "${PROJECT_ROOT}/rime-wubi"/*.dict.yaml \
-          "${PROJECT_ROOT}/rime-wubi"/*.lua "${RIMEDIR}/" 2>/dev/null || true
+          "${PROJECT_ROOT}/rime-wubi"/*.dict.yaml "${RIMEDIR}/" 2>/dev/null || true
     # Copy lua/ subdirectory (uuid, date_translator, etc.)
     if [ -d "${PROJECT_ROOT}/rime-wubi/lua" ]; then
         cp -r "${PROJECT_ROOT}/rime-wubi/lua" "${RIMEDIR}/"

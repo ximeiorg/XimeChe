@@ -52,7 +52,7 @@ install -Dm644 "${PROJECT_ROOT}/resources/xime.yaml" "${DATADIR}/xime/xime.yaml"
 # Install rime-wubi schemas to shared directory
 if [ -d "${PROJECT_ROOT}/rime-wubi" ]; then
     install -d "${DATADIR}/xime/rime-data"
-    for file in "${PROJECT_ROOT}/rime-wubi"/*.schema.yaml "${PROJECT_ROOT}/rime-wubi"/*.dict.yaml "${PROJECT_ROOT}/rime-wubi"/*.lua; do
+    for file in "${PROJECT_ROOT}/rime-wubi"/*.schema.yaml "${PROJECT_ROOT}/rime-wubi"/*.dict.yaml; do
         [ -f "$file" ] && install -m644 "$file" "${DATADIR}/xime/rime-data/"
     done
     # Copy lua/ subdirectory (uuid, date_translator, etc.)
