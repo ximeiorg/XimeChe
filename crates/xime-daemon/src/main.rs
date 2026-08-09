@@ -17,6 +17,44 @@ fn get_log_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(home).join(".config/xime")
 }
 
+/// 若用户 rime 目录还没有方案文件，则从系统共享目录（/usr/share/xime/rime-data）
+/// 复制 rime-wubi 方案到用户目录，保证单目录统一。
+fn seed_rime_schemas(user_rime_dir: &std::path::Path) {
+    let shared_src = std::path::PathBuf::from("/usr/share/xime/rime-data");
+    if !shared_src.exists() || user_rime_dir.join("default.yaml").exists() {
+        return;
+    }
+    if let Err(e) = std::fs::create_dir_all(user_rime_dir) {
+        error!("Failed to create rime dir: {}", e);
+        return;
+    }
+    if copy_dir_recursive(&shared_src, user_rime_dir).is_ok() {
+        info!(
+            "Seeded rime-wubi schemas from {} to {}",
+            shared_src.display(),
+            user_rime_dir.display()
+        );
+    }
+}
+
+fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    if !src.is_dir() {
+        return Ok(());
+    }
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let path = entry.path();
+        let target = dst.join(entry.file_name());
+        if path.is_dir() {
+            copy_dir_recursive(&path, &target)?;
+        } else {
+            std::fs::copy(&path, &target).map(|_| ())?;
+        }
+    }
+    Ok(())
+}
+
 fn init_tracing() -> WorkerGuard {
     let log_dir = get_log_dir();
 
@@ -60,21 +98,12 @@ fn main() -> anyhow::Result<()> {
     info!("xime-daemon starting");
 
     // 注入 Rime 数据目录（由本应用决定，libximecore 只提供接口）。
+    // 统一使用 ~/.config/xime/rime 单目录，不拆分 shared/user。
     let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
-    let shared_candidates = [
-        // 开发安装：~/.local/share/xime/rime-data
-        std::path::PathBuf::from(&home).join(".local/share/xime/rime-data"),
-        // 系统安装：/usr/share/xime/rime-data
-        std::path::PathBuf::from("/usr/share/xime/rime-data"),
-    ];
-    let shared_data_dir = shared_candidates
-        .iter()
-        .find(|dir| dir.join("default.yaml").exists())
-        .cloned()
-        .unwrap_or_else(|| shared_candidates[0].clone());
     let user_data_dir = std::path::PathBuf::from(&home).join(".config/xime/rime");
+    seed_rime_schemas(&user_data_dir);
     let _ = xime_config::set_rime_paths(xime_config::RimePaths {
-        shared_data_dir,
+        shared_data_dir: user_data_dir.clone(),
         user_data_dir,
     });
 

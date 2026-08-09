@@ -149,25 +149,17 @@ mod tests {
 
     #[test]
     fn test_deploy_contains_only_wubi_schemas() {
-        // 注入与 daemon 一致的 rime paths（仅 rime-wubi，不用系统 librime-data）
+        // 注入与 daemon 一致的 rime paths（统一 single dir，仅 rime-wubi）
         let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
-        let shared_candidates = [
-            std::path::PathBuf::from(&home).join(".local/share/xime/rime-data"),
-            std::path::PathBuf::from("/usr/share/xime/rime-data"),
-        ];
-        let shared_data_dir = shared_candidates
-            .iter()
-            .find(|dir| dir.join("default.yaml").exists())
-            .cloned()
-            .unwrap_or_else(|| shared_candidates[0].clone());
+        let rime_dir = std::path::PathBuf::from(&home).join(".config/xime/rime");
         assert!(
-            !shared_data_dir.starts_with("/usr/share/rime-data"),
+            !rime_dir.starts_with("/usr/share/rime-data"),
             "should not use system librime-data dir: {}",
-            shared_data_dir.display()
+            rime_dir.display()
         );
         let _ = xime_config::set_rime_paths(xime_config::RimePaths {
-            shared_data_dir,
-            user_data_dir: get_config_dir(),
+            shared_data_dir: rime_dir.clone(),
+            user_data_dir: rime_dir,
         });
 
         let engine = RimeEngine::new();
