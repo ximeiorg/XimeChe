@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Xime Settings
+Name[zh_CN]=Xime 设置
+Comment=Configure Xime input method
+Comment[zh_CN]=配置 Xime 输入法
+Exec=/usr/bin/xime-setup
+Icon=xime
+Type=Application
+Categories=Settings;Utility;DesktopSettings;
+Keywords=input;ime;chinese;wayland;settings;
+StartupNotify=false
