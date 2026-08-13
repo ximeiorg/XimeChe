@@ -2,12 +2,6 @@ use std::fs::File;
 use std::path::PathBuf;
 use xime_setup_lib::{set_notify_deploy, set_notify_reload_style, set_notify_select_schema};
 
-/// 用户 Rime 数据目录（统一 single dir，不拆分 shared/user）。
-fn rime_data_dir() -> PathBuf {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
-    PathBuf::from(home).join(".config/xime/rime")
-}
-
 fn get_lock_file_path() -> PathBuf {
     std::env::var("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
@@ -87,11 +81,8 @@ fn main() -> iced::Result {
         reply.body().deserialize::<bool>().unwrap_or(false)
     });
 
-    let rime_dir = rime_data_dir();
-    let _ = xime_setup_lib::set_rime_paths(xime_setup_lib::RimePaths {
-        shared_data_dir: rime_dir.clone(),
-        user_data_dir: rime_dir,
-    });
+    // Rime 数据目录由 libximecore 解析默认双目录（只读 shared + 用户 user）。
+    let _ = xime_setup_lib::set_rime_paths(xime_setup_lib::default_rime_paths());
 
     xime_setup_lib::run()
 }

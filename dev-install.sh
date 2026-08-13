@@ -81,24 +81,29 @@ fi
 
 # Install default config file (if not exists)
 CONFIGDIR="${HOME}/.config/xime"
-RIMEDIR="${CONFIGDIR}/rime"
 
 if [ ! -f "${CONFIGDIR}/xime.custom.yaml" ]; then
     install -Dm644 "${PROJECT_ROOT}/resources/xime.yaml" "${CONFIGDIR}/xime.custom.yaml"
     echo "Installed default config to ${CONFIGDIR}/xime.custom.yaml"
 fi
 
-# Install rime-wubi schemas to user rime directory (unified single directory)
-RIMEDIR="${CONFIGDIR}/rime"
+# Install rime-wubi schemas to read-only shared data dir (dev install).
+# 用户数据目录 ~/.config/xime/rime 不落默认文件；librime 在用户目录无同名文件时自动回退到此处。
+RIMEDATADIR="${HOME}/.local/share/xime/rime-data"
 if [ -d "${PROJECT_ROOT}/rime-wubi" ]; then
-    mkdir -p "${RIMEDIR}"
-    cp -r "${PROJECT_ROOT}/rime-wubi"/*.yaml "${RIMEDIR}/" 2>/dev/null || true
+    install -d "${RIMEDATADIR}"
+    for file in "${PROJECT_ROOT}/rime-wubi"/*.yaml; do
+        [ -f "$file" ] && install -m644 "$file" "${RIMEDATADIR}/"
+    done
     # Copy lua/ subdirectory (uuid, date_translator, etc.)
     if [ -d "${PROJECT_ROOT}/rime-wubi/lua" ]; then
-        cp -r "${PROJECT_ROOT}/rime-wubi/lua" "${RIMEDIR}/"
-        echo "Installed lua scripts to ${RIMEDIR}/lua"
+        install -d "${RIMEDATADIR}/lua"
+        for lua_file in "${PROJECT_ROOT}/rime-wubi/lua"/*.lua; do
+            [ -f "$lua_file" ] && install -m644 "$lua_file" "${RIMEDATADIR}/lua/"
+        done
+        echo "Installed lua scripts to ${RIMEDATADIR}/lua"
     fi
-    echo "Installed rime-wubi schemas to ${RIMEDIR}"
+    echo "Installed rime-wubi schemas to ${RIMEDATADIR}"
 fi
 
 # Configure KWin
