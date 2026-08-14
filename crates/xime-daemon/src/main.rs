@@ -59,6 +59,17 @@ fn main() -> anyhow::Result<()> {
     let _guard = init_tracing();
     info!("xime-daemon starting");
 
+    // 注入应用元数据（目录沿用 xime，librime 分发标识为 XimeChe）。
+    let _ = xime_config::set_app_metadata(xime_config::AppMetadata {
+        display_name: "曦码·澈输入法",
+        config_dir_name: "xime",
+        config_file_base: "xime",
+        distribution_name: "XimeChe",
+        distribution_code_name: "ximeche",
+        app_name: "rime.xime.daemon",
+        version: env!("CARGO_PKG_VERSION"),
+    });
+
     // 注入 Rime 数据目录（由 libximecore 解析默认双目录：只读 shared + 用户 user）。
     // 用户目录无同名文件时 librime 自动回退到 shared，更新默认方案不影响用户数据。
     let paths = xime_config::default_rime_paths();

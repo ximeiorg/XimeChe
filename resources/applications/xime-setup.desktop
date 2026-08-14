@@ -1,8 +1,8 @@
 [Desktop Entry]
 Name=Xime Settings
-Name[zh_CN]=Xime 设置
+Name[zh_CN]=曦码·澈设置
 Comment=Configure Xime input method
-Comment[zh_CN]=配置 Xime 输入法
+Comment[zh_CN]=配置曦码·澈输入法
 Exec=/usr/bin/xime-setup
 Icon=xime
 Type=Application

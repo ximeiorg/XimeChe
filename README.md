@@ -1,4 +1,4 @@
-# XIME-Wayland
+# XimeChe（曦码·澈输入法）
 
 一个用 Rust 实现的 Linux 输入法，不依赖 ibus 和 fcitx，直接对接 Wayland 和 librime 实现。 
 

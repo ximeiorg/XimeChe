@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Name=Xime Input Method
-Name[zh_CN]=曦码输入法
+Name[zh_CN]=曦码·澈输入法
 Comment=Chinese input method for Wayland
 Comment[zh_CN]=Wayland 中文输入法
 Exec=/usr/bin/xime-launcher

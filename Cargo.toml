@@ -16,7 +16,7 @@ version = "0.1.2"
 edition = "2021"
 authors = ["Kor1 <kingzcheung@gmail.com>"]
 license = "GPL-3.0-or-later"
-repository = "https://github.com/ximeiorg/xime-wayland"
+repository = "https://github.com/ximeiorg/XimeChe"
 
 [workspace.dependencies]
 # libximecore — shared crates (git dep, patched to local for development)

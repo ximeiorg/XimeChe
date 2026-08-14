@@ -81,6 +81,17 @@ fn main() -> iced::Result {
         reply.body().deserialize::<bool>().unwrap_or(false)
     });
 
+    // 注入应用元数据（目录沿用 xime，librime 分发标识为 XimeChe）。
+    let _ = xime_setup_lib::set_app_metadata(xime_setup_lib::AppMetadata {
+        display_name: "曦码·澈输入法",
+        config_dir_name: "xime",
+        config_file_base: "xime",
+        distribution_name: "XimeChe",
+        distribution_code_name: "ximeche",
+        app_name: "rime.xime.setup",
+        version: env!("CARGO_PKG_VERSION"),
+    });
+
     // Rime 数据目录由 libximecore 解析默认双目录（只读 shared + 用户 user）。
     let _ = xime_setup_lib::set_rime_paths(xime_setup_lib::default_rime_paths());
 

@@ -146,9 +146,14 @@ impl Drop for RimeEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // librime 是进程级全局库，setup/finalize 非线程安全，测试必须串行执行。
+    static LIBRIME_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_deploy_contains_only_wubi_schemas() {
+        let _guard = LIBRIME_TEST_LOCK.lock().unwrap();
         // 注入与 daemon 一致的 rime paths（统一 single dir，仅 rime-wubi）
         let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
         let rime_dir = std::path::PathBuf::from(&home).join(".config/xime/rime");
@@ -185,5 +190,55 @@ mod tests {
             "system librime-data schema stroke should not be deployed: {:?}",
             schemas
         );
+    }
+
+    /// Enter 在「有组合输入 / 无组合输入」下的按下/释放处理结果。
+    #[test]
+    fn test_enter_key_handling() {
+        let _guard = LIBRIME_TEST_LOCK.lock().unwrap();
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+        let rime_dir = std::path::PathBuf::from(&home).join(".config/xime/rime");
+        let _ = xime_config::set_rime_paths(xime_config::RimePaths {
+            shared_data_dir: rime_dir.clone(),
+            user_data_dir: rime_dir,
+        });
+
+        let engine = RimeEngine::new();
+        let session = engine.session().expect("session");
+        let enter: i32 = 0xFF0D;
+        let release: i32 = 0x8000_0000u32 as i32;
+
+        // 1) 无组合输入：直接按回车
+        let result = session.process_key(enter, 0);
+        let commit = session.commit().map(|c| c.text().to_string());
+        println!(
+            "[empty] Enter-press: result={}, commit={:?}",
+            result, commit
+        );
+        assert!(!result, "空输入时 Enter 不应被 Rime 拦截");
+        assert!(commit.is_none());
+
+        // 2) 输入拼音/编码后按回车（模拟终端里打了字再回车）
+        for ch in "ls".chars() {
+            session.process_key(ch as i32, 0);
+        }
+        let result = session.process_key(enter, 0);
+        let commit = session.commit().map(|c| c.text().to_string());
+        println!(
+            "[composing] Enter-press: result={}, commit={:?}",
+            result, commit
+        );
+
+        // 3) 同一 Enter 的释放事件
+        let result = session.process_key(enter, release);
+        let commit = session.commit().map(|c| c.text().to_string());
+        println!(
+            "[composing] Enter-release: result={}, commit={:?}",
+            result, commit
+        );
+
+        // 4) 组合已提交后再次回车
+        let result = session.process_key(enter, 0);
+        println!("[after-commit] Enter-press: result={}", result);
     }
 }

@@ -1,4 +1,21 @@
-# XIME-Wayland 重要决策
+# XimeChe（曦码·澈输入法）重要决策
+
+## 2026-08-15: 应用元数据参数化（AppMetadata）
+
+**问题**：libximecore 是跨平台共享库，内部硬编码 "Xime"/"xime" 名称（配置路径、librime distribution 标识），无法被不同宿主平台复用。
+
+**决策**：
+1. xime-config 新增 `AppMetadata` 结构（metadata.rs）：`display_name` / `config_dir_name` / `config_file_base` / `distribution_name` / `distribution_code_name` / `app_name` / `version`
+2. `set_app_metadata()` 全局注入，未注入时默认 "Xime" 保持兼容
+3. 参数化范围**仅限核心**：配置路径（`~/.config/xime`、`/usr/share/xime`）、librime distribution/app 标识、`xime.yaml` 配置文件名、`Xime::SchemaConfigManager` generator_id
+4. xime-setup UI 文案（"Xime 设置"、"关于 Xime" 等）**不改**，避免组件签名大规模改动
+5. librime `deploy_all` 新增 `deploy_all_with_config(config_name)`，不破坏原签名
+6. XimeChe 注入：`config_dir_name` 沿用 `xime`（兼容既有安装），`distribution_name = XimeChe`，显示名"曦码·澈输入法"
+
+**理由**：
+1. 目录沿用 xime 保证老用户配置/词库无缝迁移
+2. 只参数化功能相关的名称，UI 文案属于显示层，各平台可自行维护
+3. librime 是底层 crate，不能依赖 xime-config，故用独立函数参数而非全局状态
 
 ## 2026-08-15: 多合成器适配（v2 协议 + 后端抽象）
 

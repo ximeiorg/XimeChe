@@ -1,7 +1,19 @@
-# XIME-Wayland 开发进度
+# XimeChe（曦码·澈输入法）开发进度
 
 ## 当前状态
-**适配 GNOME/wlroots：zwp_input_method_v2 后端完整实现，daemon 支持直接连接。**（2026-08-15）
+**应用元数据参数化：libximecore 支持多平台名称注入，XimeChe 独立命名。**（2026-08-15）
+
+## 本次变更（2026-08-15）
+1. **项目改名 XimeChe（曦码·澈输入法）**
+   - git remote → `git@github.com:ximeiorg/XimeChe.git`
+   - README/DECISIONS/PROGRESS 标题、Cargo.toml repository、desktop 文件中文名
+2. **libximecore 应用元数据参数化**（crates/xime-config/src/metadata.rs）
+   - 新增 `AppMetadata` + `set_app_metadata()`（默认 Xime 兼容）
+   - 参数化配置路径（`~/.config/xime`、`/usr/share/xime`、`~/.local/share/xime`）、librime distribution/app 标识、`xime.yaml` 文件名、`Xime::SchemaConfigManager` generator_id
+   - librime 新增 `deploy_all_with_config()`，保持 `deploy_all()` 兼容
+   - xime-setup UI 文案未改（避免组件签名大规模改动）
+3. **XimeChe 注入 metadata**（daemon + xime-setup 薄壳 main.rs）
+   - 目录沿用 `xime`（兼容既有安装），distribution_name = XimeChe，显示名"曦码·澈输入法"
 
 ## 本次变更（2026-08-15）
 1. **完整实现 zwp_input_method_v2 后端**（crates/xime-wayland）
