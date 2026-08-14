@@ -2,10 +2,10 @@ use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::thread;
 
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 use xime_config::XimeConfig;
 use xime_tray::{InputMode, TrayManager};
-use xime_wayland::{InputMethodV1State, WaylandConnectionV1};
+use xime_wayland::{connect_im_from_fd, connect_im_to_env, ImBackend};
 use xime_xkb::XkbContext;
 use xime_xkb::{keysym_to_letter, Keysym, ModifierState};
 
@@ -33,7 +33,7 @@ impl WaylandLoop {
     pub fn run(self) {
         info!("Wayland loop thread started");
 
-        let mut conn: Option<WaylandConnectionV1> = None;
+        let mut conn: Option<Box<dyn ImBackend>> = None;
         let mut xkb: Option<XkbContext> = None;
         let mut rime = RimeEngine::new();
 
@@ -49,10 +49,26 @@ impl WaylandLoop {
         );
 
         let mut candidate_window_visible = false;
+        let mut consumed_presses: std::collections::HashSet<u32> = std::collections::HashSet::new();
         let mut last_input_keysym: Option<u32> = None;
         let mut ctrl_root_visible = false;
         let mut last_ascii_mode = false;
-        let mut last_state = InputMethodV1State::Inactive;
+        let mut last_active = false;
+
+        // 无 launcher 的会话（GNOME 等）：直接连接 $WAYLAND_DISPLAY 使用 v2 协议。
+        // KWin 下普通 socket 不暴露 IM 协议，此步会失败，随后等待 launcher 传入 fd。
+        match connect_im_to_env() {
+            Ok(backend) => {
+                info!("Connected directly to compositor (standalone mode)");
+                conn = Some(backend);
+            }
+            Err(e) => {
+                debug!(
+                    "Direct connection not available (waiting for launcher fd): {}",
+                    e
+                );
+            }
+        }
 
         loop {
             use std::sync::mpsc::TryRecvError;
@@ -63,14 +79,10 @@ impl WaylandLoop {
 
                     xkb = XkbContext::new().ok();
 
-                    match WaylandConnectionV1::connect_from_fd(fd) {
-                        Ok(c) => {
-                            if c.get_input_method().is_ok() {
-                                debug!("zwp_input_method_v1 available");
-                            } else {
-                                warn!("zwp_input_method_v1 not available");
-                            }
-                            conn = Some(c);
+                    match connect_im_from_fd(fd) {
+                        Ok(backend) => {
+                            info!("Connected via launcher fd (KWin mode)");
+                            conn = Some(backend);
                         }
                         Err(e) => {
                             error!("Failed to connect: {}", e);
@@ -132,19 +144,22 @@ impl WaylandLoop {
                     self.rt_handle.block_on(async {
                         self.tray.set_visible(false).await;
                     });
-                    last_state = InputMethodV1State::Inactive;
+                    last_active = false;
                     continue;
                 }
 
-                let state = c.get_state();
+                if let Err(e) = c.handle_unavailable() {
+                    debug!("handle_unavailable error: {}", e);
+                }
 
-                if state.state != last_state {
-                    debug!("State changed from {:?} to {:?}", last_state, state.state);
-                    let is_active = state.state == InputMethodV1State::Active;
+                let is_active = c.is_active();
+
+                if is_active != last_active {
+                    debug!("State changed: active={}", is_active);
                     self.rt_handle.block_on(async {
                         self.tray.set_visible(is_active).await;
                     });
-                    last_state = state.state;
+                    last_active = is_active;
 
                     if !is_active {
                         candidate_window_visible = false;
@@ -152,13 +167,14 @@ impl WaylandLoop {
                     }
                 }
 
-                if state.state == InputMethodV1State::Active {
+                if is_active {
                     self.handle_active_state(
-                        c,
+                        c.as_mut(),
                         &mut xkb,
                         &mut rime,
                         &xime_config,
                         &mut candidate_window_visible,
+                        &mut consumed_presses,
                         &mut last_input_keysym,
                         &mut ctrl_root_visible,
                         &mut last_ascii_mode,
@@ -173,11 +189,12 @@ impl WaylandLoop {
     #[allow(clippy::too_many_arguments)]
     fn handle_active_state(
         &self,
-        c: &mut WaylandConnectionV1,
+        c: &mut dyn ImBackend,
         xkb: &mut Option<XkbContext>,
         rime: &mut RimeEngine,
         xime_config: &XimeConfig,
         candidate_window_visible: &mut bool,
+        consumed_presses: &mut std::collections::HashSet<u32>,
         last_input_keysym: &mut Option<u32>,
         ctrl_root_visible: &mut bool,
         last_ascii_mode: &mut bool,
@@ -211,6 +228,7 @@ impl WaylandLoop {
                         event,
                         sym,
                         candidate_window_visible,
+                        consumed_presses,
                         last_input_keysym,
                         ctrl_root_visible,
                         last_ascii_mode,
@@ -223,13 +241,14 @@ impl WaylandLoop {
     #[allow(clippy::too_many_arguments)]
     fn handle_key_event(
         &self,
-        c: &mut WaylandConnectionV1,
+        c: &mut dyn ImBackend,
         xkb: &XkbContext,
         rime: &mut RimeEngine,
         xime_config: &XimeConfig,
         event: xime_wayland::KeyEvent,
         sym: Keysym,
         candidate_window_visible: &mut bool,
+        consumed_presses: &mut std::collections::HashSet<u32>,
         last_input_keysym: &mut Option<u32>,
         ctrl_root_visible: &mut bool,
         last_ascii_mode: &mut bool,
@@ -302,8 +321,22 @@ impl WaylandLoop {
                 debug!("ascii_mode={}, composing={}", is_ascii, status.is_composing);
             }
 
-            if !result {
+            // 回车键（Return / 数字键盘回车）始终转发给客户端：
+            // 组合态下 Rime 会吞掉回车只提交文本，终端收不到回车导致命令不执行；
+            // 同时按下被吞、释放被转发会形成孤儿释放事件，破坏按键状态配对。
+            // fcitx5 的做法一致：提交组合 + 转发回车，终端按一次即执行。
+            //
+            // 其他按键：Rime 吞掉的按下不再转发它的释放（孤儿释放抑制，对齐 fcitx5）。
+            let is_enter = sym.raw() == 0xFF0D || sym.raw() == 0xFF8D;
+            let press_consumed = result && event.pressed;
+            let release_of_consumed = !event.pressed && consumed_presses.contains(&event.key);
+            if is_enter || !press_consumed && !release_of_consumed {
                 c.forward_key(event.serial, event.time, event.key, event.pressed);
+            }
+            if press_consumed {
+                consumed_presses.insert(event.key);
+            } else {
+                consumed_presses.remove(&event.key);
             }
 
             if let Some(commit) = session.commit() {
@@ -358,7 +391,7 @@ impl WaylandLoop {
     #[allow(clippy::too_many_arguments)]
     fn handle_ctrl_key(
         &self,
-        c: &mut WaylandConnectionV1,
+        c: &mut dyn ImBackend,
         xime_config: &XimeConfig,
         event: &xime_wayland::KeyEvent,
         _sym: Keysym,

@@ -15,9 +15,13 @@ pub struct CandidateRenderer {
 
 impl CandidateRenderer {
     pub fn new() -> Self {
-        // Create font system with embedded vivoSans font
+        // 加载系统字体 + 内嵌 vivoSans 兜底：
+        // 只用内嵌字体时 SansSerif/中文候选全部匹配失败，每次渲染全库回退探测（刷屏+慢+中文空白）。
         let font_source = fontdb::Source::Binary(std::sync::Arc::new(VIVO_FONT));
-        let font_system = FontSystem::new_with_fonts([font_source]);
+        let mut fontdb = fontdb::Database::new();
+        fontdb.load_system_fonts();
+        fontdb.load_font_source(font_source);
+        let font_system = FontSystem::new_with_locale_and_db("zh-CN".to_string(), fontdb);
         let swash_cache = SwashCache::new();
         Self {
             font_system,
@@ -448,7 +452,6 @@ mod tests {
             },
         ];
         let width = renderer.calculate_width(&candidates);
-        eprintln!("Width with comments: {}", width);
         assert!(width > 100, "Width should include comment space");
     }
 
@@ -458,7 +461,6 @@ mod tests {
 
         let w16 = renderer.measure_text_width("式", 16.0);
         let w12 = renderer.measure_text_width("aa", 12.0);
-        eprintln!("16px: {}, 12px: {}", w16, w12);
         assert!(w16 > 0.0);
         assert!(w12 > 0.0);
     }

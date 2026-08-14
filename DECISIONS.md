@@ -1,5 +1,24 @@
 # XIME-Wayland 重要决策
 
+## 2026-08-15: 多合成器适配（v2 协议 + 后端抽象）
+
+**问题**：当前只适配 KWin 的 `zwp_input_method_v1`，GNOME 45+ 只暴露 v2。
+
+**决策**：
+1. 完整实现 `zwp_input_method_v2` 后端（参考 fcitx5 waylandimserverv2）
+2. 新增 `ImBackend` trait 抽象 v1/v2，daemon 用 `Box<dyn ImBackend>` 操作
+3. 连接策略：
+   - launcher（KWin）：fd 传入后探测 global，优先 v1，无则 v2
+   - 直接连接（GNOME）：daemon 启动时连 `$WAYLAND_DISPLAY`，检测 v2
+4. 按键转发：v2 无 forward_key 请求，用 `zwp_virtual_keyboard_v1.key()`（fcitx5 同款）
+5. 提交语义：v2 请求 double-buffered，必须 `commit(serial)`（serial=done 计数）
+6. 候选窗：v2 用 `zwp_input_popup_surface_v2`（合成器锚定光标），v1 保持 overlay_panel
+
+**理由**：
+1. GNOME（mutter 45+）、KWin 6、wlroots（Sway/Hyprland）都暴露 v2，一份后端覆盖大多数桌面
+2. fcitx5 验证过的方案，避免踩 v2 语义坑（grab 事件、vk 转发、unavailable 重建）
+3. GNOME 无 VirtualKeyboard/launcher 机制，必须支持 daemon 直接连接普通 socket
+
 ## 2025-05-12: 架构分离决策
 
 **问题**：单进程架构无法满足 KDE VirtualKeyboard 要求

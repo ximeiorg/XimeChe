@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use tracing::debug;
 use wayland_backend::client::Backend;
 use wayland_client;
-use wayland_client::globals::GlobalListContents;
+use wayland_client::globals::{GlobalList, GlobalListContents};
 use wayland_client::protocol::wl_buffer::WlBuffer;
 use wayland_client::protocol::wl_compositor::WlCompositor;
 use wayland_client::protocol::wl_keyboard::WlKeyboard;
@@ -46,13 +46,7 @@ pub enum InputMethodV1State {
     Active,
 }
 
-#[derive(Debug, Clone)]
-pub struct KeyEvent {
-    pub serial: u32,
-    pub time: u32,
-    pub key: u32,
-    pub pressed: bool,
-}
+pub use crate::KeyEvent;
 
 #[derive(Clone, Default)]
 pub struct InputMethodV1Data {
@@ -162,19 +156,31 @@ impl Dispatch<ZwpInputMethodContextV1, InputMethodV1Data> for InputMethodV1Data 
                 cursor,
                 anchor,
             } => {
+                debug!(
+                    "Context SURROUNDING_TEXT: cursor={}, anchor={}, len={}",
+                    cursor,
+                    anchor,
+                    text.len()
+                );
                 state.surrounding_text = Some(text);
                 state.surrounding_cursor = cursor;
                 state.surrounding_anchor = anchor;
             }
             ContextEvent::ContentType { hint, purpose } => {
+                debug!("Context CONTENT_TYPE: hint={}, purpose={}", hint, purpose);
                 state.content_hint = hint;
                 state.content_purpose = purpose;
             }
             ContextEvent::CommitState { serial } => {
+                debug!("Context COMMIT_STATE: serial={}", serial);
                 state.serial = serial;
             }
-            ContextEvent::Reset => {}
-            _ => {}
+            ContextEvent::Reset => {
+                debug!("Context RESET event received");
+            }
+            _ => {
+                debug!("Context event: {:?}", event);
+            }
         }
     }
 }
@@ -217,13 +223,19 @@ impl Dispatch<WlKeyboard, InputMethodV1Data> for InputMethodV1Data {
                 key,
                 state: key_state,
             } => {
+                let state_str = match &key_state {
+                    wayland_client::WEnum::Value(wl_keyboard::KeyState::Pressed) => "Pressed",
+                    wayland_client::WEnum::Value(wl_keyboard::KeyState::Released) => "Released",
+                    wayland_client::WEnum::Value(wl_keyboard::KeyState::Repeated) => "Repeated",
+                    _ => return,
+                };
                 let pressed = matches!(
                     key_state,
                     wayland_client::WEnum::Value(wl_keyboard::KeyState::Pressed)
                 );
                 debug!(
-                    "Key event: serial={}, key={}, pressed={}",
-                    serial, key, pressed
+                    "Key event: serial={}, key={}, state={}, pressed={}",
+                    serial, key, state_str, pressed
                 );
                 if let Ok(mut events) = state.key_events.lock() {
                     events.push(KeyEvent {
@@ -241,11 +253,33 @@ impl Dispatch<WlKeyboard, InputMethodV1Data> for InputMethodV1Data {
                 mods_locked,
                 group,
             } => {
+                debug!(
+                    "Keyboard MODIFIERS: depressed={}, latched={}, locked={}, group={}",
+                    mods_depressed, mods_latched, mods_locked, group
+                );
                 if let Ok(mut mods) = state.modifiers.lock() {
                     *mods = (mods_depressed, mods_latched, mods_locked, group);
                 }
             }
-            _ => {}
+            wl_keyboard::Event::RepeatInfo { rate, delay } => {
+                debug!("Keyboard REPEAT_INFO: rate={}, delay={}", rate, delay);
+            }
+            wl_keyboard::Event::Enter {
+                serial: _,
+                surface: _,
+                keys: _,
+            } => {
+                debug!("Keyboard ENTER (focused surface gained keyboard)");
+            }
+            wl_keyboard::Event::Leave {
+                serial: _,
+                surface: _,
+            } => {
+                debug!("Keyboard LEAVE (focused surface lost keyboard)");
+            }
+            _ => {
+                debug!("Keyboard event: {:?}", event);
+            }
         }
     }
 }
@@ -409,19 +443,28 @@ impl WaylandConnectionV1 {
             registry_queue_init(&connection).map_err(|e| Error::ConnectFailed(e.to_string()))?;
 
         let qh = event_queue.handle();
+        Self::init_from_registry(connection, globals, event_queue, &qh)
+    }
+
+    pub fn init_from_registry(
+        connection: Connection,
+        globals: GlobalList,
+        event_queue: EventQueue<InputMethodV1Data>,
+        qh: &QueueHandle<InputMethodV1Data>,
+    ) -> Result<Self> {
         let state = InputMethodV1Data::default();
 
-        let seat: Option<WlSeat> = globals.bind(&qh, 1..=8, state.clone()).ok();
+        let seat: Option<WlSeat> = globals.bind(qh, 1..=8, state.clone()).ok();
 
-        let compositor: Option<WlCompositor> = globals.bind(&qh, 1..=4, state.clone()).ok();
+        let compositor: Option<WlCompositor> = globals.bind(qh, 1..=4, state.clone()).ok();
 
-        let shm: Option<WlShm> = globals.bind(&qh, 1..=1, state.clone()).ok();
+        let shm: Option<WlShm> = globals.bind(qh, 1..=1, state.clone()).ok();
 
-        let input_method: Option<ZwpInputMethodV1> = globals.bind(&qh, 1..=1, state.clone()).ok();
+        let input_method: Option<ZwpInputMethodV1> = globals.bind(qh, 1..=1, state.clone()).ok();
 
-        let input_panel: Option<ZwpInputPanelV1> = globals.bind(&qh, 1..=1, state.clone()).ok();
+        let input_panel: Option<ZwpInputPanelV1> = globals.bind(qh, 1..=1, state.clone()).ok();
 
-        let output: Option<WlOutput> = globals.bind(&qh, 1..=1, state.clone()).ok();
+        let output: Option<WlOutput> = globals.bind(qh, 1..=1, state.clone()).ok();
 
         // Check if v1 global exists by checking bind result
         let has_v1_global = input_method.is_some() || input_panel.is_some();
@@ -551,10 +594,6 @@ impl WaylandConnectionV1 {
         if let Some(ctx) = self.get_context() {
             let key_state: u32 = if pressed { 1 } else { 0 };
             ctx.key(serial, time, key, key_state);
-            eprintln!(
-                "DEBUG: Forwarded key: serial={}, key={}, pressed={}",
-                serial, key, pressed
-            );
         }
     }
 
@@ -576,7 +615,6 @@ impl WaylandConnectionV1 {
             .flush()
             .map_err(|e| Error::Io(std::io::Error::other(e)))?;
 
-        eprintln!("DEBUG: Created candidate panel surface with overlay_panel");
         Ok(())
     }
 
@@ -591,8 +629,6 @@ impl WaylandConnectionV1 {
         // Take renderer out of self for width calculation (will be used for drawing too)
         let mut renderer = self.renderer.take().unwrap_or_default();
         let width = renderer.calculate_width(candidates);
-
-        eprintln!("DEBUG: show_candidate_window called with width={}, height={}, candidates={}, highlighted={}", width, height, candidates.len(), highlighted_index);
 
         if self.candidate_surface.is_none() {
             self.create_candidate_surface()?;
@@ -612,7 +648,6 @@ impl WaylandConnectionV1 {
 
         let stride = width * 4;
         let shm_size = stride * height;
-        eprintln!("DEBUG: stride={}, size={}", stride, shm_size);
 
         // Create SHM pool (doesn't borrow self since we pass cloned resources)
         let fd = Self::create_anonymous_file(shm_size)?;
@@ -655,10 +690,6 @@ impl WaylandConnectionV1 {
         // Put renderer back into self
         self.renderer = Some(renderer);
 
-        eprintln!(
-            "DEBUG: About to create_buffer: offset=0, width={}, height={}, stride={}",
-            width, height, stride
-        );
         let buffer = pool.create_buffer(
             0,
             width as i32,
@@ -669,18 +700,11 @@ impl WaylandConnectionV1 {
             self.state.clone(),
         );
         self.current_buffer = Some(buffer.clone());
-        eprintln!("DEBUG: Buffer created successfully");
 
         surface.attach(Some(&buffer), 0, 0);
         surface.damage_buffer(0, 0, width as i32, height as i32);
         surface.commit();
 
-        eprintln!(
-            "DEBUG: Showed candidate window {}x{} with {} candidates",
-            width,
-            height,
-            candidates.len()
-        );
         Ok(())
     }
 
@@ -688,7 +712,6 @@ impl WaylandConnectionV1 {
         if let Some(surface) = &self.candidate_surface {
             surface.attach(None::<&WlBuffer>, 0, 0);
             surface.commit();
-            eprintln!("DEBUG: Hidden candidate window");
         }
     }
 
@@ -700,11 +723,6 @@ impl WaylandConnectionV1 {
         root: &str,
         primary_color: (u8, u8, u8),
     ) -> Result<()> {
-        eprintln!(
-            "DEBUG: show_root_window called for key={}, root={}",
-            key, root
-        );
-
         let width = calculate_root_width(key, root, primary_color);
         let height = 36;
 
@@ -753,16 +771,11 @@ impl WaylandConnectionV1 {
             .flush()
             .map_err(|e| Error::Io(std::io::Error::other(e)))?;
 
-        eprintln!(
-            "DEBUG: Showed root window {}x{} for key {} (on candidate surface)",
-            width, height, key
-        );
         Ok(())
     }
 
     pub fn hide_root_window(&mut self) {
         // No need to hide, main loop will restore candidate display
-        eprintln!("DEBUG: hide_root_window called - will restore candidate on next update");
     }
 
     fn draw_root(

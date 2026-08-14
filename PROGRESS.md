@@ -1,7 +1,23 @@
 # XIME-Wayland 开发进度
 
 ## 当前状态
-**xime-setup 已迁移到 Iced（libximecore 侧），本项目适配薄壳二进制；ximed 已删除；rime-wubi 更新到 2.1.2。**
+**适配 GNOME/wlroots：zwp_input_method_v2 后端完整实现，daemon 支持直接连接。**（2026-08-15）
+
+## 本次变更（2026-08-15）
+1. **完整实现 zwp_input_method_v2 后端**（crates/xime-wayland）
+   - 协议文件更新为上游版本：`input-method-unstable-v2.xml`（含 `zwp_input_popup_surface_v2`），新增 `virtual-keyboard-unstable-v1.xml`
+   - 键盘 grab：`zwp_input_method_keyboard_grab_v2` 处理 keymap/key/modifiers/repeat_info
+   - 按键转发：v2 无 forward_key，改用 `zwp_virtual_keyboard_v1.key()`（fcitx5 同款方案）
+   - 提交语义：v2 请求是 double-buffered，commit_string/set_preedit_string 后需 `commit(serial)`，serial 为 done 事件计数
+   - 候选窗：`zwp_input_popup_surface_v2`（合成器自动锚定文本光标）
+   - `unavailable` 事件处理（GNOME 锁屏）：销毁并重建 input method 对象
+2. **daemon 后端抽象**（crates/xime-daemon/src/wayland.rs）
+   - 新增 `ImBackend` trait，v1/v2 统一接口，daemon 通过 `Box<dyn ImBackend>` 操作
+   - `connect_im_from_fd(fd)`：launcher 模式，优先 v1（KWin 5.x），无则 v2（KWin 6/wlroots/GNOME）
+   - `connect_im_to_env()`：新增直接连接模式，daemon 启动时连接 `$WAYLAND_DISPLAY`（GNOME 无 launcher 机制），KWin 下失败后等待 fd
+3. **KeyEvent 提升到 lib.rs** 共享（v1/v2 同构）
+4. **清理调试输出**：删除 im_v1.rs/renderer.rs 全部 13 处 `eprintln!`
+
 
 ## 本次变更（2026-08-09）
 1. **libximecore 同步到 Iced 版本**（`xime-setup-lib` 用 `iced` 重写，自带 `[[bin]]`）
@@ -113,6 +129,9 @@
 
 ## 待解决问题
 1. **阴影效果优化** - 当前使用简单偏移阴影，可考虑添加模糊效果
+2. **v2 实机验证** - 代码按 fcitx5 语义实现，需在 GNOME 45+ / KWin 6 / Sway 实机测试
+3. **GNOME 自动启动** - daemon 直接连接模式已实现，但缺少 GNOME 下的自启动机制（autostart/systemd user unit）
+4. **v2 按键重复** - grab 的 repeat_info 事件未驱动重复按键（与 v1 现状一致）
 
 ## 待完成功能
 1. 验证候选窗口使用正确的主题颜色
@@ -143,12 +162,14 @@
 - **总计**: ~247 tests
 
 ## 下一步
-1. 测试 xime-setup（Iced 版）单例锁 + DBus 通知 + SelectSchema 切换方案
-2. 测试主题颜色实时更新功能（重新安装后验证）
-3. 测试 Ctrl 键字根显示功能
-4. 考虑为 xime-daemon/xime-launcher 添加集成测试
-5. 修复 xime-predict 中 test_predict_basic 的分数范围断言
-6. 添加 xime-setup 组件测试（state.rs, theme.rs）
+1. **GNOME 实机验证 v2 后端**（输入、候选窗定位、Shift 切换、锁屏恢复）
+2. GNOME 自启动机制（XDG autostart 或 systemd user unit，直接启动 xime-daemon）
+3. 测试 xime-setup（Iced 版）单例锁 + DBus 通知 + SelectSchema 切换方案
+4. 测试主题颜色实时更新功能（重新安装后验证）
+5. 测试 Ctrl 键字根显示功能
+6. 考虑为 xime-daemon/xime-launcher 添加集成测试
+7. 修复 xime-predict 中 test_predict_basic 的分数范围断言
+8. 添加 xime-setup 组件测试（state.rs, theme.rs）
 
 ## 剪切板同步待完成功能
 1. **托盘集成**：在 `xime-tray` 添加配对确认菜单
