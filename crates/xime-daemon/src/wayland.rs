@@ -14,12 +14,15 @@ use crate::{DaemonCommand, PluginHost, RimeEngine};
 
 /// emoji 面板状态：`;` 触发，字符搜索，数字选择上屏。
 ///
-/// 候选列表第 1 位固定为分号 `;`（数字 1 输入分号），随后是表情。
+/// 候选列表每页第 1 位固定为分号 `;`（数字 1 输入分号），随后是表情。
+/// 方向键语义与 Rime 候选一致：Left/Right 移动高亮，Up/Down 翻页。
 struct EmojiPanel {
     active: bool,
     query: String,
     items: Vec<EmojiItem>,
     highlighted: usize,
+    /// 当前页（0 起）。
+    page: usize,
     /// 候选总数（含分号位），与 Rime 候选页大小一致。
     page_size: usize,
 }
@@ -31,8 +34,16 @@ impl Default for EmojiPanel {
             query: String::new(),
             items: Vec::new(),
             highlighted: 0,
+            page: 0,
             page_size: 5,
         }
+    }
+}
+
+impl EmojiPanel {
+    fn total_pages(&self) -> usize {
+        // 每页 page_size-1 个表情（分号占一位）
+        self.items.len().div_ceil(self.page_size.saturating_sub(1).max(1))
     }
 }
 
@@ -45,13 +56,16 @@ fn emoji_select_index(keysym: u32) -> Option<usize> {
     }
 }
 
-/// 候选索引 → 实际提交文本（0 = 分号，其余 = 表情 items 下标-1）。
+/// 候选索引 → 实际提交文本（0 = 分号，其余 = 当前页表情）。
 fn emoji_commit_text(panel: &EmojiPanel, index: usize) -> Option<String> {
     if index == 0 {
-        Some(";".to_string())
-    } else {
-        panel.items.get(index - 1).map(|e| e.text.clone())
+        return Some(";".to_string());
     }
+    let offset = panel.page * panel.page_size.saturating_sub(1).max(1);
+    panel
+        .items
+        .get(offset + index - 1)
+        .map(|e| e.text.clone())
 }
 
 /// 决定按键是否转发给应用（孤儿释放抑制）。
@@ -534,10 +548,31 @@ impl WaylandLoop {
                 panel.active = false;
                 self.hide_emoji_panel(c, candidate_window_visible);
             }
-            0xFF09 | 0xFF53 | 0x2015 => {
-                // Tab / Right / 无：切换高亮到下一个（有限支持）
-                if panel.highlighted + 1 < panel.items.len() + 1 {
-                    panel.highlighted = (panel.highlighted + 1) % (panel.items.len() + 1);
+            0xFF09 | 0xFF53 => {
+                // Tab / Right：高亮移动到下一个
+                let total = panel.items.len() + 1;
+                panel.highlighted = (panel.highlighted + 1) % total;
+                self.show_emoji_candidates(c, panel, candidate_window_visible);
+            }
+            0xFF51 => {
+                // Left：高亮移动到上一个
+                let total = panel.items.len() + 1;
+                panel.highlighted = (panel.highlighted + total - 1) % total;
+                self.show_emoji_candidates(c, panel, candidate_window_visible);
+            }
+            0xFF52 => {
+                // Up：上一页（对齐 Rime Page_Up）
+                if panel.page > 0 {
+                    panel.page -= 1;
+                    panel.highlighted = 0;
+                    self.show_emoji_candidates(c, panel, candidate_window_visible);
+                }
+            }
+            0xFF54 => {
+                // Down：下一页（对齐 Rime Page_Down）
+                if panel.page + 1 < panel.total_pages() {
+                    panel.page += 1;
+                    panel.highlighted = 0;
                     self.show_emoji_candidates(c, panel, candidate_window_visible);
                 }
             }
@@ -574,11 +609,11 @@ impl WaylandLoop {
         panel: &mut EmojiPanel,
         candidate_window_visible: &mut bool,
     ) {
-        // 第 1 位固定为分号，表情取剩余 page_size-1 个
-        panel.items = plugin_host.query_emojis(&panel.query, panel.page_size - 1);
-        if panel.highlighted > panel.items.len() {
-            panel.highlighted = 0;
-        }
+        // 第 1 位固定为分号，表情取多页（最多 3 页），供 Up/Down 翻页
+        let limit = panel.page_size.saturating_sub(1).max(1) * 3;
+        panel.items = plugin_host.query_emojis(&panel.query, limit);
+        panel.page = 0;
+        panel.highlighted = 0;
         debug!(
             "Emoji search '{}': {} results (page_size={})",
             panel.query,
@@ -598,13 +633,19 @@ impl WaylandLoop {
         panel: &EmojiPanel,
         candidate_window_visible: &mut bool,
     ) {
+        // 当前页切片（每页 page_size-1 个表情）
+        let per_page = panel.page_size.saturating_sub(1).max(1);
+        let start = panel.page * per_page;
+        let end = (start + per_page).min(panel.items.len());
+        let page_items = &panel.items[start..end];
+
         // 第 1 位：分号本身（数字 1 输入分号）
         let mut candidates = vec![xime_ui::CandidateItem {
             text: ";".to_string(),
             comment: "分号".to_string(),
             index: 0,
         }];
-        candidates.extend(panel.items.iter().enumerate().map(|(i, e)| {
+        candidates.extend(page_items.iter().enumerate().map(|(i, e)| {
             xime_ui::CandidateItem {
                 text: e.text.clone(),
                 comment: e.category.clone(),
@@ -788,5 +829,46 @@ mod tests {
         assert_eq!(emoji_commit_text(&panel, 1).as_deref(), Some("(ﾟ∀ﾟ)"));
         assert_eq!(emoji_commit_text(&panel, 2).as_deref(), Some("(^u^)"));
         assert_eq!(emoji_commit_text(&panel, 3), None);
+    }
+
+    #[test]
+    fn test_emoji_commit_text_paged() {
+        // page_size=3 → 每页 2 个表情；第 2 页索引 1 对应第 3 个表情
+        let panel = EmojiPanel {
+            page_size: 3,
+            page: 1,
+            items: vec![
+                EmojiItem {
+                    id: "k1".into(),
+                    text: "a".into(),
+                    image_url: None,
+                    category: "c".into(),
+                },
+                EmojiItem {
+                    id: "k2".into(),
+                    text: "b".into(),
+                    image_url: None,
+                    category: "c".into(),
+                },
+                EmojiItem {
+                    id: "k3".into(),
+                    text: "d".into(),
+                    image_url: None,
+                    category: "c".into(),
+                },
+                EmojiItem {
+                    id: "k4".into(),
+                    text: "e".into(),
+                    image_url: None,
+                    category: "c".into(),
+                },
+            ],
+            ..EmojiPanel::default()
+        };
+        // 第 1 页：索引 0=分号，1=a，2=b
+        assert_eq!(emoji_commit_text(&panel, 1).as_deref(), Some("d"));
+        assert_eq!(emoji_commit_text(&panel, 2).as_deref(), Some("e"));
+        assert_eq!(emoji_commit_text(&panel, 3), None);
+        assert_eq!(panel.total_pages(), 2);
     }
 }
