@@ -1,10 +1,12 @@
 mod command;
 mod daemon;
+mod plugin_host;
 mod rime;
 mod wayland;
 
 pub use command::DaemonCommand;
 pub use daemon::XimeDaemon;
+pub use plugin_host::{plugins_dir, PluginHost};
 pub use rime::RimeEngine;
 pub use wayland::WaylandLoop;
 

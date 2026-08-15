@@ -5804,11 +5804,13 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "xime-config",
+ "xime-plugin",
  "xime-tray",
  "xime-ui",
  "xime-wayland",
  "xime-xkb",
  "zbus",
+ "zip",
 ]
 
 [[package]]

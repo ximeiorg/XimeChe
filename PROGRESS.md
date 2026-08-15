@@ -1,7 +1,22 @@
 # XimeChe（曦码·澈输入法）开发进度
 
 ## 当前状态
-**应用元数据参数化：libximecore 支持多平台名称注入，XimeChe 独立命名。**（2026-08-15）
+**插件系统接入：daemon 加载已启用插件，emoji 候选窗 `;` 触发搜索上屏。**（2026-08-15）
+
+## 本次变更（2026-08-15）
+1. **插件下载即安装**（libximecore xime-setup）
+   - 插件下载改为下载到临时文件后立即 `install_from_zip`，删除 .xipk，不再需要手动"安装"
+   - 修复 `download_file` 未创建父目录导致 "no such file or dir"
+2. **daemon 插件宿主**（crates/xime-daemon/src/plugin_host.rs）
+   - 新增 `PluginHost`：启动时扫描 `~/.config/xime/plugins/`，加载 enabled 插件（PluginRuntime + mlua 沙箱）
+   - `query_emojis` / `emoji_plugin_count` 契约查询
+   - 端到端测试：临时目录安装 .xipk → 加载 → 查询/搜索
+3. **emoji 候选窗**（wayland.rs）
+   - 中文态按 `;` 进入 emoji 面板（需已安装 emoji 类插件）
+   - 字符实时搜索、BackSpace 删词、数字键选择上屏、Return/Space 高亮上屏、Escape 退出
+   - `emoji_select_index` 纯函数 + 测试
+4. **设置侧边栏新增"插件管理"页**（libximecore xime-setup）
+   - 已安装插件列表：类型图标 + 名称 + 版本 + 启用开关 + 卸载（二次确认）
 
 ## 本次变更（2026-08-15）
 1. **项目改名 XimeChe（曦码·澈输入法）**

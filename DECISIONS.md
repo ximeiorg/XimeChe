@@ -1,5 +1,20 @@
 # XimeChe（曦码·澈输入法）重要决策
 
+## 2026-08-15: 插件下载即安装 + daemon 插件宿主 + emoji 候选窗
+
+**问题**：插件下载后需手动"安装"，且 daemon 无插件加载能力，插件安装后不生效。
+
+**决策**：
+1. 插件下载即安装：下载到临时 .xipk → 立即解压注册 → 删除临时包，去掉"安装"按钮
+2. daemon 新增 `PluginHost`：启动时加载 enabled 插件（复用 libximecore xime-plugin 的 PluginRuntime/mlua 沙箱），提供 emoji 契约查询
+3. emoji 候选窗：中文态 `;` 触发，字符搜索，数字键/回车选择上屏（与 Android 版契约一致）
+4. 插件管理页（设置侧边栏）：列表 + 启用开关 + 卸载二次确认
+
+**理由**：
+1. 两步下载安装对用户无意义，下载即装降低心智负担
+2. 插件契约与 Android 版 Xime 一致（getCategories/getEmojis），同一 .xipk 两端复用
+3. 分阶段：先 emoji 类（候选窗能直接呈现），speech/clipboard 类后续接入
+
 ## 2026-08-15: 应用元数据参数化（AppMetadata）
 
 **问题**：libximecore 是跨平台共享库，内部硬编码 "Xime"/"xime" 名称（配置路径、librime distribution 标识），无法被不同宿主平台复用。

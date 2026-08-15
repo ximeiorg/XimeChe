@@ -4,12 +4,45 @@ use std::thread;
 
 use tracing::{debug, error, info};
 use xime_config::XimeConfig;
+use xime_plugin::EmojiItem;
 use xime_tray::{InputMode, TrayManager};
 use xime_wayland::{connect_im_from_fd, connect_im_to_env, ImBackend};
 use xime_xkb::XkbContext;
 use xime_xkb::{keysym_to_letter, Keysym, ModifierState};
 
-use crate::{DaemonCommand, RimeEngine};
+use crate::{DaemonCommand, PluginHost, RimeEngine};
+
+/// emoji 面板状态：`;` 触发，字符搜索，数字选择上屏。
+#[derive(Default)]
+struct EmojiPanel {
+    active: bool,
+    query: String,
+    items: Vec<EmojiItem>,
+    highlighted: usize,
+}
+
+/// 数字键 → 候选索引（1-9 对应 0-8，0 对应 9）。
+fn emoji_select_index(keysym: u32) -> Option<usize> {
+    match keysym {
+        0x31..=0x39 => Some((keysym - 0x31) as usize),
+        0x30 => Some(9),
+        _ => None,
+    }
+}
+
+/// 决定按键是否转发给应用（孤儿释放抑制）。
+/// - Rime 消费的按下（`press_consumed`）不转发；其释放事件也不转发，避免孤儿释放。
+/// - 其他按键（未被消费的按下、未被消费的释放）正常转发。
+fn should_forward_key(
+    pressed: bool,
+    result: bool,
+    consumed_presses: &std::collections::HashSet<u32>,
+    key: u32,
+) -> bool {
+    let press_consumed = result && pressed;
+    let release_of_consumed = !pressed && consumed_presses.contains(&key);
+    !press_consumed && !release_of_consumed
+}
 
 pub struct WaylandLoop {
     command_rx: Receiver<DaemonCommand>,
@@ -36,6 +69,7 @@ impl WaylandLoop {
         let mut conn: Option<Box<dyn ImBackend>> = None;
         let mut xkb: Option<XkbContext> = None;
         let mut rime = RimeEngine::new();
+        let plugin_host = PluginHost::new();
 
         let mut xime_config = XimeConfig::load();
         let _last_key_root_binding = xime_config.get_last_key_root_binding();
@@ -49,6 +83,7 @@ impl WaylandLoop {
         );
 
         let mut candidate_window_visible = false;
+        let mut emoji_panel = EmojiPanel::default();
         let mut consumed_presses: std::collections::HashSet<u32> = std::collections::HashSet::new();
         let mut last_input_keysym: Option<u32> = None;
         let mut ctrl_root_visible = false;
@@ -172,6 +207,8 @@ impl WaylandLoop {
                         c.as_mut(),
                         &mut xkb,
                         &mut rime,
+                        &plugin_host,
+                        &mut emoji_panel,
                         &xime_config,
                         &mut candidate_window_visible,
                         &mut consumed_presses,
@@ -192,6 +229,8 @@ impl WaylandLoop {
         c: &mut dyn ImBackend,
         xkb: &mut Option<XkbContext>,
         rime: &mut RimeEngine,
+        plugin_host: &PluginHost,
+        emoji_panel: &mut EmojiPanel,
         xime_config: &XimeConfig,
         candidate_window_visible: &mut bool,
         consumed_presses: &mut std::collections::HashSet<u32>,
@@ -224,6 +263,8 @@ impl WaylandLoop {
                         c,
                         x,
                         rime,
+                        plugin_host,
+                        emoji_panel,
                         xime_config,
                         event,
                         sym,
@@ -244,6 +285,8 @@ impl WaylandLoop {
         c: &mut dyn ImBackend,
         xkb: &XkbContext,
         rime: &mut RimeEngine,
+        plugin_host: &PluginHost,
+        emoji_panel: &mut EmojiPanel,
         xime_config: &XimeConfig,
         event: xime_wayland::KeyEvent,
         sym: Keysym,
@@ -271,6 +314,20 @@ impl WaylandLoop {
             "is_ctrl={}, candidate_visible={}, last_key={:?}",
             is_ctrl, candidate_window_visible, last_input_keysym
         );
+
+        // emoji 面板：`;` 触发，面板激活时按键全部由面板消费。
+        if plugin_host.emoji_plugin_count() > 0
+            && self.handle_emoji_key(
+                c,
+                plugin_host,
+                emoji_panel,
+                &event,
+                sym,
+                candidate_window_visible,
+            )
+        {
+            return;
+        }
 
         if *candidate_window_visible
             && is_ctrl
@@ -321,19 +378,15 @@ impl WaylandLoop {
                 debug!("ascii_mode={}, composing={}", is_ascii, status.is_composing);
             }
 
-            // 回车键（Return / 数字键盘回车）始终转发给客户端：
-            // 组合态下 Rime 会吞掉回车只提交文本，终端收不到回车导致命令不执行；
-            // 同时按下被吞、释放被转发会形成孤儿释放事件，破坏按键状态配对。
-            // fcitx5 的做法一致：提交组合 + 转发回车，终端按一次即执行。
-            //
-            // 其他按键：Rime 吞掉的按下不再转发它的释放（孤儿释放抑制，对齐 fcitx5）。
-            let is_enter = sym.raw() == 0xFF0D || sym.raw() == 0xFF8D;
-            let press_consumed = result && event.pressed;
-            let release_of_consumed = !event.pressed && consumed_presses.contains(&event.key);
-            if is_enter || !press_consumed && !release_of_consumed {
+            // 回车键（Return / 数字键盘回车）：与其他按键一致，按 Rime 消费结果决定转发。
+            // - 组合态下 Rime 吞掉回车并提交编码（result=true），不再转发，
+            //   应用只收到上屏的编码文本，不会多出回车符。
+            // - 空组合态下 Rime 不消费（result=false），转发给应用（正常换行/执行命令）。
+            // 被吞按下的释放事件同样抑制（孤儿释放抑制，对齐 fcitx5）。
+            if should_forward_key(event.pressed, result, consumed_presses, event.key) {
                 c.forward_key(event.serial, event.time, event.key, event.pressed);
             }
-            if press_consumed {
+            if result && event.pressed {
                 consumed_presses.insert(event.key);
             } else {
                 consumed_presses.remove(&event.key);
@@ -386,6 +439,149 @@ impl WaylandLoop {
                 }
             }
         }
+    }
+
+    /// emoji 面板按键处理。返回 true 表示按键已被面板消费。
+    ///
+    /// - `;`（中文态，无组合输入）：进入面板，显示全部表情
+    /// - 面板激活时：
+    ///   - 可打印字符：追加搜索词并实时刷新
+    ///   - BackSpace：删除搜索词末尾
+    ///   - 数字键：选择对应候选并上屏
+    ///   - Return/Space：选择高亮候选并上屏
+    ///   - Escape：退出面板
+    fn handle_emoji_key(
+        &self,
+        c: &mut dyn ImBackend,
+        plugin_host: &PluginHost,
+        panel: &mut EmojiPanel,
+        event: &xime_wayland::KeyEvent,
+        sym: Keysym,
+        candidate_window_visible: &mut bool,
+    ) -> bool {
+        if !event.pressed {
+            return panel.active;
+        }
+
+        let raw = sym.raw();
+
+        if !panel.active {
+            // 只有中文态分号触发，避免影响英文输入
+            if raw == ';' as u32 {
+                panel.active = true;
+                panel.query.clear();
+                self.refresh_emoji_panel(c, plugin_host, panel, candidate_window_visible);
+                debug!("Emoji panel activated");
+            }
+            return panel.active;
+        }
+
+        // ---- 面板激活：全部按键由面板消费 ----
+        match raw {
+            0xFF1B => {
+                // Escape：退出
+                panel.active = false;
+                self.hide_emoji_panel(c, candidate_window_visible);
+                debug!("Emoji panel exited via Escape");
+            }
+            0xFF08 => {
+                // BackSpace：删除搜索词
+                panel.query.pop();
+                self.refresh_emoji_panel(c, plugin_host, panel, candidate_window_visible);
+            }
+            0xFF0D | 0xFF8D | 0x20 => {
+                // Return / KP_Enter / Space：选中高亮
+                if let Some(item) = panel.items.get(panel.highlighted).cloned() {
+                    c.commit_string(&item.text);
+                    let _ = c.flush();
+                    debug!("Emoji committed: {}", item.text);
+                }
+                panel.active = false;
+                self.hide_emoji_panel(c, candidate_window_visible);
+            }
+            0xFF09 | 0xFF53 | 0x2015 => {
+                // Tab / Right / 无：切换高亮到下一个（有限支持）
+                if !panel.items.is_empty() {
+                    panel.highlighted = (panel.highlighted + 1) % panel.items.len();
+                    self.show_emoji_candidates(c, panel, candidate_window_visible);
+                }
+            }
+            k if emoji_select_index(k).is_some() => {
+                // 数字键选择候选（1-9 对应索引 0-8，0 对应 9）
+                let index = emoji_select_index(k).unwrap_or(0);
+                if let Some(item) = panel.items.get(index).cloned() {
+                    c.commit_string(&item.text);
+                    let _ = c.flush();
+                    debug!("Emoji committed by key: {}", item.text);
+                }
+                panel.active = false;
+                self.hide_emoji_panel(c, candidate_window_visible);
+            }
+            k if (0x20..0x7F).contains(&k) => {
+                // 其他可打印 ASCII 字符：追加搜索
+                let ch = char::from_u32(k).unwrap_or(' ');
+                panel.query.push(ch);
+                panel.highlighted = 0;
+                self.refresh_emoji_panel(c, plugin_host, panel, candidate_window_visible);
+            }
+            _ => {
+                // 其他键（修饰键等）：忽略，不退出面板
+                return true;
+            }
+        }
+        true
+    }
+
+    fn refresh_emoji_panel(
+        &self,
+        c: &mut dyn ImBackend,
+        plugin_host: &PluginHost,
+        panel: &mut EmojiPanel,
+        candidate_window_visible: &mut bool,
+    ) {
+        panel.items = plugin_host.query_emojis(&panel.query, 20);
+        if panel.highlighted >= panel.items.len() {
+            panel.highlighted = 0;
+        }
+        debug!(
+            "Emoji search '{}': {} results",
+            panel.query,
+            panel.items.len()
+        );
+        if panel.items.is_empty() {
+            self.hide_emoji_panel(c, candidate_window_visible);
+        } else {
+            self.show_emoji_candidates(c, panel, candidate_window_visible);
+        }
+    }
+
+    fn show_emoji_candidates(
+        &self,
+        c: &mut dyn ImBackend,
+        panel: &EmojiPanel,
+        candidate_window_visible: &mut bool,
+    ) {
+        let candidates: Vec<xime_ui::CandidateItem> = panel
+            .items
+            .iter()
+            .enumerate()
+            .map(|(i, e)| xime_ui::CandidateItem {
+                text: e.text.clone(),
+                comment: e.category.clone(),
+                index: i,
+            })
+            .collect();
+        if let Err(e) = c.show_candidate_window(&candidates, panel.highlighted, (0x8F, 0x73, 0xE2))
+        {
+            debug!("Emoji candidate window error: {}", e);
+        }
+        *candidate_window_visible = true;
+    }
+
+    fn hide_emoji_panel(&self, c: &mut dyn ImBackend, candidate_window_visible: &mut bool) {
+        c.hide_candidate_window();
+        let _ = c.flush();
+        *candidate_window_visible = false;
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -466,5 +662,60 @@ impl WaylandLoop {
             }
         }
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn test_should_forward_key_empty() {
+        let consumed = HashSet::new();
+        // 空组合态按下：未消费 → 转发
+        assert!(should_forward_key(true, false, &consumed, 10));
+        // 空组合态释放：未消费 → 转发
+        assert!(should_forward_key(false, false, &consumed, 10));
+    }
+
+    #[test]
+    fn test_should_forward_key_consumed_press() {
+        let mut consumed = HashSet::new();
+        // Rime 消费的按下（如组合态回车）：不转发
+        assert!(!should_forward_key(true, true, &consumed, 10));
+        consumed.insert(10);
+        // 其释放事件：不转发（孤儿释放抑制）
+        assert!(!should_forward_key(false, false, &consumed, 10));
+    }
+
+    #[test]
+    fn test_should_forward_key_after_commit() {
+        let consumed = HashSet::new();
+        // 组合态回车提交编码后，同键的第二次按下（已清空组合）：正常转发
+        assert!(should_forward_key(true, false, &consumed, 10));
+    }
+
+    #[test]
+    fn test_should_forward_key_different_keys() {
+        let mut consumed = HashSet::new();
+        consumed.insert(10);
+        // 10 的释放被抑制，但其他键不受影响
+        assert!(!should_forward_key(false, false, &consumed, 10));
+        assert!(should_forward_key(false, false, &consumed, 20));
+    }
+
+    #[test]
+    fn test_emoji_select_index() {
+        // 1-9 → 0-8
+        for (key, idx) in [(0x31, 0usize), (0x35, 4), (0x39, 8)] {
+            assert_eq!(emoji_select_index(key), Some(idx));
+        }
+        // 0 → 9
+        assert_eq!(emoji_select_index(0x30), Some(9));
+        // 非数字键不映射
+        assert_eq!(emoji_select_index(0x20), None);
+        assert_eq!(emoji_select_index(0x61), None);
+        assert_eq!(emoji_select_index(0xFF0D), None);
     }
 }
