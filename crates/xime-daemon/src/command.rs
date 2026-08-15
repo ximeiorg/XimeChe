@@ -6,6 +6,7 @@ pub enum DaemonCommand {
     ToggleMode,
     Deploy,
     ReloadStyle,
+    ReloadPlugins,
     SelectSchema(String, oneshot::Sender<bool>),
     Shutdown,
 }
@@ -38,6 +39,15 @@ mod tests {
         match cmd {
             DaemonCommand::ReloadStyle => {} // expected
             _ => panic!("Expected ReloadStyle"),
+        }
+    }
+
+    #[test]
+    fn test_daemon_command_reload_plugins() {
+        let cmd = DaemonCommand::ReloadPlugins;
+        match cmd {
+            DaemonCommand::ReloadPlugins => {} // expected
+            _ => panic!("Expected ReloadPlugins"),
         }
     }
 

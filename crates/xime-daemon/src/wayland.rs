@@ -69,8 +69,7 @@ impl WaylandLoop {
         let mut conn: Option<Box<dyn ImBackend>> = None;
         let mut xkb: Option<XkbContext> = None;
         let mut rime = RimeEngine::new();
-        let plugin_host = PluginHost::new();
-
+        let mut plugin_host = PluginHost::new();
         let mut xime_config = XimeConfig::load();
         let _last_key_root_binding = xime_config.get_last_key_root_binding();
         let primary_color = xime_config.get_primary_color();
@@ -155,6 +154,10 @@ impl WaylandLoop {
 
                     debug!("Style config reloaded, new primary_color={:?}", new_color);
                 }
+                Ok(DaemonCommand::ReloadPlugins) => {
+                    debug!("ReloadPlugins command received, reloading plugins...");
+                    plugin_host.reload();
+                }
                 Ok(DaemonCommand::SelectSchema(schema_id, result_tx)) => {
                     debug!("SelectSchema command received: {}", schema_id);
                     let ok = rime.select_schema(&schema_id);
@@ -207,7 +210,7 @@ impl WaylandLoop {
                         c.as_mut(),
                         &mut xkb,
                         &mut rime,
-                        &plugin_host,
+                        &mut plugin_host,
                         &mut emoji_panel,
                         &xime_config,
                         &mut candidate_window_visible,
@@ -229,7 +232,7 @@ impl WaylandLoop {
         c: &mut dyn ImBackend,
         xkb: &mut Option<XkbContext>,
         rime: &mut RimeEngine,
-        plugin_host: &PluginHost,
+        plugin_host: &mut PluginHost,
         emoji_panel: &mut EmojiPanel,
         xime_config: &XimeConfig,
         candidate_window_visible: &mut bool,
@@ -285,7 +288,7 @@ impl WaylandLoop {
         c: &mut dyn ImBackend,
         xkb: &XkbContext,
         rime: &mut RimeEngine,
-        plugin_host: &PluginHost,
+        plugin_host: &mut PluginHost,
         emoji_panel: &mut EmojiPanel,
         xime_config: &XimeConfig,
         event: xime_wayland::KeyEvent,
@@ -316,16 +319,14 @@ impl WaylandLoop {
         );
 
         // emoji 面板：`;` 触发，面板激活时按键全部由面板消费。
-        if plugin_host.emoji_plugin_count() > 0
-            && self.handle_emoji_key(
-                c,
-                plugin_host,
-                emoji_panel,
-                &event,
-                sym,
-                candidate_window_visible,
-            )
-        {
+        if self.handle_emoji_key(
+            c,
+            plugin_host,
+            emoji_panel,
+            &event,
+            sym,
+            candidate_window_visible,
+        ) {
             return;
         }
 
@@ -453,7 +454,7 @@ impl WaylandLoop {
     fn handle_emoji_key(
         &self,
         c: &mut dyn ImBackend,
-        plugin_host: &PluginHost,
+        plugin_host: &mut PluginHost,
         panel: &mut EmojiPanel,
         event: &xime_wayland::KeyEvent,
         sym: Keysym,
@@ -468,6 +469,12 @@ impl WaylandLoop {
         if !panel.active {
             // 只有中文态分号触发，避免影响英文输入
             if raw == ';' as u32 {
+                // 兜底：触发前重载插件，确保 daemon 早于插件安装启动时也能用。
+                plugin_host.reload();
+                if plugin_host.emoji_plugin_count() == 0 {
+                    debug!("Emoji trigger but no emoji plugins loaded");
+                    return false;
+                }
                 panel.active = true;
                 panel.query.clear();
                 self.refresh_emoji_panel(c, plugin_host, panel, candidate_window_visible);
@@ -538,8 +545,7 @@ impl WaylandLoop {
         plugin_host: &PluginHost,
         panel: &mut EmojiPanel,
         candidate_window_visible: &mut bool,
-    ) {
-        panel.items = plugin_host.query_emojis(&panel.query, 20);
+    ) {        panel.items = plugin_host.query_emojis(&panel.query, 20);
         if panel.highlighted >= panel.items.len() {
             panel.highlighted = 0;
         }

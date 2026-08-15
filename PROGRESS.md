@@ -4,7 +4,11 @@
 **插件系统接入：daemon 加载已启用插件，emoji 候选窗 `;` 触发搜索上屏。**（2026-08-15）
 
 ## 本次变更（2026-08-15）
-1. **插件下载即安装**（libximecore xime-setup）
+1. **插件热重载机制**
+   - 设置程序插件变更（安装/卸载/启停）→ DBus `ReloadPlugins` → daemon `PluginHost::reload()`
+   - 兜底：`;` 触发 emoji 面板前自动 reload，daemon 早于插件安装启动时也能用
+   - libximecore 新增 `set_notify_reload_plugins` 回调，state.rs 插件任务完成后触发
+2. **插件下载即安装**（libximecore xime-setup）
    - 插件下载改为下载到临时文件后立即 `install_from_zip`，删除 .xipk，不再需要手动"安装"
    - 修复 `download_file` 未创建父目录导致 "no such file or dir"
 2. **daemon 插件宿主**（crates/xime-daemon/src/plugin_host.rs）

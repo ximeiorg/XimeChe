@@ -133,7 +133,10 @@ mod tests {
 
     #[test]
     fn test_plugin_host_empty() {
-        let host = PluginHost::new();
+        // 直接构造空 host（避免读取用户真实插件目录）
+        let host = PluginHost {
+            runtimes: HashMap::new(),
+        };
         assert_eq!(host.emoji_plugin_count(), 0);
         assert!(host.query_emojis("", 10).is_empty());
     }

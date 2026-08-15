@@ -1,6 +1,9 @@
 use std::fs::File;
 use std::path::PathBuf;
-use xime_setup_lib::{set_notify_deploy, set_notify_reload_style, set_notify_select_schema};
+use xime_setup_lib::{
+    set_notify_deploy, set_notify_reload_plugins, set_notify_reload_style,
+    set_notify_select_schema,
+};
 
 fn get_lock_file_path() -> PathBuf {
     std::env::var("XDG_RUNTIME_DIR")
@@ -79,6 +82,17 @@ fn main() -> iced::Result {
             return false;
         };
         reply.body().deserialize::<bool>().unwrap_or(false)
+    });
+    set_notify_reload_plugins(|| {
+        if let Ok(conn) = zbus::blocking::Connection::session() {
+            let _ = conn.call_method(
+                Some("org.xime.Xime"),
+                "/org/xime/Xime",
+                Some("org.xime.Xime.Controller"),
+                "ReloadPlugins",
+                &(),
+            );
+        }
     });
 
     // 注入应用元数据（目录沿用 xime，librime 分发标识为 XimeChe）。

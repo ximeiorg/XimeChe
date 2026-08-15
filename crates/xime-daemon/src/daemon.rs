@@ -61,6 +61,14 @@ impl XimeDaemon {
         Ok(())
     }
 
+    async fn reload_plugins(&self) -> zbus::fdo::Result<()> {
+        debug!("Received ReloadPlugins request");
+        self.command_tx
+            .send(DaemonCommand::ReloadPlugins)
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
+        Ok(())
+    }
+
     async fn select_schema(&self, schema_id: String) -> zbus::fdo::Result<bool> {
         debug!("Received SelectSchema request: {}", schema_id);
         let (result_tx, result_rx) = tokio::sync::oneshot::channel();
