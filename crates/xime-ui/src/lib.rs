@@ -8,8 +8,8 @@ pub use candidate::MoveDirection;
 pub use candidate::PageInfo;
 pub use iced_view::IcedSurface;
 pub use menu::{
-    menu_button_hit, menu_item_hit, menu_panel_height, expanded_height, CANDIDATE_HEIGHT,
-    MENU_BUTTON_WIDTH, MENU_ITEM_HEIGHT, MENU_COLUMNS, MenuAction,
+    expanded_height, menu_button_hit, menu_item_hit, menu_panel_height, MenuAction,
+    CANDIDATE_HEIGHT, MENU_BUTTON_WIDTH, MENU_COLUMNS, MENU_ITEM_HEIGHT,
 };
 
 pub type Result<T> = std::result::Result<T, Error>;

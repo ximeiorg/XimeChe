@@ -97,4 +97,3 @@ pub fn menu_item_hit(x: i32, y: i32, container_width: u32) -> Option<MenuAction>
     let idx = row * MENU_COLUMNS + col;
     MenuAction::ALL.get(idx).copied()
 }
-

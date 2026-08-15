@@ -263,7 +263,8 @@ impl Dispatch<ZwpInputPanelV1, InputMethodV1Data> for InputMethodV1Data {
     }
 }
 
-impl Dispatch<WlKeyboard, InputMethodV1Data> for InputMethodV1Data {    fn event(
+impl Dispatch<WlKeyboard, InputMethodV1Data> for InputMethodV1Data {
+    fn event(
         state: &mut InputMethodV1Data,
         _proxy: &WlKeyboard,
         event: <WlKeyboard as Proxy>::Event,
@@ -524,9 +525,7 @@ impl WaylandConnectionV1 {
 
         let seat: Option<WlSeat> = globals.bind(qh, 1..=8, state.clone()).ok();
 
-        let pointer: Option<WlPointer> = seat
-            .as_ref()
-            .map(|s| s.get_pointer(qh, state.clone()));
+        let pointer: Option<WlPointer> = seat.as_ref().map(|s| s.get_pointer(qh, state.clone()));
 
         let compositor: Option<WlCompositor> = globals.bind(qh, 1..=4, state.clone()).ok();
 

@@ -535,9 +535,7 @@ impl WaylandConnectionV2 {
 
         let seat: Option<WlSeat> = globals.bind(qh, 1..=8, state.clone()).ok();
 
-        let pointer: Option<WlPointer> = seat
-            .as_ref()
-            .map(|s| s.get_pointer(qh, state.clone()));
+        let pointer: Option<WlPointer> = seat.as_ref().map(|s| s.get_pointer(qh, state.clone()));
 
         let compositor: Option<WlCompositor> = globals.bind(qh, 1..=4, state.clone()).ok();
 

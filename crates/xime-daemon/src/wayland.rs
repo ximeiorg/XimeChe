@@ -50,7 +50,9 @@ impl Default for EmojiPanel {
 impl EmojiPanel {
     fn total_pages(&self) -> usize {
         // 每页 page_size-1 个表情（分号占一位）
-        self.items.len().div_ceil(self.page_size.saturating_sub(1).max(1))
+        self.items
+            .len()
+            .div_ceil(self.page_size.saturating_sub(1).max(1))
     }
 }
 
@@ -69,10 +71,7 @@ fn emoji_commit_text(panel: &EmojiPanel, index: usize) -> Option<String> {
         return Some(";".to_string());
     }
     let offset = panel.page * panel.page_size.saturating_sub(1).max(1);
-    panel
-        .items
-        .get(offset + index - 1)
-        .map(|e| e.text.clone())
+    panel.items.get(offset + index - 1).map(|e| e.text.clone())
 }
 
 /// 决定按键是否转发给应用（孤儿释放抑制）。
@@ -319,13 +318,7 @@ impl WaylandLoop {
                 "Pointer press: x={}, y={}, on_menu={}",
                 pe.x, pe.y, pe.on_menu
             );
-            self.handle_pointer_press(
-                c,
-                panel_state,
-                last_panel_width,
-                xime_config,
-                &pe,
-            );
+            self.handle_pointer_press(c, panel_state, last_panel_width, xime_config, &pe);
         }
 
         let events = c.pop_key_events();
@@ -529,11 +522,7 @@ impl WaylandLoop {
                     *last_panel_width = c.candidate_width(&candidate_items);
                     // 缓存最近候选（菜单开/关后重绘）
                     if let Ok(mut cache) = self.candidate_cache.lock() {
-                        *cache = Some((
-                            candidate_items.clone(),
-                            highlighted_index,
-                            primary_color,
-                        ));
+                        *cache = Some((candidate_items.clone(), highlighted_index, primary_color));
                     }
                     *candidate_window_visible = true;
                 } else if *candidate_window_visible {
@@ -709,13 +698,16 @@ impl WaylandLoop {
             comment: "分号".to_string(),
             index: 0,
         }];
-        candidates.extend(page_items.iter().enumerate().map(|(i, e)| {
-            xime_ui::CandidateItem {
-                text: e.text.clone(),
-                comment: e.category.clone(),
-                index: i + 1,
-            }
-        }));
+        candidates.extend(
+            page_items
+                .iter()
+                .enumerate()
+                .map(|(i, e)| xime_ui::CandidateItem {
+                    text: e.text.clone(),
+                    comment: e.category.clone(),
+                    index: i + 1,
+                }),
+        );
         if let Err(e) = c.show_candidate_window(&candidates, panel.highlighted, (0x8F, 0x73, 0xE2))
         {
             debug!("Emoji candidate window error: {}", e);

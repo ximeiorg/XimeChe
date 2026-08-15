@@ -1,8 +1,7 @@
 use std::fs::File;
 use std::path::PathBuf;
 use xime_setup_lib::{
-    set_notify_deploy, set_notify_reload_plugins, set_notify_reload_style,
-    set_notify_select_schema,
+    set_notify_deploy, set_notify_reload_plugins, set_notify_reload_style, set_notify_select_schema,
 };
 
 fn get_lock_file_path() -> PathBuf {

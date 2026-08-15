@@ -3,14 +3,10 @@
 //! 用 iced 的 widget 树（Element）描述 UI，经 `iced_tiny_skia`
 //! 离屏渲染到 SHM buffer。布局/圆角/文本/图标交给 iced，避免手绘。
 
-use iced_tiny_skia::core::{
-    mouse,
-    renderer::Style,
-    Color, Font, Pixels, Rectangle, Size, Theme,
-};
 use iced_tiny_skia::core::widget::tree::Tree;
-use iced_tiny_skia::core::{layout, Element};
 use iced_tiny_skia::core::Renderer as CoreRenderer;
+use iced_tiny_skia::core::{layout, Element};
+use iced_tiny_skia::core::{mouse, renderer::Style, Color, Font, Pixels, Rectangle, Size, Theme};
 use iced_tiny_skia::graphics::Viewport;
 use iced_tiny_skia::Renderer;
 use iced_widget::{container, row, text, Space, Svg};
@@ -104,10 +100,8 @@ impl IcedSurface {
         );
 
         // 渲染到 pixmap
-        let viewport = Viewport::with_physical_size(
-            iced_tiny_skia::core::Size::new(width, height),
-            1.0,
-        );
+        let viewport =
+            Viewport::with_physical_size(iced_tiny_skia::core::Size::new(width, height), 1.0);
         let mut clip_mask = Mask::new(width, height).expect("mask");
         let damage = vec![Rectangle {
             x: 0.0,
@@ -117,13 +111,8 @@ impl IcedSurface {
         }];
         let bg = Color::TRANSPARENT;
         let mut pixmap_mut = pixmap.as_mut();
-        self.renderer.draw(
-            &mut pixmap_mut,
-            &mut clip_mask,
-            &viewport,
-            &damage,
-            bg,
-        );
+        self.renderer
+            .draw(&mut pixmap_mut, &mut clip_mask, &viewport, &damage, bg);
 
         // RGBA → BGRA 拷贝
         let data = pixmap.data();
@@ -138,10 +127,7 @@ impl IcedSurface {
     }
 
     /// 测量 Element 自然尺寸（内容自适应宽度）。
-    pub fn measure<M: 'static>(
-        &mut self,
-        element: &mut Element<'_, M, Theme, Renderer>,
-    ) -> Size {
+    pub fn measure<M: 'static>(&mut self, element: &mut Element<'_, M, Theme, Renderer>) -> Size {
         self.tree.diff(element.as_widget());
         let widget = element.as_widget_mut();
         let limits = layout::Limits::new(Size::ZERO, Size::new(10000.0, 10000.0));
@@ -347,15 +333,9 @@ fn candidate_items<'a>(
         let label = format!("{}. {}", idx + 1, candidate.text);
         let t = text(label)
             .size(16)
-            .color(if is_hl {
-                Color::WHITE
-            } else {
-                TEXT_MAIN
-            });
+            .color(if is_hl { Color::WHITE } else { TEXT_MAIN });
         let comment = if !candidate.comment.is_empty() {
-            text(candidate.comment.clone())
-                .size(12)
-                .color(TEXT_COMMENT)
+            text(candidate.comment.clone()).size(12).color(TEXT_COMMENT)
         } else {
             text("").size(12)
         };
@@ -365,18 +345,21 @@ fn candidate_items<'a>(
 
         if is_hl {
             let (r, g, b) = primary_color;
-            content = content.push(
-                container(item).padding([4, 8]).style(move |_| container::Style {
-                    background: Some(iced_widget::core::Background::Color(
-                        Color::from_rgb8(r, g, b),
-                    )),
-                    border: iced_widget::core::border::Border {
-                        radius: iced_widget::core::border::Radius::from(HIGHLIGHT_RADIUS),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                }),
-            );
+            content =
+                content.push(
+                    container(item)
+                        .padding([4, 8])
+                        .style(move |_| container::Style {
+                            background: Some(iced_widget::core::Background::Color(
+                                Color::from_rgb8(r, g, b),
+                            )),
+                            border: iced_widget::core::border::Border {
+                                radius: iced_widget::core::border::Radius::from(HIGHLIGHT_RADIUS),
+                                ..Default::default()
+                            },
+                            ..Default::default()
+                        }),
+                );
         } else {
             // 与选中同构（container + padding），保证字形垂直位置一致
             content = content.push(container(item).padding([4, 8]));
@@ -579,9 +562,9 @@ fn root_view<'a>(
             .spacing(8)
             .align_y(iced_widget::core::alignment::Vertical::Center),
     )
-        .padding([4, 12])
-        .align_y(iced_widget::core::alignment::Vertical::Center)
-        .into()
+    .padding([4, 12])
+    .align_y(iced_widget::core::alignment::Vertical::Center)
+    .into()
 }
 
 /// 供测试/验证用：无操作消息类型。
@@ -640,13 +623,14 @@ mod tests {
         assert_eq!(at(0, 0), 0, "top-left corner should be transparent");
         assert_eq!(at(w - 1, 0), 0, "top-right corner should be transparent");
         assert_eq!(at(0, h - 1), 0, "bottom-left corner should be transparent");
-        assert_eq!(at(w - 1, h - 1), 0, "bottom-right corner should be transparent");
+        assert_eq!(
+            at(w - 1, h - 1),
+            0,
+            "bottom-right corner should be transparent"
+        );
 
         // 上边缘中部应有内容（圆角弧线之外）
-        assert!(
-            at(w / 2, 1) != 0,
-            "top edge middle should have background"
-        );
+        assert!(at(w / 2, 1) != 0, "top edge middle should have background");
     }
 
     /// 连续多次渲染面板，菜单按钮图标不应叠加重复（复现"打一次多一个图标"）。
