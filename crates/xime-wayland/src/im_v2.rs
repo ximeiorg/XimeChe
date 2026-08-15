@@ -8,6 +8,7 @@ use wayland_client;
 use wayland_client::globals::{GlobalList, GlobalListContents};
 use wayland_client::protocol::wl_buffer::WlBuffer;
 use wayland_client::protocol::wl_compositor::WlCompositor;
+use wayland_client::protocol::wl_pointer::WlPointer;
 use wayland_client::protocol::wl_registry::WlRegistry;
 use wayland_client::protocol::wl_seat::WlSeat;
 use wayland_client::protocol::wl_shm::WlShm;
@@ -16,11 +17,9 @@ use wayland_client::protocol::wl_surface::WlSurface;
 use wayland_client::protocol::*;
 use wayland_client::{globals::registry_queue_init, Connection, EventQueue};
 use wayland_client::{Dispatch, Proxy, QueueHandle};
-use xime_ui::calculate_root_width;
-use xime_ui::draw_root_to_buffer;
-use xime_ui::{CandidateItem, CandidateRenderer};
+use xime_ui::{CandidateItem, IcedSurface};
 
-use crate::KeyEvent;
+use crate::{KeyEvent, PointerEvent};
 
 pub mod __interfaces {
     use wayland_client::protocol::__interfaces::*;
@@ -82,6 +81,10 @@ pub struct InputMethodData {
     pub keyboard: Arc<Mutex<Option<ZwpInputMethodKeyboardGrabV2>>>,
     pub virtual_keyboard: Arc<Mutex<Option<ZwpVirtualKeyboardV1>>>,
     pub key_events: Arc<Mutex<Vec<KeyEvent>>>,
+    pub pointer_events: Arc<Mutex<Vec<PointerEvent>>>,
+    pub pointer_pos: Arc<Mutex<(f64, f64)>>,
+    /// 菜单面板是否打开（影响候选栏按钮高亮）。
+    pub menu_open: bool,
     pub modifiers: Arc<Mutex<(u32, u32, u32, u32)>>,
     pub keymap_pending: Arc<Mutex<Option<(OwnedFd, usize)>>>,
 }
@@ -143,6 +146,69 @@ impl Dispatch<ZwpVirtualKeyboardV1, InputMethodData> for InputMethodData {
         _conn: &wayland_client::Connection,
         _qhandle: &QueueHandle<InputMethodData>,
     ) {
+    }
+}
+
+impl Dispatch<WlPointer, InputMethodData> for InputMethodData {
+    fn event(
+        state: &mut InputMethodData,
+        _proxy: &WlPointer,
+        event: <WlPointer as Proxy>::Event,
+        _data: &InputMethodData,
+        _conn: &wayland_client::Connection,
+        _qhandle: &QueueHandle<InputMethodData>,
+    ) {
+        match event {
+            wl_pointer::Event::Enter {
+                serial: _,
+                surface: _,
+                surface_x,
+                surface_y,
+            } => {
+                if let Ok(mut pos) = state.pointer_pos.lock() {
+                    *pos = (surface_x, surface_y);
+                }
+            }
+            wl_pointer::Event::Motion {
+                time: _,
+                surface_x,
+                surface_y,
+            } => {
+                if let Ok(mut pos) = state.pointer_pos.lock() {
+                    *pos = (surface_x, surface_y);
+                }
+            }
+            wl_pointer::Event::Button {
+                serial,
+                time,
+                button,
+                state: button_state,
+            } => {
+                let pressed = matches!(
+                    button_state,
+                    wayland_client::WEnum::Value(wl_pointer::ButtonState::Pressed)
+                );
+                let pos = state.pointer_pos.lock().map(|p| *p).unwrap_or((0.0, 0.0));
+                debug!(
+                    "Pointer button: serial={}, button={}, pressed={}, pos=({:.0},{:.0})",
+                    serial, button, pressed, pos.0, pos.1
+                );
+                if let Ok(mut events) = state.pointer_events.lock() {
+                    events.push(PointerEvent {
+                        serial,
+                        time,
+                        x: pos.0 as i32,
+                        y: pos.1 as i32,
+                        pressed,
+                        button,
+                        on_menu: false,
+                    });
+                }
+            }
+            _ => {
+                debug!("Pointer event: {:?}", event);
+            }
+        }
     }
 }
 
@@ -420,6 +486,9 @@ pub struct WaylandConnectionV2 {
     event_queue: EventQueue<InputMethodData>,
     state: InputMethodData,
     seat: Option<WlSeat>,
+    // 保持 proxy 存活以接收指针事件；事件经 state.pointer_events 收集。
+    #[allow(dead_code)]
+    pointer: Option<WlPointer>,
     input_method_manager: Option<ZwpInputMethodManagerV2>,
     virtual_keyboard_manager: Option<ZwpVirtualKeyboardManagerV1>,
     input_method: Option<ZwpInputMethodV2>,
@@ -429,7 +498,7 @@ pub struct WaylandConnectionV2 {
     candidate_surface: Option<WlSurface>,
     current_buffer: Option<WlBuffer>,
     current_pool: Option<WlShmPool>,
-    renderer: Option<CandidateRenderer>,
+    renderer: Option<IcedSurface>,
 }
 
 impl WaylandConnectionV2 {
@@ -466,6 +535,10 @@ impl WaylandConnectionV2 {
 
         let seat: Option<WlSeat> = globals.bind(qh, 1..=8, state.clone()).ok();
 
+        let pointer: Option<WlPointer> = seat
+            .as_ref()
+            .map(|s| s.get_pointer(qh, state.clone()));
+
         let compositor: Option<WlCompositor> = globals.bind(qh, 1..=4, state.clone()).ok();
 
         let shm: Option<WlShm> = globals.bind(qh, 1..=1, state.clone()).ok();
@@ -481,6 +554,7 @@ impl WaylandConnectionV2 {
             event_queue,
             state,
             seat,
+            pointer,
             input_method_manager,
             virtual_keyboard_manager,
             input_method: None,
@@ -597,6 +671,16 @@ impl WaylandConnectionV2 {
         }
     }
 
+    pub fn pop_pointer_events(&self) -> Vec<PointerEvent> {
+        if let Ok(mut events) = self.state.pointer_events.lock() {
+            let result = events.clone();
+            events.clear();
+            result
+        } else {
+            Vec::new()
+        }
+    }
+
     pub fn get_modifiers(&self) -> (u32, u32, u32, u32) {
         if let Ok(mods) = self.state.modifiers.lock() {
             *mods
@@ -690,11 +774,19 @@ impl WaylandConnectionV2 {
         highlighted_index: usize,
         primary_color: (u8, u8, u8),
     ) -> Result<()> {
-        let height = 36u32;
+        // 菜单面板打开时增高：上面面板区，下面候选栏
+        let menu_open = self.state.menu_open;
+        let panel_height = if menu_open {
+            xime_ui::menu_panel_height()
+        } else {
+            0
+        };
+        let height = 36u32 + panel_height;
 
-        // Take renderer out of self for width calculation (will be used for drawing too)
-        let mut renderer = self.renderer.take().unwrap_or_default();
-        let width = renderer.calculate_width(candidates);
+        // Take surface out of self for width measurement and drawing
+        let mut surface = self.renderer.take().unwrap_or_default();
+        // measure_candidates 已包含右侧菜单按钮宽度
+        let width = surface.measure_candidates(candidates);
 
         if self.candidate_surface.is_none() {
             self.create_candidate_surface()?;
@@ -709,7 +801,7 @@ impl WaylandConnectionV2 {
 
         // Clone needed resources out of self before mutable operations
         let shm = self.shm.clone().ok_or(Error::NoShm)?;
-        let surface = self.candidate_surface.clone().unwrap();
+        let surface_obj = self.candidate_surface.clone().unwrap();
         let qh = self.event_queue.handle();
 
         let stride = width * 4;
@@ -720,7 +812,7 @@ impl WaylandConnectionV2 {
         let pool = shm.create_pool(fd.as_fd(), shm_size as i32, &qh, self.state.clone());
         self.current_pool = Some(pool.clone());
 
-        // mmap SHM buffer and draw candidates using cached renderer
+        // mmap SHM buffer and draw with iced
         let buf_size = (width * height * 4) as usize;
         let size_nonzero = std::num::NonZero::new(buf_size).expect("size should be non-zero");
 
@@ -739,13 +831,16 @@ impl WaylandConnectionV2 {
         let pixels: &mut [u8] =
             unsafe { slice::from_raw_parts_mut(ptr.as_ptr() as *mut u8, buf_size) };
 
-        renderer.draw_candidates(
+        // 统一 iced 绘制：候选栏 + 菜单按钮 + (菜单打开时)展开面板
+        surface.draw_panel(
             pixels,
             width,
             height,
             candidates,
             highlighted_index,
             primary_color,
+            menu_open,
+            None,
         );
 
         unsafe {
@@ -753,8 +848,8 @@ impl WaylandConnectionV2 {
                 .map_err(|e| Error::Io(std::io::Error::from_raw_os_error(e as i32)))?;
         }
 
-        // Put renderer back into self
-        self.renderer = Some(renderer);
+        // Put surface back into self
+        self.renderer = Some(surface);
 
         let buffer = pool.create_buffer(
             0,
@@ -767,9 +862,10 @@ impl WaylandConnectionV2 {
         );
         self.current_buffer = Some(buffer.clone());
 
-        surface.attach(Some(&buffer), 0, 0);
-        surface.damage_buffer(0, 0, width as i32, height as i32);
-        surface.commit();
+        // 候选栏（buffer 顶部 36px）锚定光标，菜单面板在其下方展开。
+        surface_obj.attach(Some(&buffer), 0, 0);
+        surface_obj.damage_buffer(0, 0, width as i32, height as i32);
+        surface_obj.commit();
 
         Ok(())
     }
@@ -781,6 +877,29 @@ impl WaylandConnectionV2 {
         }
     }
 
+    /// 候选栏自然宽度（内容 + 菜单按钮），用于命中测试。
+    pub fn candidate_width(&mut self, candidates: &[CandidateItem]) -> u32 {
+        let mut surface = self.renderer.take().unwrap_or_default();
+        let width = surface.measure_candidates(candidates);
+        self.renderer = Some(surface);
+        width
+    }
+
+    /// 打开菜单：仅设置状态（候选栏增高由下一次 show_candidate_window 渲染）。
+    pub fn show_menu_panel(
+        &mut self,
+        _active_index: Option<usize>,
+        _primary_color: (u8, u8, u8),
+    ) -> Result<()> {
+        self.state.menu_open = true;
+        debug!("Menu panel flag set (rendered on next candidate refresh)");
+        Ok(())
+    }
+
+    pub fn hide_menu_panel(&mut self) {
+        self.state.menu_open = false;
+    }
+
     /// Show a single key root display window
     /// Displays "a: 工匚戈艹廿龷七弋戈" in a small popup
     pub fn show_root_window(
@@ -789,12 +908,13 @@ impl WaylandConnectionV2 {
         root: &str,
         primary_color: (u8, u8, u8),
     ) -> Result<()> {
-        let width = calculate_root_width(key, root, primary_color);
+        let mut surface = self.renderer.take().unwrap_or_default();
+        let width = surface.measure_root(key, root);
         let height = 36;
 
         // Use candidate_surface to display root (same surface, different content)
         let shm = self.shm.clone().ok_or(Error::NoShm)?;
-        let surface = self
+        let surface_obj = self
             .candidate_surface
             .clone()
             .ok_or(Error::Io(std::io::Error::other("No candidate surface")))?;
@@ -816,7 +936,8 @@ impl WaylandConnectionV2 {
         let pool = shm.create_pool(fd.as_fd(), size as i32, &qh, self.state.clone());
         self.current_pool = Some(pool.clone());
 
-        self.draw_root(&fd, width, height, key, root, primary_color)?;
+        self.draw_root(&fd, width, height, key, root, primary_color, &mut surface)?;
+        self.renderer = Some(surface);
 
         let buffer = pool.create_buffer(
             0,
@@ -829,9 +950,9 @@ impl WaylandConnectionV2 {
         );
         self.current_buffer = Some(buffer.clone());
 
-        surface.attach(Some(&buffer), 0, 0);
-        surface.damage_buffer(0, 0, width as i32, height as i32);
-        surface.commit();
+        surface_obj.attach(Some(&buffer), 0, 0);
+        surface_obj.damage_buffer(0, 0, width as i32, height as i32);
+        surface_obj.commit();
 
         self.connection
             .flush()
@@ -844,6 +965,7 @@ impl WaylandConnectionV2 {
         // No need to hide, main loop will restore candidate display
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn draw_root(
         &self,
         fd: &OwnedFd,
@@ -852,6 +974,7 @@ impl WaylandConnectionV2 {
         key: char,
         root: &str,
         primary_color: (u8, u8, u8),
+        surface: &mut IcedSurface,
     ) -> Result<()> {
         let size = (width * height * 4) as usize;
         let size_nonzero = std::num::NonZero::new(size).expect("size should be non-zero");
@@ -870,7 +993,7 @@ impl WaylandConnectionV2 {
 
         let pixels: &mut [u8] = unsafe { slice::from_raw_parts_mut(ptr.as_ptr() as *mut u8, size) };
 
-        draw_root_to_buffer(pixels, width, height, key, root, primary_color);
+        surface.draw_root(pixels, width, height, key, root, primary_color);
 
         unsafe {
             nix::sys::mman::munmap(ptr, size)

@@ -1,7 +1,21 @@
 # XimeChe（曦码·澈输入法）开发进度
 
 ## 当前状态
-**插件系统接入：daemon 加载已启用插件，emoji 候选窗 `;` 触发搜索上屏。**（2026-08-15）
+**候选栏菜单按钮：pointer 点击接入，菜单面板（表情/符号/剪切板/快捷发送入口）**（2026-08-15）
+
+## 本次变更（2026-08-15）
+1. **菜单按钮改用用户提供的 SVG 图标**（crates/xime-ui/resources/menu.svg）
+   - resvg/usvg 渲染（OnceLock 缓存），active 时着紫色、默认灰色
+2. **菜单面板改为候选栏增高模式**（修复 KWin 下第二个 overlay panel 不显示）
+   - 面板不再用独立 surface，而是候选栏 buffer 增高：上面面板、下面候选栏
+   - 点击面板入口按 y 坐标命中（menu_item_hit 语义改为从面板顶部 0 起算）
+   - daemon 缓存最近候选（candidate_cache），菜单开/关后立即重绘
+3. **Wayland 指针事件接入**（crates/xime-wayland）
+   - `PointerEvent` + v1/v2 绑定 `wl_pointer`，`pop_pointer_events()`
+4. **菜单按钮 + 菜单面板**（crates/xime-ui/src/menu.rs）
+   - 候选栏最右侧固定菜单按钮（36px）
+   - 菜单面板（200x176）：表情/符号/剪切板/快捷发送 4 个入口
+5. **daemon 面板状态机**：点击按钮开/关面板、点击入口进入功能页、按键自动关闭
 
 ## 本次变更（2026-08-15）
 1. **插件热重载机制**

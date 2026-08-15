@@ -7,5 +7,16 @@ license.workspace = true
 
 [dependencies]
 thiserror.workspace = true
-cosmic-text.workspace = true
-tiny-skia.workspace = true
+iced_tiny_skia = { version = "0.14.0", default-features = false, features = [
+    "svg",
+    "x11",
+    "wayland",
+] }
+iced_widget = { version = "0.14.0", default-features = false, features = ["svg"] }
+# 直接启用 iced_renderer 的 tiny-skia（release 模式必需，否则编译错误）
+iced_renderer = { version = "0.14.0", default-features = false, features = ["tiny-skia"] }
+# 与 iced_tiny_skia 对齐的 tiny-skia 0.11（iced 内部锁死 0.11.4）
+tiny-skia11 = { package = "tiny-skia", version = "0.11", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }

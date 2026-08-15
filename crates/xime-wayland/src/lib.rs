@@ -27,12 +27,28 @@ pub struct KeyEvent {
     pub pressed: bool,
 }
 
+/// 指针点击事件（候选栏 / 面板 surface 局部坐标）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PointerEvent {
+    pub serial: u32,
+    pub time: u32,
+    pub x: i32,
+    pub y: i32,
+    /// true = 按下，false = 释放。
+    pub pressed: bool,
+    /// wl_pointer button code（BTN_LEFT = 272）。
+    pub button: u32,
+    /// 点击是否发生在菜单面板 surface 上。
+    pub on_menu: bool,
+}
+
 /// Common backend interface shared by the v1 (KWin) and v2 (GNOME/wlroots)
 /// input method implementations.
 pub trait ImBackend {
     fn dispatch_events(&mut self) -> Result<(), String>;
     fn is_active(&self) -> bool;
     fn pop_key_events(&self) -> Vec<KeyEvent>;
+    fn pop_pointer_events(&self) -> Vec<PointerEvent>;
     fn get_modifiers(&self) -> (u32, u32, u32, u32);
     fn get_keymap_pending(&self) -> Option<(OwnedFd, usize)>;
     fn forward_key(&self, serial: u32, time: u32, key: u32, pressed: bool);
@@ -46,7 +62,19 @@ pub trait ImBackend {
         highlighted_index: usize,
         primary_color: (u8, u8, u8),
     ) -> Result<(), String>;
+    /// 候选栏自然宽度（内容 + 菜单按钮），用于命中测试。
+    fn candidate_width(&mut self, _candidates: &[CandidateItem]) -> u32 {
+        200
+    }
     fn hide_candidate_window(&mut self);
+    /// 显示菜单面板（候选栏右侧按钮点击后展开的功能入口列表）。
+    /// 面板内容含高亮入口（active_index = None 表示无高亮）。
+    fn show_menu_panel(
+        &mut self,
+        active_index: Option<usize>,
+        primary_color: (u8, u8, u8),
+    ) -> Result<(), String>;
+    fn hide_menu_panel(&mut self);
     fn show_root_window(
         &mut self,
         key: char,
@@ -70,6 +98,10 @@ impl ImBackend for im_v1::WaylandConnectionV1 {
 
     fn pop_key_events(&self) -> Vec<KeyEvent> {
         self.pop_key_events()
+    }
+
+    fn pop_pointer_events(&self) -> Vec<PointerEvent> {
+        self.pop_pointer_events()
     }
 
     fn get_modifiers(&self) -> (u32, u32, u32, u32) {
@@ -110,8 +142,25 @@ impl ImBackend for im_v1::WaylandConnectionV1 {
             .map_err(|e| e.to_string())
     }
 
+    fn candidate_width(&mut self, candidates: &[CandidateItem]) -> u32 {
+        self.candidate_width(candidates)
+    }
+
     fn hide_candidate_window(&mut self) {
         self.hide_candidate_window()
+    }
+
+    fn show_menu_panel(
+        &mut self,
+        active_index: Option<usize>,
+        primary_color: (u8, u8, u8),
+    ) -> Result<(), String> {
+        self.show_menu_panel(active_index, primary_color)
+            .map_err(|e| e.to_string())
+    }
+
+    fn hide_menu_panel(&mut self) {
+        self.hide_menu_panel()
     }
 
     fn show_root_window(
@@ -146,6 +195,10 @@ impl ImBackend for im_v2::WaylandConnectionV2 {
         self.pop_key_events()
     }
 
+    fn pop_pointer_events(&self) -> Vec<PointerEvent> {
+        self.pop_pointer_events()
+    }
+
     fn get_modifiers(&self) -> (u32, u32, u32, u32) {
         self.get_modifiers()
     }
@@ -184,8 +237,25 @@ impl ImBackend for im_v2::WaylandConnectionV2 {
             .map_err(|e| e.to_string())
     }
 
+    fn candidate_width(&mut self, candidates: &[CandidateItem]) -> u32 {
+        self.candidate_width(candidates)
+    }
+
     fn hide_candidate_window(&mut self) {
         self.hide_candidate_window()
+    }
+
+    fn show_menu_panel(
+        &mut self,
+        active_index: Option<usize>,
+        primary_color: (u8, u8, u8),
+    ) -> Result<(), String> {
+        self.show_menu_panel(active_index, primary_color)
+            .map_err(|e| e.to_string())
+    }
+
+    fn hide_menu_panel(&mut self) {
+        self.hide_menu_panel()
     }
 
     fn show_root_window(
@@ -346,6 +416,40 @@ mod tests {
             pressed: false,
         };
         assert!(!event.pressed);
+    }
+
+    #[test]
+    fn test_pointer_event_creation() {
+        let event = PointerEvent {
+            serial: 50,
+            time: 2000,
+            x: 320,
+            y: 12,
+            pressed: true,
+            button: 272,
+            on_menu: false,
+        };
+        assert_eq!(event.serial, 50);
+        assert_eq!(event.x, 320);
+        assert_eq!(event.y, 12);
+        assert!(event.pressed);
+        assert_eq!(event.button, 272);
+        assert!(!event.on_menu);
+    }
+
+    #[test]
+    fn test_pointer_event_release() {
+        let event = PointerEvent {
+            serial: 51,
+            time: 2001,
+            x: 320,
+            y: 12,
+            pressed: false,
+            button: 272,
+            on_menu: true,
+        };
+        assert!(!event.pressed);
+        assert!(event.on_menu);
     }
 
     #[test]

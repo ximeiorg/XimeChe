@@ -27,6 +27,13 @@ struct EmojiPanel {
     page_size: usize,
 }
 
+/// 候选栏右侧菜单面板状态。
+enum PanelState {
+    Closed,
+    /// 菜单面板打开。
+    MenuOpen,
+}
+
 impl Default for EmojiPanel {
     fn default() -> Self {
         Self {
@@ -82,10 +89,15 @@ fn should_forward_key(
     !press_consumed && !release_of_consumed
 }
 
+/// 最近一次候选窗内容（菜单开/关后重绘用）。
+type CandidateCache = (Vec<xime_ui::CandidateItem>, usize, (u8, u8, u8));
+
 pub struct WaylandLoop {
     command_rx: Receiver<DaemonCommand>,
     tray: Arc<TrayManager>,
     rt_handle: tokio::runtime::Handle,
+    /// 最近一次候选内容缓存（菜单开/关后重绘用）。
+    candidate_cache: std::sync::Mutex<Option<CandidateCache>>,
 }
 
 impl WaylandLoop {
@@ -98,6 +110,7 @@ impl WaylandLoop {
             command_rx,
             tray,
             rt_handle,
+            candidate_cache: std::sync::Mutex::new(None),
         }
     }
 
@@ -121,6 +134,8 @@ impl WaylandLoop {
 
         let mut candidate_window_visible = false;
         let mut emoji_panel = EmojiPanel::default();
+        let mut panel_state = PanelState::Closed;
+        let mut last_panel_width: u32 = 0;
         let mut consumed_presses: std::collections::HashSet<u32> = std::collections::HashSet::new();
         let mut last_input_keysym: Option<u32> = None;
         let mut ctrl_root_visible = false;
@@ -250,6 +265,8 @@ impl WaylandLoop {
                         &mut rime,
                         &mut plugin_host,
                         &mut emoji_panel,
+                        &mut panel_state,
+                        &mut last_panel_width,
                         &xime_config,
                         &mut candidate_window_visible,
                         &mut consumed_presses,
@@ -272,6 +289,8 @@ impl WaylandLoop {
         rime: &mut RimeEngine,
         plugin_host: &mut PluginHost,
         emoji_panel: &mut EmojiPanel,
+        panel_state: &mut PanelState,
+        last_panel_width: &mut u32,
         xime_config: &XimeConfig,
         candidate_window_visible: &mut bool,
         consumed_presses: &mut std::collections::HashSet<u32>,
@@ -290,6 +309,25 @@ impl WaylandLoop {
             x.update_modifiers(depressed, latched, locked, group);
         }
 
+        // 指针事件：菜单按钮 / 面板入口点击
+        let pointer_events = c.pop_pointer_events();
+        for pe in pointer_events {
+            if pe.button != 272 || !pe.pressed {
+                continue; // 只处理左键按下
+            }
+            debug!(
+                "Pointer press: x={}, y={}, on_menu={}",
+                pe.x, pe.y, pe.on_menu
+            );
+            self.handle_pointer_press(
+                c,
+                panel_state,
+                last_panel_width,
+                xime_config,
+                &pe,
+            );
+        }
+
         let events = c.pop_key_events();
         for event in events {
             debug!(
@@ -306,6 +344,8 @@ impl WaylandLoop {
                         rime,
                         plugin_host,
                         emoji_panel,
+                        panel_state,
+                        last_panel_width,
                         xime_config,
                         event,
                         sym,
@@ -328,6 +368,8 @@ impl WaylandLoop {
         rime: &mut RimeEngine,
         plugin_host: &mut PluginHost,
         emoji_panel: &mut EmojiPanel,
+        panel_state: &mut PanelState,
+        last_panel_width: &mut u32,
         xime_config: &XimeConfig,
         event: xime_wayland::KeyEvent,
         sym: Keysym,
@@ -355,6 +397,19 @@ impl WaylandLoop {
             "is_ctrl={}, candidate_visible={}, last_key={:?}",
             is_ctrl, candidate_window_visible, last_input_keysym
         );
+
+        // 菜单面板打开时：任意按键（除修饰键）关闭面板并消费该键。
+        if event.pressed
+            && matches!(panel_state, PanelState::MenuOpen)
+            && !is_ctrl
+            && !matches!(sym.raw(), 0xFFE1 | 0xFFE2 | 0xFFE9 | 0xFFEA)
+        {
+            debug!("Key pressed while menu open, closing panel");
+            *panel_state = PanelState::Closed;
+            c.hide_menu_panel();
+            self.redraw_menu_candidates(c, xime_config);
+            // 不转发：面板关闭后由后续按键处理正常输入
+        }
 
         // emoji 面板：`;` 触发，面板激活时按键全部由面板消费。
         if self.handle_emoji_key(
@@ -470,6 +525,15 @@ impl WaylandLoop {
                         c.show_candidate_window(&candidate_items, highlighted_index, primary_color)
                     {
                         debug!("Candidate window error: {}", e);
+                    }
+                    *last_panel_width = c.candidate_width(&candidate_items);
+                    // 缓存最近候选（菜单开/关后重绘）
+                    if let Ok(mut cache) = self.candidate_cache.lock() {
+                        *cache = Some((
+                            candidate_items.clone(),
+                            highlighted_index,
+                            primary_color,
+                        ));
                     }
                     *candidate_window_visible = true;
                 } else if *candidate_window_visible {
@@ -663,6 +727,71 @@ impl WaylandLoop {
         c.hide_candidate_window();
         let _ = c.flush();
         *candidate_window_visible = false;
+    }
+
+    /// 处理候选栏菜单按钮 / 面板入口点击。
+    fn handle_pointer_press(
+        &self,
+        c: &mut dyn ImBackend,
+        panel_state: &mut PanelState,
+        last_panel_width: &u32,
+        xime_config: &XimeConfig,
+        pe: &xime_wayland::PointerEvent,
+    ) {
+        if let PanelState::MenuOpen = panel_state {
+            // 面板在候选栏下方展开：y >= 36 是面板区
+            if pe.y >= xime_ui::CANDIDATE_HEIGHT as i32 {
+                // 点击面板入口
+                if let Some(action) = xime_ui::menu_item_hit(pe.x, pe.y, *last_panel_width) {
+                    debug!("Menu item clicked: {:?}", action);
+                    *panel_state = PanelState::Closed;
+                    c.hide_menu_panel();
+                    self.redraw_menu_candidates(c, xime_config);
+                    if action == xime_ui::MenuAction::Emoji {
+                        // 进入表情页：复用 emoji 面板（需在按键循环中处理）
+                        // 这里先关闭菜单，由后续按键逻辑展示
+                    }
+                } else {
+                    // 面板内但未命中入口：关闭
+                    *panel_state = PanelState::Closed;
+                    c.hide_menu_panel();
+                    self.redraw_menu_candidates(c, xime_config);
+                }
+            } else {
+                // 点击候选栏区域
+                if xime_ui::menu_button_hit(pe.x, pe.y, *last_panel_width) {
+                    *panel_state = PanelState::Closed;
+                    c.hide_menu_panel();
+                    self.redraw_menu_candidates(c, xime_config);
+                    debug!("Menu button clicked, closing panel");
+                }
+            }
+        } else {
+            // 候选栏最右侧按钮区域
+            if xime_ui::menu_button_hit(pe.x, pe.y, *last_panel_width) {
+                debug!("Menu button clicked, opening panel");
+                let primary_color = xime_config.get_primary_color();
+                if let Err(e) = c.show_menu_panel(None, primary_color) {
+                    debug!("Failed to show menu panel: {}", e);
+                } else {
+                    *panel_state = PanelState::MenuOpen;
+                    self.redraw_menu_candidates(c, xime_config);
+                }
+            }
+        }
+    }
+
+    /// 菜单开/关后重绘候选栏（复用最近一次候选内容，实现面板增高效果）。
+    fn redraw_menu_candidates(&self, c: &mut dyn ImBackend, xime_config: &XimeConfig) {
+        let cached = self.candidate_cache.lock().ok().and_then(|g| g.clone());
+        if let Some((candidates, highlighted, _)) = cached {
+            let primary_color = xime_config.get_primary_color();
+            if let Err(e) = c.show_candidate_window(&candidates, highlighted, primary_color) {
+                debug!("Menu redraw candidate window error: {}", e);
+            }
+            let _ = c.flush();
+            debug!("Candidate window redrawn after menu state change");
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
