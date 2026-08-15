@@ -13,12 +13,27 @@ use xime_xkb::{keysym_to_letter, Keysym, ModifierState};
 use crate::{DaemonCommand, PluginHost, RimeEngine};
 
 /// emoji 面板状态：`;` 触发，字符搜索，数字选择上屏。
-#[derive(Default)]
+///
+/// 候选列表第 1 位固定为分号 `;`（数字 1 输入分号），随后是表情。
 struct EmojiPanel {
     active: bool,
     query: String,
     items: Vec<EmojiItem>,
     highlighted: usize,
+    /// 候选总数（含分号位），与 Rime 候选页大小一致。
+    page_size: usize,
+}
+
+impl Default for EmojiPanel {
+    fn default() -> Self {
+        Self {
+            active: false,
+            query: String::new(),
+            items: Vec::new(),
+            highlighted: 0,
+            page_size: 5,
+        }
+    }
 }
 
 /// 数字键 → 候选索引（1-9 对应 0-8，0 对应 9）。
@@ -27,6 +42,15 @@ fn emoji_select_index(keysym: u32) -> Option<usize> {
         0x31..=0x39 => Some((keysym - 0x31) as usize),
         0x30 => Some(9),
         _ => None,
+    }
+}
+
+/// 候选索引 → 实际提交文本（0 = 分号，其余 = 表情 items 下标-1）。
+fn emoji_commit_text(panel: &EmojiPanel, index: usize) -> Option<String> {
+    if index == 0 {
+        Some(";".to_string())
+    } else {
+        panel.items.get(index - 1).map(|e| e.text.clone())
     }
 }
 
@@ -325,6 +349,7 @@ impl WaylandLoop {
             emoji_panel,
             &event,
             sym,
+            xime_config,
             candidate_window_visible,
         ) {
             return;
@@ -444,13 +469,14 @@ impl WaylandLoop {
 
     /// emoji 面板按键处理。返回 true 表示按键已被面板消费。
     ///
-    /// - `;`（中文态，无组合输入）：进入面板，显示全部表情
+    /// - `;`（中文态，无组合输入）：进入面板，候选第 1 位为分号本身
     /// - 面板激活时：
     ///   - 可打印字符：追加搜索词并实时刷新
     ///   - BackSpace：删除搜索词末尾
-    ///   - 数字键：选择对应候选并上屏
+    ///   - 数字键：1 输入分号，其余选择对应表情并上屏
     ///   - Return/Space：选择高亮候选并上屏
     ///   - Escape：退出面板
+    #[allow(clippy::too_many_arguments)]
     fn handle_emoji_key(
         &self,
         c: &mut dyn ImBackend,
@@ -458,6 +484,7 @@ impl WaylandLoop {
         panel: &mut EmojiPanel,
         event: &xime_wayland::KeyEvent,
         sym: Keysym,
+        xime_config: &XimeConfig,
         candidate_window_visible: &mut bool,
     ) -> bool {
         if !event.pressed {
@@ -477,8 +504,9 @@ impl WaylandLoop {
                 }
                 panel.active = true;
                 panel.query.clear();
+                panel.page_size = xime_config.style.candidate_count.max(2) as usize;
                 self.refresh_emoji_panel(c, plugin_host, panel, candidate_window_visible);
-                debug!("Emoji panel activated");
+                debug!("Emoji panel activated (page_size={})", panel.page_size);
             }
             return panel.active;
         }
@@ -498,28 +526,28 @@ impl WaylandLoop {
             }
             0xFF0D | 0xFF8D | 0x20 => {
                 // Return / KP_Enter / Space：选中高亮
-                if let Some(item) = panel.items.get(panel.highlighted).cloned() {
-                    c.commit_string(&item.text);
+                if let Some(text) = emoji_commit_text(panel, panel.highlighted) {
+                    c.commit_string(&text);
                     let _ = c.flush();
-                    debug!("Emoji committed: {}", item.text);
+                    debug!("Emoji committed: {}", text);
                 }
                 panel.active = false;
                 self.hide_emoji_panel(c, candidate_window_visible);
             }
             0xFF09 | 0xFF53 | 0x2015 => {
                 // Tab / Right / 无：切换高亮到下一个（有限支持）
-                if !panel.items.is_empty() {
-                    panel.highlighted = (panel.highlighted + 1) % panel.items.len();
+                if panel.highlighted + 1 < panel.items.len() + 1 {
+                    panel.highlighted = (panel.highlighted + 1) % (panel.items.len() + 1);
                     self.show_emoji_candidates(c, panel, candidate_window_visible);
                 }
             }
             k if emoji_select_index(k).is_some() => {
                 // 数字键选择候选（1-9 对应索引 0-8，0 对应 9）
                 let index = emoji_select_index(k).unwrap_or(0);
-                if let Some(item) = panel.items.get(index).cloned() {
-                    c.commit_string(&item.text);
+                if let Some(text) = emoji_commit_text(panel, index) {
+                    c.commit_string(&text);
                     let _ = c.flush();
-                    debug!("Emoji committed by key: {}", item.text);
+                    debug!("Emoji committed by key {}: {}", k, text);
                 }
                 panel.active = false;
                 self.hide_emoji_panel(c, candidate_window_visible);
@@ -545,14 +573,17 @@ impl WaylandLoop {
         plugin_host: &PluginHost,
         panel: &mut EmojiPanel,
         candidate_window_visible: &mut bool,
-    ) {        panel.items = plugin_host.query_emojis(&panel.query, 20);
-        if panel.highlighted >= panel.items.len() {
+    ) {
+        // 第 1 位固定为分号，表情取剩余 page_size-1 个
+        panel.items = plugin_host.query_emojis(&panel.query, panel.page_size - 1);
+        if panel.highlighted > panel.items.len() {
             panel.highlighted = 0;
         }
         debug!(
-            "Emoji search '{}': {} results",
+            "Emoji search '{}': {} results (page_size={})",
             panel.query,
-            panel.items.len()
+            panel.items.len(),
+            panel.page_size
         );
         if panel.items.is_empty() {
             self.hide_emoji_panel(c, candidate_window_visible);
@@ -567,16 +598,19 @@ impl WaylandLoop {
         panel: &EmojiPanel,
         candidate_window_visible: &mut bool,
     ) {
-        let candidates: Vec<xime_ui::CandidateItem> = panel
-            .items
-            .iter()
-            .enumerate()
-            .map(|(i, e)| xime_ui::CandidateItem {
+        // 第 1 位：分号本身（数字 1 输入分号）
+        let mut candidates = vec![xime_ui::CandidateItem {
+            text: ";".to_string(),
+            comment: "分号".to_string(),
+            index: 0,
+        }];
+        candidates.extend(panel.items.iter().enumerate().map(|(i, e)| {
+            xime_ui::CandidateItem {
                 text: e.text.clone(),
                 comment: e.category.clone(),
-                index: i,
-            })
-            .collect();
+                index: i + 1,
+            }
+        }));
         if let Err(e) = c.show_candidate_window(&candidates, panel.highlighted, (0x8F, 0x73, 0xE2))
         {
             debug!("Emoji candidate window error: {}", e);
@@ -723,5 +757,36 @@ mod tests {
         assert_eq!(emoji_select_index(0x20), None);
         assert_eq!(emoji_select_index(0x61), None);
         assert_eq!(emoji_select_index(0xFF0D), None);
+    }
+
+    #[test]
+    fn test_emoji_commit_text() {
+        // 空面板：索引 0 是分号，其余无
+        let panel = EmojiPanel::default();
+        assert_eq!(emoji_commit_text(&panel, 0).as_deref(), Some(";"));
+        assert_eq!(emoji_commit_text(&panel, 1), None);
+
+        // 有表情：索引 0 分号，索引 1.. 表情
+        let panel = EmojiPanel {
+            items: vec![
+                EmojiItem {
+                    id: "k1".into(),
+                    text: "(ﾟ∀ﾟ)".into(),
+                    image_url: None,
+                    category: "颜文字".into(),
+                },
+                EmojiItem {
+                    id: "k2".into(),
+                    text: "(^u^)".into(),
+                    image_url: None,
+                    category: "颜文字".into(),
+                },
+            ],
+            ..EmojiPanel::default()
+        };
+        assert_eq!(emoji_commit_text(&panel, 0).as_deref(), Some(";"));
+        assert_eq!(emoji_commit_text(&panel, 1).as_deref(), Some("(ﾟ∀ﾟ)"));
+        assert_eq!(emoji_commit_text(&panel, 2).as_deref(), Some("(^u^)"));
+        assert_eq!(emoji_commit_text(&panel, 3), None);
     }
 }
