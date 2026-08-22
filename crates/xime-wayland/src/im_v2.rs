@@ -17,7 +17,7 @@ use wayland_client::protocol::wl_surface::WlSurface;
 use wayland_client::protocol::*;
 use wayland_client::{globals::registry_queue_init, Connection, EventQueue};
 use wayland_client::{Dispatch, Proxy, QueueHandle};
-use xime_ui::{CandidateItem, IcedSurface};
+use xime_ui::{CandidateItem, GridItem, IcedSurface, PanelView};
 
 use crate::{KeyEvent, PointerEvent};
 
@@ -83,8 +83,8 @@ pub struct InputMethodData {
     pub key_events: Arc<Mutex<Vec<KeyEvent>>>,
     pub pointer_events: Arc<Mutex<Vec<PointerEvent>>>,
     pub pointer_pos: Arc<Mutex<(f64, f64)>>,
-    /// 菜单面板是否打开（影响候选栏按钮高亮）。
-    pub menu_open: bool,
+    /// 面板展开视图（菜单网格/内容网格），影响候选栏增高与渲染。
+    pub panel_view: PanelView,
     pub modifiers: Arc<Mutex<(u32, u32, u32, u32)>>,
     pub keymap_pending: Arc<Mutex<Option<(OwnedFd, usize)>>>,
 }
@@ -772,19 +772,28 @@ impl WaylandConnectionV2 {
         highlighted_index: usize,
         primary_color: (u8, u8, u8),
     ) -> Result<()> {
-        // 菜单面板打开时增高：上面面板区，下面候选栏
-        let menu_open = self.state.menu_open;
-        let panel_height = if menu_open {
-            xime_ui::menu_panel_height()
-        } else {
-            0
-        };
+        // 面板展开视图决定增高与宽度
+        let panel_view = self.state.panel_view.clone();
+        let panel_height = xime_ui::panel_height_for(&panel_view);
         let height = 36u32 + panel_height;
 
         // Take surface out of self for width measurement and drawing
         let mut surface = self.renderer.take().unwrap_or_default();
         // measure_candidates 已包含右侧菜单按钮宽度
-        let width = surface.measure_candidates(candidates);
+        let measured = surface.measure_candidates(candidates);
+        // 内容网格按最宽项自适应列宽/列数，宽度不低于候选栏
+        let width = match &panel_view {
+            PanelView::Content { items, .. } => {
+                let widest = items
+                    .iter()
+                    .map(|i| xime_ui::content_text_width(&i.text))
+                    .max()
+                    .unwrap_or(0);
+                let cell = xime_ui::content_cell_width(widest);
+                xime_ui::content_panel_width(cell, xime_ui::content_columns_for(cell)).max(measured)
+            }
+            _ => measured,
+        };
 
         if self.candidate_surface.is_none() {
             self.create_candidate_surface()?;
@@ -829,7 +838,7 @@ impl WaylandConnectionV2 {
         let pixels: &mut [u8] =
             unsafe { slice::from_raw_parts_mut(ptr.as_ptr() as *mut u8, buf_size) };
 
-        // 统一 iced 绘制：候选栏 + 菜单按钮 + (菜单打开时)展开面板
+        // 统一 iced 绘制：候选栏 + 菜单按钮 + 展开视图（菜单网格/内容网格）
         surface.draw_panel(
             pixels,
             width,
@@ -837,8 +846,7 @@ impl WaylandConnectionV2 {
             candidates,
             highlighted_index,
             primary_color,
-            menu_open,
-            None,
+            &panel_view,
         );
 
         unsafe {
@@ -886,16 +894,31 @@ impl WaylandConnectionV2 {
     /// 打开菜单：仅设置状态（候选栏增高由下一次 show_candidate_window 渲染）。
     pub fn show_menu_panel(
         &mut self,
-        _active_index: Option<usize>,
+        active_index: Option<usize>,
         _primary_color: (u8, u8, u8),
     ) -> Result<()> {
-        self.state.menu_open = true;
+        self.state.panel_view = PanelView::Menu(active_index);
         debug!("Menu panel flag set (rendered on next candidate refresh)");
         Ok(())
     }
 
+    /// 显示内容面板（表情/符号网格）：仅设置状态，渲染随下一次
+    /// show_candidate_window 生效。
+    pub fn show_content_panel(
+        &mut self,
+        items: &[GridItem],
+        highlighted: Option<usize>,
+    ) -> Result<()> {
+        self.state.panel_view = PanelView::Content {
+            items: items.to_vec(),
+            highlighted,
+        };
+        debug!("Content panel set ({} items)", items.len());
+        Ok(())
+    }
+
     pub fn hide_menu_panel(&mut self) {
-        self.state.menu_open = false;
+        self.state.panel_view = PanelView::Closed;
     }
 
     /// Show a single key root display window

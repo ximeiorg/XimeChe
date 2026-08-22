@@ -74,6 +74,12 @@ pub trait ImBackend {
         active_index: Option<usize>,
         primary_color: (u8, u8, u8),
     ) -> Result<(), String>;
+    /// 显示内容面板（表情/符号网格）。渲染随下一次 show_candidate_window 生效。
+    fn show_content_panel(
+        &mut self,
+        items: &[xime_ui::GridItem],
+        highlighted: Option<usize>,
+    ) -> Result<(), String>;
     fn hide_menu_panel(&mut self);
     fn show_root_window(
         &mut self,
@@ -156,6 +162,15 @@ impl ImBackend for im_v1::WaylandConnectionV1 {
         primary_color: (u8, u8, u8),
     ) -> Result<(), String> {
         self.show_menu_panel(active_index, primary_color)
+            .map_err(|e| e.to_string())
+    }
+
+    fn show_content_panel(
+        &mut self,
+        items: &[xime_ui::GridItem],
+        highlighted: Option<usize>,
+    ) -> Result<(), String> {
+        self.show_content_panel(items, highlighted)
             .map_err(|e| e.to_string())
     }
 
@@ -251,6 +266,15 @@ impl ImBackend for im_v2::WaylandConnectionV2 {
         primary_color: (u8, u8, u8),
     ) -> Result<(), String> {
         self.show_menu_panel(active_index, primary_color)
+            .map_err(|e| e.to_string())
+    }
+
+    fn show_content_panel(
+        &mut self,
+        items: &[xime_ui::GridItem],
+        highlighted: Option<usize>,
+    ) -> Result<(), String> {
+        self.show_content_panel(items, highlighted)
             .map_err(|e| e.to_string())
     }
 

@@ -1,7 +1,44 @@
 # XimeChe（曦码·澈输入法）开发进度
 
 ## 当前状态
-**候选栏菜单按钮：pointer 点击接入，菜单面板（表情/符号/剪切板/快捷发送入口）**（2026-08-15）
+**菜单面板升级为路由容器：表情/符号网格直接铺在面板区（不占候选栏），剪切板/快捷发送置灰**（2026-08-22）
+
+## 本次变更（2026-08-22）
+1. **修复内容网格宽度不足**：单元格固定 36px 导致颜文字换行、排列错位
+   - 按最宽项估算单元格宽（`content_text_width`：ASCII 10px/CJK 17px/零宽组合符 0，保守偏大 +16 内边距）
+   - 列数在 660px 上限内自适应（4..=10 列）；面板宽度随内容变化（颜文字页 7 列 ≈645px，纯符号 10 列 414px）
+   - 单元格文本 `Wrapping::None` 禁止换行兜底；渲染/命中测试共用同一纯函数保证一致
+2. **面板路由化**（PanelView 状态机）
+   - 面板区不再是纯菜单，而是可路由内容容器：`Closed / Menu(入口网格) / Content(表情或符号网格)`
+   - 点「表情」「符号」→ 面板区直接铺开 10 列 × 3 行网格（不再走候选栏候选位）
+   - 内容打开时点菜单按钮 → 路由回菜单视图；Esc → 关闭面板恢复候选栏
+   - 点网格项直接上屏且面板保持打开（可连续选择）；数字键/Tab/方向键/回车均可选；`;` 上屏分号
+   - 输入字符实时过滤（表情走插件搜索；符号走分类/关键词/字符匹配）；↑↓ 翻页（每页 30）
+2. **xime-ui 内容网格**（menu.rs / iced_view.rs）
+   - `PanelView`、`GridItem`、`content_capacity/content_panel_height/content_panel_width/content_item_hit` + 命中测试
+   - `content_grid` 渲染：固定 10×3 网格，空位留白，高亮项着色；draw_panel 改收 `&PanelView`
+3. **xime-wayland 面板视图**：v1/v2 状态 `menu_open: bool` → `panel_view: PanelView`；
+   `show_content_panel()` 新接口；show_candidate_window 按视图决定增高（菜单 88px / 内容 120px）与最小宽度（内容 414px）
+4. **daemon 路由状态**：`PanelState::ContentOpen`；SearchPanel 移除 page_size（每页 = 网格容量）；
+   `show_content` 渲染（复用候选缓存，无缓存时空候选栏）；`redraw_menu_candidates` 无缓存时隐藏窗口
+5. **测试**：content_item_hit/几何 3 个（xime-ui）、面板提交/翻页/符号模式 3 个（xime-daemon）
+
+## 本次变更（2026-08-22）
+1. **修复失焦后残留候选栏阻塞输入**（wayland.rs deactivate 分支）
+   - 原 bug：切换窗口/输入框时只置标志 `candidate_window_visible = false`，从未调用 `hide_candidate_window()`
+   - 残留候选栏 surface 继续显示并接收指针事件，吞掉新输入框的点击 → text-input 不重新 enable → 输入法"再也无法切换出来"
+   - 修复：deactivate 时立即隐藏候选栏/菜单面板/Ctrl 字根窗口、关闭 emoji 面板、清空按键消费记录
+   - 底层另有 KWin/Chromium text-input-v3 失焦失效 bug（KWin 493098，fcitx5 同样受影响，Chromium 139 才修复），本修复保证点击输入框即可恢复
+2. **菜单入口接通**（此前点击只关菜单、无任何动作）
+   - 「表情」：复用 `;` 触发的搜索面板（插件数据源）
+   - 「符号」：新增 `crates/xime-daemon/src/symbols.rs` 内置符号表（17 类约 2000 符号，数据来自 Xime 安卓版 SymbolData.kt），支持分类/关键词/字符搜索
+   - 「剪切板」「快捷发送」：未实现，`is_available() == false` 置灰显示、点击保持菜单打开
+3. **SearchPanel 双模式改造**（wayland.rs）
+   - `PanelMode::{Emoji, Symbols}`：表情模式第 1 位分号保留位、翻页每页 page_size-1；符号模式无保留位、每页 page_size
+   - 符号模式刷新全量加载（分页浏览），表情模式维持 3 页上限
+   - 菜单点击不再依赖按键循环，直接 `refresh_search_panel` 打开面板
+4. **xime-ui 菜单置灰渲染**（iced_view.rs menu_cell）：不可用入口灰色 chip + 灰色文字
+5. **单元测试**：symbols::search 5 个（空查询/分类 id/中文关键词/字符/top_k）、符号模式提交与翻页 1 个
 
 ## 本次变更（2026-08-15）
 1. **菜单按钮改用用户提供的 SVG 图标**（crates/xime-ui/resources/menu.svg）
@@ -198,10 +235,10 @@
 - **xime-xkb**: 45 tests - KeyBinding 解析、keysym 转换、XKB Error 类型
 - **librime**: 51 tests - KeyEvent、Traits builder、Error 类型、Status/Context/Commit 结构化测试
 - **xime-config**: 46 tests - 配置解析、合并逻辑、schema 解析、config 合并、rime 配置提取
-- **xime-ui**: 37 tests - CandidateList 状态机、渲染器、root_display 绘制、blend 边界
+- **xime-ui**: 22 tests - CandidateList 状态机、渲染器、root_display 绘制、blend 边界、菜单/内容网格命中
 - **xime-tray**: 28 tests - 状态切换、颜色设置、文字图标渲染、MenuAction、rounded_rect
 - **xime-wayland**: 17 tests - IM 状态机、错误类型、KeyEvent 数据
-- **xime-daemon**: 6 tests - DaemonCommand 枚举、get_config_dir
+- **xime-daemon**: 29 tests - DaemonCommand 枚举、get_config_dir、插件宿主、symbols 搜索、面板提交/翻页
 - **xime-predict**: 17 tests (1 个预先存在失败：test_predict_basic 分数断言)
 - **xime-setup/launcher/pack**: 0 tests (UI 密集型，需集成测试)
 - **总计**: ~247 tests

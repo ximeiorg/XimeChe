@@ -44,6 +44,12 @@ cargo clippy --all-targets --all-features -- -D warnings
 # Build release (librime build is handled by librime-sys2/build.rs)
 cargo build --release -p xime-daemon -p xime-launcher -p xime-setup
 
+# Build & install xime-sync-server (clipboard sync server, from libximecore)
+if [ -f "${LIBXIMECORE}/Cargo.toml" ]; then
+    cargo build --release --manifest-path "${LIBXIMECORE}/Cargo.toml" -p xime-sync-server
+    install -Dm755 "${LIBXIMECORE}/target/release/xime-sync-server" "${BINDIR}/xime-sync-server"
+fi
+
 # Install binaries
 install -Dm755 "${PROJECT_ROOT}/target/release/xime-daemon" "${BINDIR}/xime-daemon"
 install -Dm755 "${PROJECT_ROOT}/target/release/xime-launcher" "${BINDIR}/xime-launcher"
