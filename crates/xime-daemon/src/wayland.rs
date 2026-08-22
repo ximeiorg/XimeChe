@@ -413,6 +413,7 @@ impl WaylandLoop {
                         last_input_keysym,
                         ctrl_root_visible,
                         last_ascii_mode,
+                        im_enabled,
                     );
                 }
             }
@@ -437,6 +438,7 @@ impl WaylandLoop {
         last_input_keysym: &mut Option<u32>,
         ctrl_root_visible: &mut bool,
         last_ascii_mode: &mut bool,
+        im_enabled: &mut bool,
     ) {
         let modifiers = xkb.get_modifiers();
         let release_mask = if !event.pressed {
@@ -450,6 +452,45 @@ impl WaylandLoop {
             modifiers.effective,
             release_mask
         );
+
+        // Ctrl+Space：启停输入法（fcitx 风格）。任意状态下优先处理。
+        if event.pressed && modifiers.ctrl && sym.raw() == 0x20 {
+            *im_enabled = !*im_enabled;
+            if *im_enabled {
+                debug!("Input method enabled (Ctrl+Space)");
+            } else {
+                debug!("Input method disabled (Ctrl+Space)");
+                // 停用：丢弃组合、清空 preedit、关闭全部 UI
+                rime.clear_composition();
+                c.clear_preedit();
+                c.hide_candidate_window();
+                c.hide_menu_panel();
+                c.hide_root_window();
+                let _ = c.flush();
+                *candidate_window_visible = false;
+                search_panel.active = false;
+                *panel_state = PanelState::Closed;
+                *ctrl_root_visible = false;
+                *last_input_keysym = None;
+                consumed_presses.clear();
+                self.rt_handle.block_on(async {
+                    self.tray.set_mode(InputMode::English).await;
+                });
+            }
+            // 消费按下（释放由 consumed_presses 抑制，避免孤儿释放）
+            consumed_presses.insert(event.key);
+            return;
+        }
+
+        // 停用态：按键直接转发，不做任何处理（被消费按下的释放仍抑制）。
+        if !*im_enabled {
+            if event.pressed || !consumed_presses.contains(&event.key) {
+                c.forward_key(event.serial, event.time, event.key, event.pressed);
+            } else {
+                consumed_presses.remove(&event.key);
+            }
+            return;
+        }
 
         let is_ctrl = sym.raw() == 0xFFE3 || sym.raw() == 0xFFE4;
         debug!(
@@ -1143,7 +1184,10 @@ mod tests {
         assert_eq!(panel_commit_text(&panel, 1).as_deref(), Some("(^u^)"));
         assert_eq!(panel_commit_text(&panel, 2), None);
         // 每页容量 = 内容网格容量
-        assert_eq!(panel.per_page(), xime_ui::content_capacity(xime_ui::CONTENT_COLUMNS_MAX));
+        assert_eq!(
+            panel.per_page(),
+            xime_ui::content_capacity(xime_ui::CONTENT_COLUMNS_MAX)
+        );
     }
 
     #[test]
@@ -1173,7 +1217,10 @@ mod tests {
             items,
             ..SearchPanel::default()
         };
-        assert_eq!(first.page_len(), xime_ui::content_capacity(xime_ui::CONTENT_COLUMNS_MAX));
+        assert_eq!(
+            first.page_len(),
+            xime_ui::content_capacity(xime_ui::CONTENT_COLUMNS_MAX)
+        );
     }
 
     #[test]
@@ -1192,10 +1239,16 @@ mod tests {
                 .collect(),
             ..SearchPanel::default()
         };
-        assert_eq!(panel.per_page(), xime_ui::content_capacity(xime_ui::CONTENT_COLUMNS_MAX));
+        assert_eq!(
+            panel.per_page(),
+            xime_ui::content_capacity(xime_ui::CONTENT_COLUMNS_MAX)
+        );
         assert_eq!(panel.total_pages(), 3);
         // 第 2 页（offset=30）：索引 0=s30
         assert_eq!(panel_commit_text(&panel, 0).as_deref(), Some("s30"));
-        assert_eq!(panel.page_len(), xime_ui::content_capacity(xime_ui::CONTENT_COLUMNS_MAX));
+        assert_eq!(
+            panel.page_len(),
+            xime_ui::content_capacity(xime_ui::CONTENT_COLUMNS_MAX)
+        );
     }
 }
