@@ -2,6 +2,7 @@ mod command;
 mod daemon;
 mod plugin_host;
 mod rime;
+mod symbols;
 mod wayland;
 
 pub use command::DaemonCommand;

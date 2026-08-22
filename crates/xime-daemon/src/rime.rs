@@ -77,6 +77,18 @@ impl RimeEngine {
         }
     }
 
+    /// 丢弃当前会话未上屏的组合内容（启停输入法时调用）。
+    pub fn clear_composition(&mut self) {
+        if let Some(session) = self.session.as_ref() {
+            unsafe {
+                let api = librime::get_api();
+                if let Some(clear) = (*api).clear_composition {
+                    clear(session.session_id());
+                }
+            }
+        }
+    }
+
     pub fn get_current_schema(&self) -> Option<String> {
         if let Some(session) = self.session.as_ref() {
             session.status().ok().map(|s| s.schema_id().to_string())

@@ -15,7 +15,11 @@ type Pixmap = tiny_skia11::Pixmap;
 type Mask = tiny_skia11::Mask;
 
 use crate::CandidateItem;
-use crate::{MenuAction, CANDIDATE_HEIGHT, MENU_BUTTON_WIDTH, MENU_COLUMNS, MENU_ITEM_HEIGHT};
+use crate::{
+    content_cell_width, content_columns_for, content_text_width, GridItem, MenuAction, PanelView,
+    CANDIDATE_HEIGHT, CONTENT_GAP, CONTENT_ITEM_SIZE, CONTENT_ROWS, MENU_BUTTON_WIDTH,
+    MENU_COLUMNS, MENU_ITEM_HEIGHT,
+};
 
 const MENU_SVG: &[u8] = include_bytes!("../resources/menu.svg");
 
@@ -23,7 +27,7 @@ const BG: Color = Color::from_rgb8(0xFA, 0xFA, 0xFA);
 const BORDER: Color = Color::from_rgb8(0xE0, 0xE0, 0xE0);
 const TEXT_MAIN: Color = Color::from_rgb8(0x33, 0x33, 0x33);
 const TEXT_COMMENT: Color = Color::from_rgb8(0xB0, 0xB0, 0xB0);
-const CONTAINER_RADIUS: f32 = 12.0;
+const CONTAINER_RADIUS: f32 = 6.0;
 const HIGHLIGHT_RADIUS: f32 = 6.0;
 
 /// 菜单入口图标颜色。
@@ -159,12 +163,11 @@ impl IcedSurface {
             candidates,
             highlighted_index,
             primary_color,
-            false,
-            None,
+            &PanelView::Closed,
         );
     }
 
-    /// 绘制完整面板（候选栏 + 菜单按钮 + 可选展开菜单）。
+    /// 绘制完整面板（候选栏 + 菜单按钮 + 可选展开视图：菜单网格/内容网格）。
     #[allow(clippy::too_many_arguments)]
     pub fn draw_panel(
         &mut self,
@@ -174,21 +177,14 @@ impl IcedSurface {
         candidates: &[CandidateItem],
         highlighted_index: usize,
         primary_color: (u8, u8, u8),
-        menu_open: bool,
-        active_index: Option<usize>,
+        panel_view: &PanelView,
     ) {
         // 1. 自绘圆角背景 + 边框（SDF 精确，绕开 tiny-skia 曲线光栅化偏差）
         paint_rounded_panel(pixels, width, height, CONTAINER_RADIUS, 2.0, BORDER, BG);
 
         // 2. iced 渲染内容（透明背景）到临时 buffer
         let mut content = vec![0u8; (width * height * 4) as usize];
-        let mut view = panel_view(
-            candidates,
-            highlighted_index,
-            primary_color,
-            menu_open,
-            active_index,
-        );
+        let mut view = build_panel_view(candidates, highlighted_index, primary_color, panel_view);
         self.render(&mut view, &mut content, width, height);
 
         // 3. 内容合成到背景
@@ -408,27 +404,26 @@ fn menu_button(active: bool) -> Element<'static, (), Theme, Renderer> {
         .into()
 }
 
-/// 完整面板：候选栏 + 可选展开菜单（双列网格）。
-fn panel_view<'a>(
+/// 完整面板：候选栏 + 可选展开视图（菜单网格 / 内容网格）。
+fn build_panel_view<'a>(
     candidates: &'a [CandidateItem],
     highlighted_index: usize,
     primary_color: (u8, u8, u8),
-    menu_open: bool,
-    active_index: Option<usize>,
+    view: &'a PanelView,
 ) -> Element<'a, (), Theme, Renderer> {
     let bar = candidate_bar(candidates, highlighted_index, primary_color);
-    let content: Element<'a, (), Theme, Renderer> = if menu_open {
-        let grid = menu_grid(active_index);
-        let divider = container(Space::new())
-            .width(iced_widget::core::Length::Fill)
-            .height(1)
-            .style(|_| container::Style {
-                background: Some(iced_widget::core::Background::Color(BORDER)),
-                ..Default::default()
-            });
-        iced_widget::column![bar, divider, grid].into()
-    } else {
-        iced_widget::column![bar].into()
+    let content: Element<'a, (), Theme, Renderer> = match view {
+        PanelView::Closed => bar,
+        PanelView::Menu(active_index) => {
+            let grid = menu_grid(*active_index);
+            let divider = panel_divider();
+            iced_widget::column![bar, divider, grid].into()
+        }
+        PanelView::Content { items, highlighted } => {
+            let grid = content_grid(items, *highlighted);
+            let divider = panel_divider();
+            iced_widget::column![bar, divider, grid].into()
+        }
     };
 
     // 背景圆角/边框由 paint_rounded_panel 自绘（SDF 精确），这里透明
@@ -436,6 +431,18 @@ fn panel_view<'a>(
         .width(iced_widget::core::Length::Fill)
         .height(iced_widget::core::Length::Fill)
         .style(|_| container::Style::default())
+        .into()
+}
+
+/// 面板区与候选栏之间的分隔线。
+fn panel_divider<'a>() -> Element<'a, (), Theme, Renderer> {
+    container(Space::new())
+        .width(iced_widget::core::Length::Fill)
+        .height(1)
+        .style(|_| container::Style {
+            background: Some(iced_widget::core::Background::Color(BORDER)),
+            ..Default::default()
+        })
         .into()
 }
 
@@ -488,9 +495,16 @@ fn menu_grid(active_index: Option<usize>) -> Element<'static, (), Theme, Rendere
 }
 
 /// 单个菜单入口：图标 chip（首字 + 色底）+ 文字。
+/// 未实现的入口（is_available() == false）置灰显示，点击无效。
 fn menu_cell(action: MenuAction, active: bool) -> Element<'static, (), Theme, Renderer> {
     let idx = action.index();
-    let color = menu_item_color(idx);
+    let available = action.is_available();
+    let color = if available {
+        menu_item_color(idx)
+    } else {
+        Color::from_rgb8(0xC0, 0xC0, 0xC0)
+    };
+    let label_color = if available { TEXT_MAIN } else { TEXT_COMMENT };
     let first = action.label().chars().next().unwrap_or('?');
     let chip = container(text(first.to_string()).size(14).color(color))
         .width(32)
@@ -510,7 +524,7 @@ fn menu_cell(action: MenuAction, active: bool) -> Element<'static, (), Theme, Re
             },
             ..Default::default()
         });
-    let label = text(action.label()).size(14).color(TEXT_MAIN);
+    let label = text(action.label()).size(14).color(label_color);
     let item = row![chip, label]
         .spacing(10)
         .align_y(iced_widget::core::alignment::Vertical::Center);
@@ -531,6 +545,69 @@ fn menu_cell(action: MenuAction, active: bool) -> Element<'static, (), Theme, Re
             ..Default::default()
         })
         .into()
+}
+
+/// 内容网格（表情/符号）：列数按最宽项自适应（4..=10），固定 CONTENT_ROWS 行，
+/// 空位留白，高亮项着色。
+fn content_grid(
+    items: &[GridItem],
+    highlighted: Option<usize>,
+) -> Element<'static, (), Theme, Renderer> {
+    let widest = items
+        .iter()
+        .map(|i| content_text_width(&i.text))
+        .max()
+        .unwrap_or(0);
+    let cell_width = content_cell_width(widest);
+    let columns = content_columns_for(cell_width);
+    let mut grid = iced_widget::column![].spacing(CONTENT_GAP as f32);
+    for r in 0..CONTENT_ROWS {
+        let mut row_widget = iced_widget::row![].spacing(CONTENT_GAP as f32);
+        for c in 0..columns {
+            let idx = r * columns + c;
+            let cell: Element<'static, (), Theme, Renderer> = match items.get(idx) {
+                Some(item) => content_cell(item, highlighted == Some(idx)),
+                None => Space::new()
+                    .width(iced_widget::core::Length::Fill)
+                    .height(CONTENT_ITEM_SIZE)
+                    .into(),
+            };
+            row_widget = row_widget.push(cell);
+        }
+        grid = grid.push(
+            row_widget
+                .width(iced_widget::core::Length::Fill)
+                .height(CONTENT_ITEM_SIZE),
+        );
+    }
+    grid.width(iced_widget::core::Length::Fill)
+        .height(CONTENT_ROWS as f32 * CONTENT_ITEM_SIZE as f32)
+        .into()
+}
+
+/// 单个内容单元格：文本居中不换行，高亮时着底色。
+fn content_cell(item: &GridItem, highlighted: bool) -> Element<'static, (), Theme, Renderer> {
+    container(
+        text(item.text.clone())
+            .size(16)
+            .color(TEXT_MAIN)
+            .wrapping(iced_widget::core::text::Wrapping::None),
+    )
+    .width(iced_widget::core::Length::Fill)
+    .height(CONTENT_ITEM_SIZE)
+    .align_x(iced_widget::core::alignment::Horizontal::Center)
+    .align_y(iced_widget::core::alignment::Vertical::Center)
+    .style(move |_| container::Style {
+        background: if highlighted {
+            Some(iced_widget::core::Background::Color(Color::from_rgba8(
+                0x8F, 0x73, 0xE2, 0.13,
+            )))
+        } else {
+            None
+        },
+        ..Default::default()
+    })
+    .into()
 }
 
 /// 字根窗口：`[key] root`。
@@ -651,8 +728,7 @@ mod tests {
                 &candidates,
                 0,
                 (0x8F, 0x73, 0xE2),
-                true,
-                None,
+                &crate::PanelView::Menu(None),
             );
             frames.push(pixels);
         }
