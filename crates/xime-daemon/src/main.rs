@@ -59,7 +59,8 @@ fn init_tracing() -> WorkerGuard {
 
 fn main() -> anyhow::Result<()> {
     let _guard = init_tracing();
-    info!("xime-daemon starting");
+    // pid 进日志：方便和 coredumpctl / journal 的记录互相对上。
+    info!("xime-daemon starting (pid={})", std::process::id());
 
     // 注入应用元数据（目录沿用 xime，librime 分发标识为 XimeChe）。
     let _ = xime_config::set_app_metadata(xime_config::AppMetadata {

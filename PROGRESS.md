@@ -1,9 +1,42 @@
 # XimeChe（曦码·澈输入法）开发进度
 
 ## 当前状态
-**P10 语音转文本 M1+M2 完成：daemon 语音链路 + setup「语音转文本」页
-（模型下载/删除/切换/试听全在设置程序，候选栏只做未就绪引导）**
-（2026-10-04）。候选栏面板已按 XimeYao 完全重写并合入 main。
+**输入法"偶尔死掉"修复：Wayland 断连可见化 + 整链自动恢复 + Shutdown
+段错误修复**（2026-10-05）。此前 P10 语音 M1+M2 完成、面板重写已合 main。
+
+## 本次变更（2026-10-05）：断连死锁与退出崩溃修复
+
+诊断结论（coredump + journal + KWin 源码取证）：
+- **断连死锁**：daemon 与 KWin 的 Wayland 连接会静默断开（复制时最易
+  触发——应用 disable text-input → KWin deactivate 的竞态窗口），此前
+  dispatch 错误只打 debug 日志，conn=None 后永久干等 launcher 重传 fd；
+  而 launcher 收完 fd 就 sleep 永不退出，KWin 看 launcher 活着就不重拉
+  → 死锁，用户只能去设置里切换输入法恢复
+- **KWin 侧约束**（源码实锤）：KWin 只在 IM 客户端 **CrashExit** 时重拉
+  launcher（干净退出不重拉）；20 秒内崩溃计数到 5 则 stopInputMethod
+  永久停用，计数器无崩溃 20 秒清零
+- **Shutdown 段错误**：每次 DBus Shutdown 的 exit(0) 都在 librime 静态
+  Service 析构（CleanupAllSessions → ConcreteEngine 释放 Translator）
+  时 SIGSEGV，"正常退出"实际全是 CrashExit
+
+修复内容：
+- **可见化**：dispatch 错误升 error 落文件日志、handle_unavailable 升
+  warn、启动日志带 pid、命令通道断开升 error
+- **daemon 自愈**：HealScheduler（首次断连 1s 后动作，自愈杀 launcher
+  间隔固定 25s > KWin 20s 清零窗口，永不触发崩溃保护）；断连后先试
+  standalone 直连，失败则 pkill -TERM 滞留 launcher 逼 KWin 重拉传新 fd；
+  启动后 fd 迟迟不到的死等也纳入自愈
+- **launcher 看门狗**：每 3s 查询 org.xime.Xime 在总线上的存活，连续
+  3 次消失（约 9s）后 SIGKILL 自杀——必须被信号杀死（CrashExit）KWin
+  才会重拉；新 launcher 经 DBus 激活重建 daemon，daemon 崩溃也能全链
+  自动恢复
+- **clean_exit**：Shutdown/通道断开改为 sleep 150ms（排空 non-blocking
+  日志）+ libc::_exit(0)，跳过 librime 静态析构，退出码回到干净的 0
+
+验证：clippy -D warnings 零警告；xime-daemon 64 测试全过（含 4 个
+HealScheduler 节奏测试）；实机演练「DBus Shutdown → 无 coredump →
+看门狗自杀 → KWin 重拉 → DBus 激活新 daemon → fd 重连」整链恢复。
+
 
 ## 本次变更（2026-10-04）：P10-M2 模型管理归位设置程序
 

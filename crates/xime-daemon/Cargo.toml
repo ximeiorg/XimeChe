@@ -25,6 +25,8 @@ tracing-subscriber.workspace = true
 tracing-appender.workspace = true
 zbus = "5"
 nix = { version = "0.31.3", features = ["fs", "mman"] }
+# clean_exit 里用 _exit 跳过 C++ 静态析构（librime 静态 Service 析构会段错误）。
+libc = "0.2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 chrono = "0.4"
 futures-lite = "2"

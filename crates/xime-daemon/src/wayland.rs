@@ -1,8 +1,9 @@
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::thread;
+use std::time::{Duration, Instant};
 
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use xime_clipboard::store::ClipboardStore;
 use xime_config::XimeConfig;
 use xime_tray::{InputMode, TrayManager};
@@ -130,6 +131,94 @@ fn space_fallback_input(
 /// 最近一次候选窗内容（菜单开/关后重绘用，主题以当前值为准）。
 type CandidateCache = (Vec<xime_ui::CandidateItem>, usize);
 
+/// 断连自愈的节奏控制：
+/// - 首次断连后 1 秒即尝试（给可能在途的 launcher fd 让路）；
+/// - 之后的自愈动作间隔固定 25 秒——KWin 对 IM 客户端有崩溃保护：20 秒内
+///   崩溃计数到 5 就 stopInputMethod 永久停用（src/inputmethod.cpp），
+///   计数器在无崩溃 20 秒后清零，因此自愈杀 launcher 的间隔必须 >20s，
+///   保证 KWin 计数永远数不到 2。
+const HEAL_QUICK_RETRY: Duration = Duration::from_secs(1);
+const HEAL_KILL_SPACING: Duration = Duration::from_secs(25);
+
+struct HealScheduler {
+    fire_at: Option<Instant>,
+    last_kill: Option<Instant>,
+}
+
+impl HealScheduler {
+    fn new() -> Self {
+        Self {
+            fire_at: None,
+            last_kill: None,
+        }
+    }
+
+    /// 连接断开：安排下一次自愈时间。
+    fn on_disconnect(&mut self, now: Instant) {
+        let quick = now + HEAL_QUICK_RETRY;
+        let spaced = self.last_kill.map_or(quick, |t| t + HEAL_KILL_SPACING);
+        self.fire_at = Some(quick.max(spaced));
+    }
+
+    /// 成功连上（launcher fd 或直连）：清掉待触发动作，保留 last_kill
+    /// （跨重连的 25 秒间隔约束仍然有效）。
+    fn on_connected(&mut self) {
+        self.fire_at = None;
+    }
+
+    fn due(&self, now: Instant) -> bool {
+        self.fire_at.is_some_and(|t| now >= t)
+    }
+
+    /// 触发一次自愈动作后顺延下一次（无论动作是否杀掉了进程，
+    /// 都不能让自愈循环 1ms 空转重试）。
+    fn step(&mut self, now: Instant) {
+        self.fire_at = Some(now + HEAL_KILL_SPACING);
+    }
+
+    /// 真的终结了 launcher：记录时刻，让后续断连的重试时间不得早于
+    /// 本次 +25 秒（KWin 崩溃计数清零窗口）。
+    fn mark_killed(&mut self, now: Instant) {
+        self.last_kill = Some(now);
+        self.fire_at = Some(now + HEAL_KILL_SPACING);
+    }
+}
+
+/// 终结滞留的 xime-launcher 进程。KWin 只在 IM 客户端 CrashExit 时重拉
+/// launcher（干净退出不重拉），新 launcher 会重新调 OpenWaylandSocket
+/// 传入新 fd，整链恢复。返回是否真的终结了进程。
+fn kill_lingering_launcher() -> bool {
+    match std::process::Command::new("pkill")
+        .args(["-TERM", "-x", "xime-launcher"])
+        .status()
+    {
+        Ok(status) if status.success() => {
+            warn!(
+                "Self-heal: killed lingering xime-launcher, KWin should respawn it with a fresh fd"
+            );
+            true
+        }
+        Ok(_) => {
+            // pkill 退出码 1 = 没有匹配进程（launcher 已死或 standalone 会话）
+            debug!("Self-heal: no lingering xime-launcher process found");
+            false
+        }
+        Err(e) => {
+            warn!("Self-heal: failed to run pkill: {}", e);
+            false
+        }
+    }
+}
+
+/// 干净退出：给 non-blocking 文件日志一点排空时间，然后 _exit 跳过
+/// C++ 静态析构。librime 的静态 Service 析构在 exit() 路径会段错误
+/// （coredump 2026-10-04 ×3：CleanupAllSessions → ConcreteEngine 释放
+/// Translator 时崩），把本应 exit(0) 的正常退出变成 CrashExit。
+fn clean_exit() -> ! {
+    std::thread::sleep(Duration::from_millis(150));
+    unsafe { libc::_exit(0) }
+}
+
 pub struct WaylandLoop {
     command_rx: Receiver<DaemonCommand>,
     tray: Arc<TrayManager>,
@@ -196,6 +285,8 @@ impl WaylandLoop {
         let mut im_enabled = true;
         // 暗色模式切换后待重绘标记（渲染需在 conn 作用域内进行）
         let mut pending_theme_redraw = false;
+        // 断连自愈调度：见 HealScheduler。
+        let mut heal = HealScheduler::new();
 
         // 剪贴板同步桥初始化：加载 clipboard_sync 插件并拉取一次
         let _ = self.sync_tx.send(SyncMessage::Reload(scan_descriptors()));
@@ -213,6 +304,10 @@ impl WaylandLoop {
                     "Direct connection not available (waiting for launcher fd): {}",
                     e
                 );
+                // KWin 下这是常态（普通 socket 无 IM 协议）；排个自愈时间，
+                // 若 launcher 的 fd 一直不来（launcher 启动即死等场景），
+                // 到点后杀滞留 launcher 逼 KWin 重拉，而不是永久干等。
+                heal.on_disconnect(Instant::now());
             }
         }
 
@@ -234,9 +329,13 @@ impl WaylandLoop {
                             self.rt_handle
                                 .block_on(self.tray.update_schema_menu(schemas, current));
                             conn = Some(backend);
+                            heal.on_connected();
                         }
                         Err(e) => {
                             error!("Failed to connect: {}", e);
+                            if conn.is_none() {
+                                heal.on_disconnect(Instant::now());
+                            }
                         }
                     }
                 }
@@ -334,31 +433,57 @@ impl WaylandLoop {
                     let _ = result_tx.send(result);
                 }
                 Ok(DaemonCommand::Shutdown) => {
-                    debug!("Shutdown requested, exiting process with status 0");
-                    // 必须整进程退出：DBus 主循环不感知该命令；exit(0) 为正常
-                    // 退出，KWin 不会计入 QProcess::CrashExit 崩溃保护。
-                    std::process::exit(0);
+                    // 必须整进程退出：DBus 主循环不感知该命令；clean_exit 保
+                    // 证退出码为 0（librime 静态析构段错误会让 exit() 变成
+                    // CrashExit，触发 KWin 崩溃保护计数）。
+                    info!("Shutdown requested, exiting process with status 0");
+                    clean_exit();
                 }
                 Err(TryRecvError::Empty) => {}
                 Err(TryRecvError::Disconnected) => {
-                    debug!("Command channel disconnected");
-                    break;
+                    // 命令通道是 daemon 的生命线（fd/托盘/部署全走这里），
+                    // 断了只能整进程退出；返回 run() 会让线程静默死亡，
+                    // daemon 变成"活着但永远收不到 fd"的僵尸。
+                    error!("Command channel disconnected, exiting");
+                    clean_exit();
+                }
+            }
+
+            // 断连自愈：优先尝试直连（standalone/GNOME 会话）；KWin 模式下
+            // 普通 socket 不暴露 IM 协议，直连必败，改为终结滞留的 launcher
+            // ——KWin 只在 IM 客户端 CrashExit 时重拉，新 launcher 重新传 fd。
+            if conn.is_none() && heal.due(Instant::now()) {
+                heal.step(Instant::now());
+                match connect_im_to_env() {
+                    Ok(backend) => {
+                        info!("Self-heal: reconnected directly to compositor (standalone mode)");
+                        conn = Some(backend);
+                        heal.on_connected();
+                    }
+                    Err(_) => {
+                        if kill_lingering_launcher() {
+                            heal.mark_killed(Instant::now());
+                        }
+                    }
                 }
             }
 
             if let Some(c) = conn.as_mut() {
                 if let Err(e) = c.dispatch_events() {
-                    debug!("Dispatch error: {}", e);
+                    // 升级为 error：断连原因必须落到文件日志（此前只有
+                    // debug 级，INFO 文件里完全看不到死因，无法定位）。
+                    error!("Wayland connection lost (dispatch error): {}", e);
                     conn = None;
                     self.rt_handle.block_on(async {
                         self.tray.set_visible(false).await;
                     });
                     last_active = false;
+                    heal.on_disconnect(Instant::now());
                     continue;
                 }
 
                 if let Err(e) = c.handle_unavailable() {
-                    debug!("handle_unavailable error: {}", e);
+                    warn!("handle_unavailable error: {}", e);
                 }
 
                 let is_active = c.is_active();
@@ -1662,6 +1787,57 @@ async fn notify_desktop(summary: &str, body: &str) {
 mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    #[test]
+    fn test_heal_first_disconnect_fires_quickly() {
+        let t0 = Instant::now();
+        let mut h = HealScheduler::new();
+        assert!(!h.due(t0), "初始不触发");
+
+        h.on_disconnect(t0);
+        assert!(!h.due(t0));
+        assert!(h.due(t0 + HEAL_QUICK_RETRY), "1 秒后应触发");
+    }
+
+    #[test]
+    fn test_heal_kill_spacing_respected_across_reconnects() {
+        let t0 = Instant::now();
+        let mut h = HealScheduler::new();
+
+        // t0+1s 触发自愈并杀掉 launcher → 下一次动作必须在 +25s 之后
+        h.on_disconnect(t0);
+        let t1 = t0 + HEAL_QUICK_RETRY;
+        h.step(t1);
+        h.mark_killed(t1);
+
+        // 杀掉后 5 秒又断连：不允许提前到 +6s，仍须等满 25s 间隔
+        h.on_disconnect(t1 + Duration::from_secs(5));
+        assert!(!h.due(t1 + Duration::from_secs(24)));
+        assert!(h.due(t1 + HEAL_KILL_SPACING));
+    }
+
+    #[test]
+    fn test_heal_stale_kill_does_not_delay_fresh_disconnect() {
+        let t0 = Instant::now();
+        let mut h = HealScheduler::new();
+
+        // 很久以前杀过一次：新断连只受 1s 快速重试约束
+        h.step(t0);
+        h.mark_killed(t0);
+
+        let late = t0 + Duration::from_secs(3600);
+        h.on_disconnect(late);
+        assert!(h.due(late + HEAL_QUICK_RETRY));
+    }
+
+    #[test]
+    fn test_heal_on_connected_clears_pending() {
+        let t0 = Instant::now();
+        let mut h = HealScheduler::new();
+        h.on_disconnect(t0);
+        h.on_connected();
+        assert!(!h.due(t0 + HEAL_QUICK_RETRY), "连上后不应再触发");
+    }
 
     #[test]
     fn test_space_fallback_input() {
