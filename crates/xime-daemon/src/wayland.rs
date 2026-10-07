@@ -128,6 +128,15 @@ fn space_fallback_input(
     Some(input.to_string())
 }
 
+/// Rime ascii_mode → 托盘显示模式（中/英）。
+fn tray_mode_for(is_ascii: bool) -> InputMode {
+    if is_ascii {
+        InputMode::English
+    } else {
+        InputMode::Chinese
+    }
+}
+
 /// 最近一次候选窗内容（菜单开/关后重绘用，主题以当前值为准）。
 type CandidateCache = (Vec<xime_ui::CandidateItem>, usize);
 
@@ -417,6 +426,24 @@ impl WaylandLoop {
                         let schemas = rime.available_schemas();
                         self.rt_handle
                             .block_on(self.tray.update_schema_menu(schemas, schema_id));
+                        // 切方案后 Rime 会话回到新方案的默认状态，中英模式可能
+                        // 与切换前不同，托盘中/英跟随实际状态（如从英文态切到
+                        // 新方案回中文，托盘不能停留在 en）。
+                        if let Some(session) = rime.session() {
+                            if let Ok(status) = session.status() {
+                                if status.is_ascii_mode != last_ascii_mode {
+                                    last_ascii_mode = status.is_ascii_mode;
+                                    let tray_mode = tray_mode_for(status.is_ascii_mode);
+                                    self.rt_handle.block_on(async {
+                                        self.tray.set_mode(tray_mode).await;
+                                    });
+                                    debug!(
+                                        "Tray updated after schema switch: ascii_mode={}",
+                                        status.is_ascii_mode
+                                    );
+                                }
+                            }
+                        }
                     }
                 }
                 Ok(DaemonCommand::ListDictEntries(dict, query, result_tx)) => {
@@ -709,9 +736,24 @@ impl WaylandLoop {
             *im_enabled = !*im_enabled;
             if *im_enabled {
                 debug!("Input method enabled (Ctrl+Space)");
+                // 停用期间托盘显示的是"直通"占位（English），并不反映 Rime
+                // 模式；重新启用必须按 Rime 实际状态无条件恢复托盘并同步
+                // last_ascii_mode。否则停/启一轮后托盘永远卡在停用期的显示
+                // 上——后续按键只在 ascii 变化时才刷新托盘，纠正不了它。
+                if let Some(session) = rime.session() {
+                    if let Ok(status) = session.status() {
+                        *last_ascii_mode = status.is_ascii_mode;
+                        let tray_mode = tray_mode_for(status.is_ascii_mode);
+                        self.rt_handle.block_on(async {
+                            self.tray.set_mode(tray_mode).await;
+                        });
+                    }
+                }
             } else {
                 debug!("Input method disabled (Ctrl+Space)");
-                // 停用：丢弃组合、清空 preedit、关闭全部 UI
+                // 停用：丢弃组合、清空 preedit、关闭全部 UI；托盘设 English
+                // 仅表示"直通"占位——Rime 的 ascii_mode 与 last_ascii_mode
+                // 都不动（它们仍描述 Rime 真实状态），重新启用时统一恢复。
                 rime.clear_composition();
                 c.clear_preedit();
                 c.hide_candidate_window();
@@ -876,11 +918,7 @@ impl WaylandLoop {
                 let is_ascii = status.is_ascii_mode;
                 if is_ascii != *last_ascii_mode {
                     *last_ascii_mode = is_ascii;
-                    let tray_mode = if is_ascii {
-                        InputMode::English
-                    } else {
-                        InputMode::Chinese
-                    };
+                    let tray_mode = tray_mode_for(is_ascii);
                     self.rt_handle.block_on(async {
                         self.tray.set_mode(tray_mode).await;
                     });
@@ -1863,6 +1901,14 @@ mod tests {
         );
         // 非空格键不拦
         assert_eq!(space_fallback_input(0xFF0D, &none, Some("wubi"), 0), None);
+    }
+
+    #[test]
+    fn test_tray_mode_for() {
+        // Rime ascii_mode → 托盘：英文态显示 en，中文态显示中。
+        // Ctrl+Space 停/启与切方案后的托盘恢复都依赖这个映射。
+        assert_eq!(tray_mode_for(true), InputMode::English);
+        assert_eq!(tray_mode_for(false), InputMode::Chinese);
     }
 
     #[test]

@@ -1,8 +1,33 @@
 # XimeChe（曦码·澈输入法）开发进度
 
 ## 当前状态
-**输入法"偶尔死掉"修复：Wayland 断连可见化 + 整链自动恢复 + Shutdown
-段错误修复**（2026-10-05）。此前 P10 语音 M1+M2 完成、面板重写已合 main。
+**托盘中/英状态同步修复：Ctrl+Space 停/启与切方案后托盘不再卡旧显示**
+（2026-10-07）。此前断连自愈（2026-10-05）、P10 语音 M1+M2、面板重写完成。
+
+## 本次变更（2026-10-07）：托盘中英状态同步修复
+
+用户报告"托盘里的中/en 有时候不变"。排查发现两条托盘状态与 Rime 实际
+模式脱节的路径，均为状态机缺陷（非事件循环阻塞——2026-09-25 已用按键级
+日志实锤 block_on 不冻结）：
+
+- **Ctrl+Space 停/启循环后托盘卡 en**：停用分支把托盘设为 English（"直通"
+  占位）但不动 `last_ascii_mode` 和 Rime ascii_mode；启用分支什么都不做。
+  停/启一轮后托盘停在 en，而后续按键只在 ascii **变化**时刷新托盘，永远
+  纠正不回来。修复：启用时读 Rime status，无条件按实际模式恢复托盘并同步
+  `last_ascii_mode`（wayland.rs Ctrl+Space 分支）。
+- **托盘菜单切方案后托盘不同步**：SelectSchema 只更新方案菜单 ✓，新方案
+  回到默认中文时托盘停留旧显示。修复：切完后读 status，变化才刷托盘。
+- 顺带把 ascii→托盘映射抽成 `tray_mode_for()`（键事件路径/ToggleMode 外
+  的所有更新点共用）+ 单测 `test_tray_mode_for`。
+
+**语义澄清**：Ctrl+Space = 启停整个 IM（fcitx 风格，停用=按键直通）；Shift
+= 中英切换（Rime ascii_composer `Shift_L/R: commit_code`）。托盘更新链路 =
+`process_key` 后读 `status.is_ascii_mode` 与缓存比对，变化才 set_mode。
+
+**验证**：clippy -D warnings 零警告；xime-daemon 65 测试全过（+1）。
+**已知未修**：IM 未激活（QQ/Chromium 138 不 enable text-input）时 Shift/
+Ctrl+Space 本就收不到事件——那是 KWin 激活链路问题，托盘点击 forceActivate
+是既有恢复通道，不属本次范围。
 
 ## 本次变更（2026-10-05）：断连死锁与退出崩溃修复
 
