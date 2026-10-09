@@ -188,9 +188,15 @@ fn read_offer_text(receive_and_flush: impl FnOnce(&UnixStream)) -> Option<String
               // 源应用可能迟迟不写数据（或 offer 已失效），读超时防止挂死监听线程。
     rx.set_read_timeout(Some(READ_TIMEOUT)).ok()?;
     let mut buf = String::new();
-    // 限制读取量，避免异常大内容长时间占用监听线程
-    let mut limited = rx.take(MAX_READ_BYTES);
+    // 限制读取量，避免异常大内容长时间占用监听线程。多读 1 字节用于
+    // 判定超限：正好读满上限时无法区分"恰好 1MiB"与"被截断"，截断入库
+    // 会让用户上屏残缺文本且毫无感知，所以超限整条拒绝。
+    let mut limited = rx.take(MAX_READ_BYTES + 1);
     match limited.read_to_string(&mut buf) {
+        Ok(n) if n as u64 > MAX_READ_BYTES => {
+            debug!("Clipboard capture skipped: content exceeds {MAX_READ_BYTES} bytes");
+            None
+        }
         Ok(_) if !buf.is_empty() => Some(buf),
         _ => None,
     }
@@ -290,6 +296,9 @@ impl Dispatch<ExtDataControlDeviceV1, (), WatcherState> for WatcherState {
                 capture_selection(state, mimes, |mime, fd| {
                     offer.receive(mime.to_string(), fd.as_fd())
                 });
+                // 读取完成即销毁 offer：proxy drop 不会发 destroy 请求，
+                // 不销毁则每次复制在合成器侧泄漏一个 offer 对象。
+                offer.destroy();
             }
             ext_data_control_device_v1::Event::Selection { id: None } => {}
             _ => {}
@@ -356,6 +365,9 @@ impl Dispatch<ZwlrDataControlDeviceV1, (), WatcherState> for WatcherState {
                 capture_selection(state, mimes, |mime, fd| {
                     offer.receive(mime.to_string(), fd.as_fd())
                 });
+                // 读取完成即销毁 offer：proxy drop 不会发 destroy 请求，
+                // 不销毁则每次复制在合成器侧泄漏一个 offer 对象。
+                offer.destroy();
             }
             zwlr_data_control_device_v1::Event::Selection { id: None } => {}
             _ => {}

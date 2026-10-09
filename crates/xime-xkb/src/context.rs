@@ -149,11 +149,14 @@ impl XkbContext {
             let layout = state.serialize_layout(xkbcommon::xkb::STATE_LAYOUT_EFFECTIVE);
 
             // Check individual modifiers
+            // XKB 修饰键索引由核心协议固定：Shift=0, Lock=1, Control=2,
+            // Mod1(Alt)=3, Mod2=4, Mod3=5, Mod4(Super)=6, Mod5=7。
+            // （此前 alt=1/super=3 是错位：CapsLock 开启会被当成 Alt，
+            // 真 Super 从不命中，空格兜底与字根窗在 CapsLock 下误拦/误隐。）
             let shift = state.mod_index_is_active(0, xkbcommon::xkb::STATE_MODS_EFFECTIVE);
             let ctrl = state.mod_index_is_active(2, xkbcommon::xkb::STATE_MODS_EFFECTIVE);
-            let alt = state.mod_index_is_active(1, xkbcommon::xkb::STATE_MODS_EFFECTIVE);
-            // Mod4 (index 3) is usually Super/Win
-            let super_key = state.mod_index_is_active(3, xkbcommon::xkb::STATE_MODS_EFFECTIVE);
+            let alt = state.mod_index_is_active(3, xkbcommon::xkb::STATE_MODS_EFFECTIVE);
+            let super_key = state.mod_index_is_active(6, xkbcommon::xkb::STATE_MODS_EFFECTIVE);
 
             debug!("XKB: depressed={}, latched={}, locked={}, effective={}, shift={}, ctrl={}, alt={}, super={}", 
                       depressed, latched, locked, effective, shift, ctrl, alt, super_key);

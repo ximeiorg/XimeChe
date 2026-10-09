@@ -291,11 +291,14 @@ struct SchemaDictCache {
 
 impl SchemaDictCache {
     /// 签名是否仍然成立（缺失的名字也必须仍然缺失）。
+    ///
+    /// 只做 stat（len+mtime），绝不读文件内容——本函数在设置页搜索的
+    /// 每次按键都会被调，此前误用 find_table 会把整本码表读进来只为
+    /// 比对签名。
     fn matches(&self, rime_dir: &std::path::Path) -> bool {
         self.stamps.iter().all(|(name, stamp)| {
-            // find_table 的 Option 是"找到与否"，内层 FileStamp 才是签名
-            //（None = 此前缺失，现在也必须缺失）。
-            find_table(rime_dir, name).map(|(_, s)| s).unwrap_or(None) == *stamp
+            let path = rime_dir.join(format!("{name}.dict.yaml"));
+            stamp_of(&path) == *stamp
         })
     }
 }
@@ -329,23 +332,32 @@ pub fn read_schema_dict(
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(cached) = cache.as_ref() {
             if cached.dict_name == dict_name && cached.packs == packs && cached.matches(rime_dir) {
-                let rows: Vec<DictEntryRow> = cached
+                // 直接在借用上过滤、只 clone 命中子集：缓存里是全量词条
+                //（五笔码表 7-10 万条），先整表 clone 再过滤是每次按键
+                // ~20 万次无谓分配。
+                let needle = query.trim().to_lowercase();
+                let matched: Vec<DictEntryRow> = cached
                     .entries
                     .iter()
+                    .filter(|(word, code)| {
+                        needle.is_empty()
+                            || word.to_lowercase().contains(&needle)
+                            || code.to_lowercase().contains(&needle)
+                    })
                     .map(|(word, code)| DictEntryRow {
                         word: word.clone(),
                         code: code.clone(),
                         commits: 0,
                     })
                     .collect();
-                return Ok(finish_read(
-                    &cached.dict_name,
-                    &cached.tables,
-                    &cached.missing,
-                    cached.total,
-                    &rows,
-                    query,
-                ));
+                return Ok(SchemaDictRead {
+                    dict_name: cached.dict_name.clone(),
+                    tables: cached.tables.clone(),
+                    total: cached.total,
+                    matched: matched.len() as i32,
+                    entries: matched.into_iter().take(DICT_ENTRIES_MAX).collect(),
+                    missing: cached.missing.clone(),
+                });
             }
         }
     }

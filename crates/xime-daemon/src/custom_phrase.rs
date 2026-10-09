@@ -185,7 +185,8 @@ pub fn save_phrases(
     let file_name = format!("{dict_name}.txt");
 
     let file = phrase_file(rime_dir, &dict_name);
-    std::fs::write(&file, build_phrase_text(&entries).as_bytes())
+    // 用户整张短语表：必须原子写，崩溃/断电时不能只留半截文件。
+    xime_config::atomic_write(&file, build_phrase_text(&entries).as_bytes())
         .map_err(|e| format!("写入 {file_name} 失败：{e}"))?;
 
     // 仅当至少有一条短语才注入（空表会让 rime 为空表建翻译器而报错）；
@@ -245,7 +246,8 @@ fn apply_translator_patch(
         cleaned
     };
 
-    std::fs::write(&yaml_path, patched.as_bytes())
+    // custom.yaml 半截会导致方案部署失败，同样必须原子写。
+    xime_config::atomic_write(&yaml_path, patched.as_bytes())
         .map_err(|e| format!("写入 {}.custom.yaml 失败：{e}", schema_id))?;
     Ok(true)
 }

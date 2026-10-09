@@ -74,6 +74,17 @@ fn blend_glyph(
     }
 }
 
+/// 全局字体系统缓存：FontSystem::new() 全量扫描系统字体目录（几十至上百
+/// 毫秒），而 icon_pixmap 一次读取要渲 3 个尺寸——不缓存的话每次中英切换
+/// 托盘重读属性就白扫 3 遍。
+fn font_cache() -> std::sync::MutexGuard<'static, Option<(FontSystem, SwashCache)>> {
+    use std::sync::{Mutex, OnceLock};
+    static FONT: OnceLock<Mutex<Option<(FontSystem, SwashCache)>>> = OnceLock::new();
+    FONT.get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
 fn render_text_icon(text: &str, bg_color: Color, size: i32) -> Vec<u8> {
     let width = size as u32;
     let height = size as u32;
@@ -95,8 +106,9 @@ fn render_text_icon(text: &str, bg_color: Color, size: i32) -> Vec<u8> {
         None,
     );
 
-    let mut font_system = FontSystem::new();
-    let mut swash_cache = SwashCache::new();
+    let mut cache = font_cache();
+    let (font_system, swash_cache) =
+        cache.get_or_insert_with(|| (FontSystem::new(), SwashCache::new()));
 
     let font_size = size as f32 * 0.6;
     let metrics = Metrics::new(font_size, font_size * 1.2);
@@ -104,8 +116,8 @@ fn render_text_icon(text: &str, bg_color: Color, size: i32) -> Vec<u8> {
 
     let text_color = CosmicColor::rgba(255, 255, 255, 255);
 
-    let mut buffer = Buffer::new(&mut font_system, metrics);
-    buffer.set_text(&mut font_system, text, attrs, Shaping::Advanced);
+    let mut buffer = Buffer::new(font_system, metrics);
+    buffer.set_text(font_system, text, attrs, Shaping::Advanced);
 
     let mut text_width = 0.0f32;
     for run in buffer.layout_runs() {
@@ -120,23 +132,18 @@ fn render_text_icon(text: &str, bg_color: Color, size: i32) -> Vec<u8> {
     let pixmap_width = pixmap.width() as usize;
     let pixmap_height = pixmap.height() as usize;
 
-    buffer.draw(
-        &mut font_system,
-        &mut swash_cache,
-        text_color,
-        |x, y, w, h, color| {
-            blend_glyph(
-                pixmap.data_mut(),
-                x + x_offset,
-                y + y_offset,
-                w as i32,
-                h as i32,
-                color,
-                pixmap_width,
-                pixmap_height,
-            );
-        },
-    );
+    buffer.draw(font_system, swash_cache, text_color, |x, y, w, h, color| {
+        blend_glyph(
+            pixmap.data_mut(),
+            x + x_offset,
+            y + y_offset,
+            w as i32,
+            h as i32,
+            color,
+            pixmap_width,
+            pixmap_height,
+        );
+    });
 
     let data = pixmap.data();
     // Convert RGBA to ARGB (StatusNotifierItem expects ARGB32)

@@ -218,10 +218,10 @@ fn read_selected_id() -> String {
 /// 持久化选中的模型 id。
 fn write_selected_id(id: &str) -> anyhow::Result<()> {
     let path = speech_config_path();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&path, serde_json::json!({ "model": id }).to_string())?;
+    xime_config::atomic_write(
+        &path,
+        serde_json::json!({ "model": id }).to_string().as_bytes(),
+    )?;
     Ok(())
 }
 
@@ -585,6 +585,17 @@ pub fn status_json() -> String {
 
 // ── worker ──────────────────────────────────────────────────────────
 
+/// 模型 id 清洗：DBus 入参直接拼 `models_root()/id` 路径，先滤掉路径
+/// 穿越（对照 user_dict 的 sanitize_dict_name；会话总线限同用户，但
+/// 出错/被入侵的设置端不该能删 $HOME）。
+fn sanitize_model_id(id: &str) -> Option<String> {
+    let t = id.trim();
+    if t.is_empty() || t.contains('/') || t.contains('\\') || t.contains("..") {
+        return None;
+    }
+    Some(t.to_string())
+}
+
 /// worker 主循环：Idle 时阻塞等命令；下载/删除/选择即时处理，
 /// Toggle 跑完整场听写会话。
 fn worker_loop(cmd_rx: Receiver<SpeechCommand>, event_tx: Sender<SpeechEvent>) {
@@ -595,8 +606,14 @@ fn worker_loop(cmd_rx: Receiver<SpeechCommand>, event_tx: Sender<SpeechEvent>) {
         match cmd {
             SpeechCommand::Toggle => {
                 // 会话内命令由 run_listening_session 的循环消费；
-                // 这里先清掉滞留命令，避免误停。
-                while cmd_rx.try_recv().is_ok() {}
+                // 这里清掉滞留的 Toggle 避免误停，其余命令（下载/删除/选择）
+                // 回灌队列——不能静默丢弃（否则设置页的操作"没发生"且无
+                // 任何错误提示）。
+                while let Ok(c) = cmd_rx.try_recv() {
+                    if !matches!(c, SpeechCommand::Toggle) {
+                        send_cmd(c);
+                    }
+                }
                 let selected = read_selected_id();
                 let profile = AsrModelRegistry::profile_or_default(&selected);
                 let dir = models_root().join(&profile.id);
@@ -620,15 +637,18 @@ fn worker_loop(cmd_rx: Receiver<SpeechCommand>, event_tx: Sender<SpeechEvent>) {
                 }
                 emit(SpeechEvent::State(SpeechState::Idle), &event_tx);
             }
-            SpeechCommand::DownloadModel(id) => {
-                download_model_async(&id, event_tx.clone());
-            }
-            SpeechCommand::DeleteModel(id) => {
-                handle_delete_model(&id, event_tx.clone());
-            }
-            SpeechCommand::SelectModel(id) => {
-                handle_select_model(&id, event_tx.clone());
-            }
+            SpeechCommand::DownloadModel(id) => match sanitize_model_id(&id) {
+                Some(id) => download_model_async(&id, event_tx.clone()),
+                None => emit(SpeechEvent::Error("模型 id 非法".into()), &event_tx),
+            },
+            SpeechCommand::DeleteModel(id) => match sanitize_model_id(&id) {
+                Some(id) => handle_delete_model(&id, event_tx.clone()),
+                None => emit(SpeechEvent::Error("模型 id 非法".into()), &event_tx),
+            },
+            SpeechCommand::SelectModel(id) => match sanitize_model_id(&id) {
+                Some(id) => handle_select_model(&id, event_tx.clone()),
+                None => emit(SpeechEvent::Error("模型 id 非法".into()), &event_tx),
+            },
         }
     }
 }
@@ -638,23 +658,21 @@ fn worker_loop(cmd_rx: Receiver<SpeechCommand>, event_tx: Sender<SpeechEvent>) {
 fn download_model_async(id: &str, _event_tx: Sender<SpeechEvent>) {
     let id = id.to_string();
     let profile = AsrModelRegistry::profile_or_default(&id);
-    // 已就绪 / 已在下载：不重复。
+    // 已就绪 / 已在下载：不重复。检查与占位在同一把锁内完成——
+    // 否则两次请求可同时穿过检查窗口，并发写同一临时文件互相截断。
     {
-        let view = view().lock().unwrap_or_else(|p| p.into_inner());
+        let mut view = view().lock().unwrap_or_else(|p| p.into_inner());
         if is_model_ready(&profile, &models_root().join(&profile.id))
             || matches!(&view.download, Some((downloading, _)) if *downloading == profile.id)
         {
             return;
         }
+        view.download = Some((profile.id.clone(), 0.0));
+        view.last_error = None;
     }
     std::thread::Builder::new()
         .name("xime-speech-download".into())
         .spawn(move || {
-            {
-                let mut view = view().lock().unwrap_or_else(|p| p.into_inner());
-                view.download = Some((profile.id.clone(), 0.0));
-                view.last_error = None;
-            }
             let result = ensure_model(&profile, &models_root(), &|p: f32| {
                 let mut view = view().lock().unwrap_or_else(|p| p.into_inner());
                 view.download = Some((profile.id.clone(), p));
@@ -680,9 +698,10 @@ fn download_model_async(id: &str, _event_tx: Sender<SpeechEvent>) {
 /// 删除模型目录；听写中的选中模型拒绝（会话正占着推理器）。
 fn handle_delete_model(id: &str, event_tx: Sender<SpeechEvent>) {
     let selected = read_selected_id();
-    if id == selected && state() == SpeechState::Listening {
+    // Loading 也要拒绝：模型装载与目录删除并发会装载失败且选中模型被清。
+    if id == selected && state() != SpeechState::Idle {
         emit(
-            SpeechEvent::Error("正在使用该模型听写，先停止后再删除".into()),
+            SpeechEvent::Error("正在使用该模型，先停止后再删除".into()),
             &event_tx,
         );
         return;
@@ -750,12 +769,14 @@ fn run_listening_session(
             Ok(SpeechCommand::Toggle) => break,
             Err(TryRecvError::Empty) => {}
             Err(TryRecvError::Disconnected) => break,
-            // 会话内的模型管理命令同样视为停止信号（听写优先让位）。
+            // 会话内的模型管理命令同样视为停止信号（听写优先让位），
+            // 但命令本身要回灌队列，让 worker 循环在会话结束后处理。
             Ok(
-                SpeechCommand::DownloadModel(_)
+                cmd @ (SpeechCommand::DownloadModel(_)
                 | SpeechCommand::DeleteModel(_)
-                | SpeechCommand::SelectModel(_),
+                | SpeechCommand::SelectModel(_)),
             ) => {
+                send_cmd(cmd);
                 break;
             }
         }

@@ -17,15 +17,23 @@
 /// 菜单按钮区域宽度。
 pub const MENU_BUTTON_WIDTH: u32 = 36;
 
+/// 候选栏左右水平内边距（iced_view 的 candidate_bar 容器 padding [0, 12]）。
+/// 菜单按钮贴内边距右缘，命中测试与绘制必须共用本常量。
+pub const CANDIDATE_BAR_H_PADDING: u32 = 12;
+
 /// 候选栏高度（与 daemon 一致）。
 pub const CANDIDATE_HEIGHT: u32 = 36;
 
 // ── 面板几何常量（1:1 对齐 XimeYao panel.rs 的 DIP 数值）─────────
 
 /// 菜单按钮是否包含坐标（候选栏区域，surface 局部坐标）。
+///
+/// 渲染端按钮贴 buffer 右缘、容器带 [0, 12] 水平内边距，实际绘制区间是
+/// `[W-12-36, W-12)`——命中区间必须与此一致（画得出来必须点得到）。
 pub fn menu_button_hit(x: i32, y: i32, panel_width: u32, bar_height: u32) -> bool {
-    let start = panel_width as i32 - MENU_BUTTON_WIDTH as i32;
-    x >= start && x < panel_width as i32 && y >= 0 && y < bar_height as i32
+    let end = panel_width as i32 - CANDIDATE_BAR_H_PADDING as i32;
+    let start = end - MENU_BUTTON_WIDTH as i32;
+    x >= start && x < end && y >= 0 && y < bar_height as i32
 }
 
 /// 面板标题栏高（列表/网格子页顶部：← 菜单 + 标题）。
@@ -703,6 +711,25 @@ pub fn truncate_text(text: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 菜单按钮命中区间 = 绘制区间：buffer 右缘内缩 [0,12] 容器内边距，
+    /// 再向左取 36px 按钮宽。2026-10-07 事故：命中公式曾假设 [W-36, W)，
+    /// 实际画在 [W-48, W-12)——右 1/3 永远点不中，窄栏（W 钳到 320 而命中
+    /// 传未钳制宽）时整个按钮不可点。
+    #[test]
+    fn menu_button_hit_matches_drawn_geometry() {
+        let w = 320u32;
+        let bar = CANDIDATE_HEIGHT;
+        // 绘制区间 [W-48, W-12) = [272, 308)
+        assert!(!menu_button_hit(271, 10, w, bar));
+        assert!(menu_button_hit(272, 10, w, bar));
+        assert!(menu_button_hit(307, 10, w, bar));
+        assert!(!menu_button_hit(308, 10, w, bar));
+        assert!(!menu_button_hit(319, 10, w, bar), "右内边距不是按钮");
+        // 纵向：只认候选栏高度以内
+        assert!(menu_button_hit(280, 0, w, bar));
+        assert!(!menu_button_hit(280, bar as i32, w, bar));
+    }
 
     /// 绘制堆叠必须与命中公式同源（2026-10-03 事故：iced 流式布局累积高度
     /// 偏离命中公式 ~15px，表情/符号页标签全部点不中）。

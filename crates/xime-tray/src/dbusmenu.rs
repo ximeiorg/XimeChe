@@ -175,7 +175,10 @@ impl DBusMenu {
                 }
             }
             children.push(Value::new((
-                2,
+                // 分隔线不参与点击，但 dbusmenu 规范要求同层 id 唯一
+                //（客户端按 id 缓存属性/路由属性更新）；第一个分隔线占 2，
+                // 6 未被任何动作占用（1/3/4/5 = 动作，≥10 = 方案）。
+                6,
                 HashMap::from([("type".to_string(), Value::new("separator"))]),
                 Vec::<Value<'static>>::new(),
             )));

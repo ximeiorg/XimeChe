@@ -16,11 +16,12 @@ type Pixmap = tiny_skia11::Pixmap;
 type Mask = tiny_skia11::Mask;
 
 use crate::menu::{
-    list_row_y, PanelGrid, PanelList, PanelPage, EMPTY_TEXT, GRID_CELL_GAP, GRID_CELL_HEIGHT,
-    GRID_HEIGHT, GRID_PER_ROW, GRID_ROWS, GRID_TAB_GAP, GRID_TAB_HEIGHT, LIST_DISPLAY_MAX_CHARS,
-    LIST_PAGE_BUTTON_HEIGHT, LIST_PAGE_BUTTON_WIDTH, LIST_PAGE_LABEL_WIDTH, LIST_ROWS_PER_PAGE,
-    MENU_BUTTON_WIDTH, PANEL_CONTENT_GAP, PANEL_GAP, PANEL_HEADER_HEIGHT, PANEL_H_INSET,
-    PANEL_ITEM_HEIGHT, PANEL_MENU_COL_GAP, PANEL_MENU_TOP, PANEL_ROW_GAP, RECENT_EMPTY_TEXT,
+    list_row_y, PanelGrid, PanelList, PanelPage, CANDIDATE_BAR_H_PADDING, EMPTY_TEXT,
+    GRID_CELL_GAP, GRID_CELL_HEIGHT, GRID_HEIGHT, GRID_PER_ROW, GRID_ROWS, GRID_TAB_GAP,
+    GRID_TAB_HEIGHT, LIST_DISPLAY_MAX_CHARS, LIST_PAGE_BUTTON_HEIGHT, LIST_PAGE_BUTTON_WIDTH,
+    LIST_PAGE_LABEL_WIDTH, LIST_ROWS_PER_PAGE, MENU_BUTTON_WIDTH, PANEL_CONTENT_GAP, PANEL_GAP,
+    PANEL_HEADER_HEIGHT, PANEL_H_INSET, PANEL_ITEM_HEIGHT, PANEL_MENU_COL_GAP, PANEL_MENU_TOP,
+    PANEL_ROW_GAP, RECENT_EMPTY_TEXT,
 };
 use crate::theme::PanelTheme;
 use crate::CandidateItem;
@@ -354,25 +355,34 @@ fn paint_rounded_panel(
     }
 }
 
-/// 将内容 buffer（BGRA, 半透明）合成到目标 buffer。
+/// 将内容 buffer 合成到目标 buffer。
+///
+/// 两边都是**预乘 alpha** 语义：src 来自 tiny-skia（输出即预乘 BGRA），
+/// dst 由 paint_rounded_panel 写入（fill_a 已乘进通道），最终 SHM
+/// ARGB8888 也由合成器按预乘解释——因此必须用 premultiplied-over：
+/// `out = src + dst*(1-sa)`，不再除 out_a（旧实现按直通 alpha 公式
+/// 处理预乘数据，AA 边缘被二次乘 alpha，文字边缘偏暗发硬）。
 fn blend_over(dst: &mut [u8], src: &[u8]) {
     for i in (0..src.len()).step_by(4) {
         let sa = src[i + 3] as f32 / 255.0;
+        if sa >= 1.0 {
+            // 完全覆盖：直接替换（省 3 次乘法，不透明像素占绝大多数）
+            dst[i] = src[i];
+            dst[i + 1] = src[i + 1];
+            dst[i + 2] = src[i + 2];
+            dst[i + 3] = src[i + 3];
+            continue;
+        }
         if sa <= 0.0 {
             continue;
         }
-        let da = dst[i + 3] as f32 / 255.0;
-        let out_a = sa + da * (1.0 - sa);
-        if out_a <= 0.0 {
-            continue;
-        }
+        let keep = 1.0 - sa;
         for c in 0..3 {
-            let s = src[i + c] as f32;
-            let d = dst[i + c] as f32;
-            let v = (s * sa + d * da * (1.0 - sa)) / out_a;
+            let v = src[i + c] as f32 + dst[i + c] as f32 * keep;
             dst[i + c] = v.clamp(0.0, 255.0) as u8;
         }
-        dst[i + 3] = (out_a * 255.0) as u8;
+        let out_a = sa + (dst[i + 3] as f32 / 255.0) * keep;
+        dst[i + 3] = (out_a * 255.0).clamp(0.0, 255.0) as u8;
     }
 }
 
@@ -439,7 +449,7 @@ fn candidate_bar_view<'a>(
         candidate_items(candidates, highlighted_index, theme),
         menu_button(false, theme),
     ])
-    .padding([0, 12])
+    .padding([0, CANDIDATE_BAR_H_PADDING as u16])
     .into()
 }
 
@@ -1056,7 +1066,7 @@ fn candidate_bar<'a>(
     )
     .width(iced_widget::core::Length::Fill)
     .height(theme.bar_height())
-    .padding([0, 12])
+    .padding([0, CANDIDATE_BAR_H_PADDING as u16])
     .align_y(iced_widget::core::alignment::Vertical::Center)
     .into()
 }
@@ -1105,6 +1115,47 @@ pub type IcedElement<'a> = Element<'a, (), Theme, Renderer>;
 mod tests {
     use super::*;
     use crate::CandidateItem;
+
+    /// blend_over 必须按预乘语义合成：半透明蓝（预乘 src）盖在不透明红上，
+    /// 结果 = src + dst*(1-sa)，alpha 通道单独 over。直通公式会把预乘的
+    /// src 通道再乘一次 sa，AA 边缘偏暗。
+    #[test]
+    fn blend_over_is_premultiplied() {
+        // src：半透明纯蓝，a=128（预乘后 B=255*128/255≈128，字节存 128）
+        let sa = 128.0 / 255.0;
+        let src = [0u8, 0, (255.0 * sa) as u8, 128];
+        // dst：不透明纯红（预乘 = 直通，因为 a=255）
+        let mut dst = [255u8, 0, 0, 255];
+        blend_over(&mut dst, &src);
+        // out.B = 128 + 0*(1-sa) = 128（预乘）
+        // out.R = 0 + 255*(1-sa) = 127
+        // out.A = sa + 1*(1-sa) = 1 → 255
+        // （f32 截断允许 ±1 误差）
+        let sa = sa as f32;
+        assert!(
+            (dst[0] as i32 - (255.0f32 * (1.0 - sa)) as i32).abs() <= 1,
+            "R 通道: {}",
+            dst[0]
+        );
+        assert_eq!(dst[1], 0);
+        assert!(
+            (dst[2] as i32 - (255.0f32 * sa) as i32).abs() <= 1,
+            "B 通道: {}",
+            dst[2]
+        );
+        assert_eq!(dst[3], 255);
+    }
+
+    /// 全透明 src 不得改动 dst；全不透明 src 必须整体替换。
+    #[test]
+    fn blend_over_endpoints() {
+        let mut dst = [10u8, 20, 30, 40];
+        blend_over(&mut dst, &[0, 0, 0, 0]);
+        assert_eq!(dst, [10, 20, 30, 40]);
+
+        blend_over(&mut dst, &[1, 2, 3, 255]);
+        assert_eq!(dst, [1, 2, 3, 255]);
+    }
 
     fn sample_candidates() -> Vec<CandidateItem> {
         vec![

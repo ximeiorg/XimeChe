@@ -34,8 +34,9 @@ fn init_tracing() -> WorkerGuard {
         }
     }
 
-    // 按天轮转，避免单文件无限增长；默认 INFO，需要 DEBUG 时用 RUST_LOG 覆盖
-    // （如 RUST_LOG=debug 或 RUST_LOG=cosmic_text=debug,xime_daemon=debug）。
+    // 按天轮转，避免单文件无限增长。
+    // 默认级别：三方库 info + 自家 crate 取配置 `log_level`（xime.yaml，
+    // 排障时改 debug 即可，无需环境变量）；RUST_LOG 仍可整体覆盖。
     let file_appender = tracing_appender::rolling::daily(&log_dir, "xime.log");
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
@@ -46,10 +47,29 @@ fn init_tracing() -> WorkerGuard {
 
     let stdout_layer = fmt::layer().with_writer(std::io::stderr).with_ansi(true);
 
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    // RUST_LOG 显式覆盖时句柄置 None（不注册热重载，配置 log_level 无效，
+    // 也不能让 ReloadStyle 把用户显式指定的过滤器冲掉）。
+    let (filter_layer, handle): (
+        tracing_subscriber::reload::Layer<EnvFilter, tracing_subscriber::Registry>,
+        Option<tracing_subscriber::reload::Handle<EnvFilter, tracing_subscriber::Registry>>,
+    ) = if let Ok(env_filter) = EnvFilter::try_from_default_env() {
+        // RUST_LOG 显式覆盖：句柄弃用（不注册），配置 log_level 无效——
+        // 否则 ReloadStyle 会把用户显式指定的过滤器冲掉。
+        let (layer, _handle) = tracing_subscriber::reload::Layer::new(env_filter);
+        (layer, None)
+    } else {
+        let cfg = xime_config::XimeConfig::load();
+        let (layer, handle) =
+            tracing_subscriber::reload::Layer::new(xime_daemon::build_log_filter(&cfg));
+        // RUST_LOG 未设：注册句柄，ReloadStyle 时配置 log_level 热生效。
+        (layer, Some(handle))
+    };
+    if let Some(handle) = handle {
+        let _ = xime_daemon::LOG_FILTER_HANDLE.set(handle);
+    }
 
     tracing_subscriber::registry()
-        .with(filter)
+        .with(filter_layer)
         .with(file_layer)
         .with(stdout_layer)
         .init();
@@ -57,12 +77,40 @@ fn init_tracing() -> WorkerGuard {
     guard
 }
 
-fn main() -> anyhow::Result<()> {
-    let _guard = init_tracing();
-    // pid 进日志：方便和 coredumpctl / journal 的记录互相对上。
-    info!("xime-daemon starting (pid={})", std::process::id());
+/// panic 必须落文件日志：DBus 激活进程的 stderr 落 journal（用户找不到），
+/// 而 non_blocking 缓冲在进程暴死时未刷——不补这一条，用户提交的日志里
+/// 会丢掉崩溃现场最后几行（恰恰是最关键的）。默认 hook 仍执行，保留
+/// journal 侧输出。
+fn install_panic_hook() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let payload = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| (*s).to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "<non-string panic payload>".to_string());
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "<unknown>".to_string());
+        let thread = std::thread::current()
+            .name()
+            .unwrap_or("<unnamed>")
+            .to_string();
+        error!(
+            "PANIC thread={thread} location={location}: {payload} (pid={}, version={})",
+            std::process::id(),
+            env!("CARGO_PKG_VERSION")
+        );
+        default_hook(info);
+    }));
+}
 
-    // 注入应用元数据（目录沿用 xime，librime 分发标识为 XimeChe）。
+fn main() -> anyhow::Result<()> {
+    // 元数据先于日志初始化：init_tracing 要读 XimeConfig::load()，
+    // 其 user_config_path 依赖 config_dir_name（默认元数据也是 xime，但
+    // 显式先注入，避免与默认值漂移）。
     let _ = xime_config::set_app_metadata(xime_config::AppMetadata {
         display_name: "曦码·澈输入法",
         config_dir_name: "xime",
@@ -72,6 +120,16 @@ fn main() -> anyhow::Result<()> {
         app_name: "rime.xime.daemon",
         version: env!("CARGO_PKG_VERSION"),
     });
+
+    let _guard = init_tracing();
+    install_panic_hook();
+    // pid/版本进日志：方便和 coredumpctl / journal 对上，以及判断用户
+    // 提交的日志出自哪个版本。
+    info!(
+        "xime-daemon starting (pid={}, version={})",
+        std::process::id(),
+        env!("CARGO_PKG_VERSION")
+    );
 
     // 单目录模型（对齐 XimeYao / Xime 3.0）：shared == user == ~/.config/xime/rime。
     // 随包方案数据（dev-install 装到 ~/.local/share/xime/rime-data 或系统的
@@ -199,6 +257,13 @@ fn main() -> anyhow::Result<()> {
             }
         }
 
+        // Exit 到这里。不能让 main 正常返回：libc exit() 会跑 atexit，撞上
+        // librime 静态析构段错误（coredump ×3 实锤），且抢在 wayland 线程
+        // clean_exit 的 _exit(0) 之前。永久挂起，把进程终结权交给 wayland
+        // 线程（DBus 服务对象随之自然失效，shutdown 语义不变）。
+        std::future::pending::<()>().await;
+
+        #[allow(unreachable_code)]
         Ok::<(), anyhow::Error>(())
     })?;
 

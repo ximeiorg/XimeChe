@@ -398,6 +398,9 @@ impl WaylandLoop {
                         self.tray.set_primary_color(new_color).await;
                     });
                     xime_config = new_config;
+                    // log_level 热生效：设置程序保存任意配置都会触发
+                    // ReloadStyle，用户改完日志级别无需重启 daemon。
+                    crate::apply_log_level(&xime_config);
                     theme = build_theme(&xime_config, dark_mode);
 
                     debug!("Style config reloaded, new primary_color={:?}", new_color);
@@ -426,24 +429,9 @@ impl WaylandLoop {
                         let schemas = rime.available_schemas();
                         self.rt_handle
                             .block_on(self.tray.update_schema_menu(schemas, schema_id));
-                        // 切方案后 Rime 会话回到新方案的默认状态，中英模式可能
-                        // 与切换前不同，托盘中/英跟随实际状态（如从英文态切到
-                        // 新方案回中文，托盘不能停留在 en）。
-                        if let Some(session) = rime.session() {
-                            if let Ok(status) = session.status() {
-                                if status.is_ascii_mode != last_ascii_mode {
-                                    last_ascii_mode = status.is_ascii_mode;
-                                    let tray_mode = tray_mode_for(status.is_ascii_mode);
-                                    self.rt_handle.block_on(async {
-                                        self.tray.set_mode(tray_mode).await;
-                                    });
-                                    debug!(
-                                        "Tray updated after schema switch: ascii_mode={}",
-                                        status.is_ascii_mode
-                                    );
-                                }
-                            }
-                        }
+                        // 新方案的中英状态可能与切换前不同（切换后回方案默认），
+                        // 托盘中/英跟随实际状态，不能停留在切换前的显示。
+                        self.sync_tray_after_session_rebuild(&rime, &mut last_ascii_mode);
                     }
                 }
                 Ok(DaemonCommand::ListDictEntries(dict, query, result_tx)) => {
@@ -453,11 +441,13 @@ impl WaylandLoop {
                     let result = rime
                         .with_user_dict_closed(|| crate::user_dict::list_entries(&dict, &query));
                     let _ = result_tx.send(result);
+                    self.sync_tray_after_session_rebuild(&rime, &mut last_ascii_mode);
                 }
                 Ok(DaemonCommand::UserDictOp(op, result_tx)) => {
                     debug!("UserDictOp command received: {op:?}");
                     let result = rime.with_user_dict_closed(|| op.run());
                     let _ = result_tx.send(result);
+                    self.sync_tray_after_session_rebuild(&rime, &mut last_ascii_mode);
                 }
                 Ok(DaemonCommand::Shutdown) => {
                     // 必须整进程退出：DBus 主循环不感知该命令；clean_exit 保
@@ -553,6 +543,12 @@ impl WaylandLoop {
                         ctrl_root_visible = false;
                         last_input_keysym = None;
                         consumed_presses.clear();
+                        // 候选缓存同样要清：语音会话结束的 redraw 会用缓存
+                        // 复活候选栏——不清的话 A 窗的候选栏会叠在新窗口上
+                        //（Idle 事件可能在新窗口激活后才到达）。
+                        if let Ok(mut cache) = self.candidate_cache.lock() {
+                            *cache = None;
+                        }
                         // 听写中失焦：停止会话（剩余文本经 finalize 迟到上屏，
                         // 没有焦点的窗口上继续录音没有意义）。
                         if crate::speech::state() != crate::speech::SpeechState::Idle {
@@ -661,6 +657,22 @@ impl WaylandLoop {
             self.handle_speech_event(c, plugin_host, event, theme, candidate_window_visible);
         });
 
+        // 应用侧 reset（浏览器地址栏 Esc 等）：协议要求清空 IM 组合状态，
+        // 否则随后的 commit 会插进已被应用重置的上下文。
+        if c.take_reset_pending() {
+            debug!("App requested reset: clearing composition and UI");
+            rime.clear_composition();
+            c.clear_preedit();
+            c.hide_candidate_window();
+            let _ = c.flush();
+            *candidate_window_visible = false;
+            quick_send.clear();
+            *last_input_keysym = None;
+            if let Ok(mut cache) = self.candidate_cache.lock() {
+                *cache = None;
+            }
+        }
+
         let events = c.pop_key_events();
         for event in events {
             debug!(
@@ -766,6 +778,10 @@ impl WaylandLoop {
                 *ctrl_root_visible = false;
                 *last_input_keysym = None;
                 consumed_presses.clear();
+                // 停用即视同失焦：候选缓存一并清（同 deactivate 路径的理由）。
+                if let Ok(mut cache) = self.candidate_cache.lock() {
+                    *cache = None;
+                }
                 self.rt_handle.block_on(async {
                     self.tray.set_mode(InputMode::English).await;
                 });
@@ -890,20 +906,27 @@ impl WaylandLoop {
 
             // 空格兜底：Rime 处理后组合仍在且无候选（confirm 落空/未消费），
             // 直接上屏编码，保证空格始终有产出（对齐 XimeYao）。
-            let raw_input = session.get_input().map(str::to_string);
-            let num_candidates = session.context().map_or(0, |ctx| ctx.menu().num_candidates);
-            if let Some(raw) =
-                space_fallback_input(sym.raw(), &modifiers, raw_input.as_deref(), num_candidates)
-            {
-                c.commit_string(&raw);
-                let _ = c.flush();
-                plugin_host.emit_text_committed(&raw);
-                session.clear_composition();
-                c.clear_preedit();
-                let _ = c.flush();
-                consumed_presses.insert(event.key);
-                debug!("Space with no candidates: committed raw input '{raw}'");
-                return;
+            // get_input/RimeGetContext 都是全量拷贝+堆分配（每条候选各一次），
+            // 兜底只对空格有意义——非空格键不做这两次拷贝。
+            if sym.raw() == 0x20 {
+                let raw_input = session.get_input().map(str::to_string);
+                let num_candidates = session.context().map_or(0, |ctx| ctx.menu().num_candidates);
+                if let Some(raw) = space_fallback_input(
+                    sym.raw(),
+                    &modifiers,
+                    raw_input.as_deref(),
+                    num_candidates,
+                ) {
+                    c.commit_string(&raw);
+                    let _ = c.flush();
+                    plugin_host.emit_text_committed(&raw);
+                    session.clear_composition();
+                    c.clear_preedit();
+                    let _ = c.flush();
+                    consumed_presses.insert(event.key);
+                    debug!("Space with no candidates: committed raw input '{raw}'");
+                    return;
+                }
             }
 
             if result && event.pressed {
@@ -978,11 +1001,14 @@ impl WaylandLoop {
                     match_quick_send_codes(&entries, raw_input, 9)
                 };
                 quick_send.items = matched;
-                quick_send.rime_count = menu.num_candidates;
+                // 页内候选数必须与展示端同一钳制：candidate_count 小于页大小时，
+                // 未钳制的数会让数字键去选一个没显示出来的候选（落穿给 Rime）。
+                quick_send.rime_count = menu
+                    .num_candidates
+                    .min(xime_config.style.candidate_count.clamp(1, 9) as usize);
                 quick_send.highlighted = 0;
 
                 if menu.num_candidates > 0 {
-                    // candidate_count 配置限制展示条数（对齐 macOS 版 max_candidates）
                     let max_candidates = xime_config.style.candidate_count.clamp(1, 9) as usize;
                     let mut candidate_items: Vec<xime_ui::CandidateItem> = menu
                         .candidates
@@ -1342,8 +1368,10 @@ impl WaylandLoop {
         let bar = theme.bar_height();
 
         // 候选栏区域：菜单按钮开合。听写中点它 = 停止听写（🎙️ 结束入口）。
+        // 注意用 buffer 宽度（measured 钳到 PANEL_MIN_WIDTH），与绘制端一致；
+        // last_panel_width 存的是未钳制的自然宽度，直接传会在窄栏下错位。
         if pe.y < bar as i32 {
-            if xime_ui::menu_button_hit(pe.x, pe.y, *last_panel_width, bar) {
+            if xime_ui::menu_button_hit(pe.x, pe.y, width, bar) {
                 if crate::speech::state() == crate::speech::SpeechState::Listening {
                     crate::speech::toggle();
                     return;
@@ -1586,9 +1614,14 @@ impl WaylandLoop {
                 if let Some(ctx) = session.context() {
                     let menu = ctx.menu();
                     if menu.num_candidates > 0 {
+                        // 与主渲染路径同一钳制：字根窗期间超配置数量的候选
+                        // 不能借恢复路径漏出来；恢复结果也要回写候选缓存，
+                        // 否则缓存与屏幕内容分叉（后续菜单重绘用旧缓存）。
+                        let max_candidates = xime_config.style.candidate_count.clamp(1, 9) as usize;
                         let candidate_items: Vec<xime_ui::CandidateItem> = menu
                             .candidates
                             .iter()
+                            .take(max_candidates)
                             .enumerate()
                             .map(|(i, x)| {
                                 let comment = x.comment.map(|c| c.to_string()).unwrap_or_default();
@@ -1599,7 +1632,9 @@ impl WaylandLoop {
                                 }
                             })
                             .collect();
-                        let highlighted_index = menu.highlighted_candidate_index;
+                        let highlighted_index = menu
+                            .highlighted_candidate_index
+                            .min(max_candidates.saturating_sub(1));
                         if let Err(e) =
                             c.show_candidate_window(&candidate_items, highlighted_index, theme)
                         {
@@ -1608,11 +1643,34 @@ impl WaylandLoop {
                         if let Err(e) = c.flush() {
                             debug!("Failed to flush: {}", e);
                         }
+                        if let Ok(mut cache) = self.candidate_cache.lock() {
+                            *cache = Some((candidate_items, highlighted_index));
+                        }
                     }
                 }
             }
         }
         true
+    }
+
+    /// 会话重建后（词典操作/切方案）按 Rime 实际状态同步托盘中英：
+    /// 新会话的 ascii_mode 回到方案默认值，不同步则托盘与实际模式背离。
+    fn sync_tray_after_session_rebuild(&self, rime: &RimeEngine, last_ascii_mode: &mut bool) {
+        if let Some(session) = rime.session() {
+            if let Ok(status) = session.status() {
+                if status.is_ascii_mode != *last_ascii_mode {
+                    *last_ascii_mode = status.is_ascii_mode;
+                    let tray_mode = tray_mode_for(status.is_ascii_mode);
+                    self.rt_handle.block_on(async {
+                        self.tray.set_mode(tray_mode).await;
+                    });
+                    debug!(
+                        "Tray updated after session rebuild: ascii_mode={}",
+                        status.is_ascii_mode
+                    );
+                }
+            }
+        }
     }
 
     // ── 快捷发送编码注入（从 main 恢复：独立功能，与面板改造无关）──
@@ -1746,6 +1804,9 @@ impl WaylandLoop {
                 }
                 0xFF1B => {
                     // Escape：清组合退出注入态
+                    // 接管的按下必须记入 consumed_presses：clear() 之后释放
+                    // 事件连本处理器都进不去了，不记会被当孤儿释放转发给应用。
+                    consumed_presses.insert(event.key);
                     quick_send.clear();
                     rime.clear_composition();
                     c.clear_preedit();
@@ -1759,6 +1820,7 @@ impl WaylandLoop {
                 }
                 0xFF52 | 0xFF51 => {
                     // Up / Left：上一个
+                    consumed_presses.insert(event.key);
                     quick_send.highlighted = quick_send.highlighted.saturating_sub(1);
                     self.render_quick_send(
                         c,
@@ -1771,6 +1833,7 @@ impl WaylandLoop {
                 }
                 0xFF54 | 0xFF53 | 0xFF09 => {
                     // Down / Right / Tab：下一个
+                    consumed_presses.insert(event.key);
                     if quick_send.highlighted + 1 < quick_send.items.len() {
                         quick_send.highlighted += 1;
                     }

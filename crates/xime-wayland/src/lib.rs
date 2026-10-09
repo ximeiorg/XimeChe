@@ -82,6 +82,10 @@ pub trait ImBackend {
     /// Recreate the input method object after the compositor reports it
     /// unavailable (e.g. GNOME lock screen). No-op on v1.
     fn handle_unavailable(&mut self) -> Result<(), String>;
+    /// 应用请求清空组合（v1 context.reset；v2 无此事件，恒 false）。取走即清。
+    fn take_reset_pending(&self) -> bool {
+        false
+    }
 }
 
 impl ImBackend for im_v1::WaylandConnectionV1 {
@@ -107,6 +111,10 @@ impl ImBackend for im_v1::WaylandConnectionV1 {
 
     fn get_keymap_pending(&self) -> Option<(OwnedFd, usize)> {
         self.get_keymap_pending()
+    }
+
+    fn take_reset_pending(&self) -> bool {
+        self.take_reset_pending()
     }
 
     fn forward_key(&self, serial: u32, time: u32, key: u32, pressed: bool) {

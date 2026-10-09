@@ -628,6 +628,11 @@ impl WaylandConnectionV2 {
         if let Some(im) = self.input_method.take() {
             im.destroy();
         }
+        // 候选窗 popup 挂在旧 input_method 上，IM 对象销毁后它随之失效；
+        // 不清掉的话 show_candidate_window 因 candidate_surface.is_some()
+        // 而跳过重建，解锁/重建后候选窗永远不再出现。
+        self.candidate_surface = None;
+        self.input_popup_surface = None;
 
         let seat = self.get_seat()?.clone();
         let manager = self.get_input_method_manager()?.clone();

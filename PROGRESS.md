@@ -1,8 +1,112 @@
 # XimeChe（曦码·澈输入法）开发进度
 
 ## 当前状态
-**托盘中/英状态同步修复：Ctrl+Space 停/启与切方案后托盘不再卡旧显示**
-（2026-10-07）。此前断连自愈（2026-10-05）、P10 语音 M1+M2、面板重写完成。
+**分发适配：日志体系（log_level/panic hook/版本行）+ 全仓深度审查修复**
+（2026-10-07）。此前托盘同步修复（0284244）、断连自愈（2026-10-05）。
+
+## 本次变更一（2026-10-07）：面向分发的日志改造
+
+- **log_level 配置项**（libximecore b955ba5）：`xime.yaml` 设
+  `log_level: debug` 即可让自家 crate 出按键级日志——此前用户无法给
+  DBus 激活进程设 RUST_LOG，"按键没反应"类问题无法从用户日志取证。
+  三方库固定 info（cosmic_text 每帧 debug 会拖慢按键线程）；RUST_LOG
+  优先且不被 ReloadStyle 热重载冲掉（不注册句柄）；ReloadStyle 触发
+  热生效。libximecore 新增 `atomic_write`（见变更二）。
+- **panic hook**：panic 落文件日志（DBus 激活进程 stderr 用户看不到；
+  non_blocking 暴死丢缓冲），默认 hook 保留（journal 侧）。
+- **启动日志带版本号**，用户提交日志可对版本。
+- 测试：xime-config +3（级别解析/合并优先级/序列化）、daemon +1
+  （过滤器规格可解析且三方库固定 info）。
+
+## 本次变更二（2026-10-07）：全仓深度审查修复（5 个并行审查 + 修复）
+
+审查发现并修复 7 个 P1 与一批 P2，全部经调用方/被调方核实后修改：
+
+**XimeChe**
+- [P1] xkb 修饰键索引错位（context.rs）：alt 用索引 1（实为 CapsLock）、
+  super 用 3（实为 Alt）——CapsLock 开启时空格兜底误拦、字根窗误隐。
+  按 XKB 固定序改为 alt=3(Mod1)、super=6(Mod4)。
+- [P1] 托盘 Exit 退出竞争（main.rs）：Exit 后主线程 break 返回 → libc
+  exit() 撞 librime 静态析构段错误，抢在 wayland 线程 _exit(0) 之前。
+  改为循环后永久挂起。
+- [P1] 菜单按钮命中几何失配：命中假设 [W-36,W)，实际画在 [W-48,W-12)
+  （容器 [0,12] 内边距），窄栏（W 钳 320 而命中传未钳制宽）整个按钮
+  点不中。命中公式与 iced_view 共用 CANDIDATE_BAR_H_PADDING，daemon
+  传钳制宽度；+测试锁定"画得出来必须点得到"。
+- [P1→修] redeploy 会话句柄顺序（rime.rs）：finalize 后才 drop 旧会话
+  （赋值先求值右值），SessionId 即堆地址，可能 destroy 新会话 → 静默
+  失灵。改为 take+drop 先于 finalize。
+- [P2] 失活/Ctrl+Space 停用不清 candidate_cache：语音结束 redraw 会把
+  A 窗候选栏复活到 B 窗。两处补清缓存。
+- [P2] quick_send 接管态 Escape/方向键/Tab 的按下未记 consumed_presses，
+  释放孤儿转发给应用。补 insert。
+- [P2] quick_send.rime_count 未按 candidate_count 钳制：数字键会去选
+  没显示的候选。钳制后存。
+- [P2] Ctrl 释放恢复候选不裁剪不回写缓存：复用主渲染钳制 + 回写缓存。
+- [P2] im_v1 Context Reset 被忽略：应用侧 reset（地址栏 Esc）后组合
+  残留，commit 插进已重置上下文。置位 pending，daemon 轮询清理。
+- [P2] 每键两次 RimeGetContext/get_input 全量拷贝：只在空格路径做。
+- [P2] 词典操作重建会话后托盘不同步：新增 sync_tray_after_session_
+  rebuild，SelectSchema 一并复用。
+- [P2] sni 每次读 icon_pixmap 新建 FontSystem（全量扫描字体目录 ×3
+  尺寸 ×每次中英切换）：全局缓存。
+- [P2] blend_over 直通公式处理预乘数据（AA 边缘二次乘 alpha）：改
+  premultiplied-over，+测试。
+- [P2] im_v2 handle_unavailable 不清 candidate_surface：解锁后候选窗
+  永不再现。补清理。
+- [P2] 剪贴板 >1MiB 截断入库：多读 1 字节判超限整条拒绝；offer proxy
+  drop 不发 destroy（每次复制泄漏合成器对象）：补 destroy()。
+- [P2] dbusmenu 两个分隔线同 id=2：第二个改 6。
+- [P2] schema_dict 缓存命中路径整读码表比签名 + 全量 clone：改 stat
+  判定 + 借用过滤只 clone 命中子集。
+- [P2] custom_phrase/recent_usage/speech 配置非原子写：统一走
+  libximecore `atomic_write`（tmp+rename，0600）。
+- [P2] speech：命令 drain 丢弃模型管理命令 → 回灌队列；删除守卫漏
+  Loading → 改 state != Idle 拒绝；模型 id 未清洗拼路径 → sanitize；
+  下载检查与占位 TOCTOU → 同锁内占位。
+
+**libximecore**
+- [P1] 插件 Promise settle 自旋不查 deadline：永不落定的 Promise 绕过
+  全部超时机制忙等宿主线程。循环内补 deadline_expired。
+- [P2] 沙箱 eval/Function 可经 Function.prototype.constructor 绕过：
+  bootstrap 拆掉原型 constructor。
+- [P2] 新增 `atomic_write`（xime-config）并应用到 config save、schema
+  清单/宿主配置/插件配置与注册表等读-改-写路径（崩溃不再留半截文件）。
+- [P1] setup http_client 无超时（reqwest blocking 默认总超时 30s）：
+  133MB 模型/大备份必败。改 connect_timeout 30s + 总超时禁用。
+- [P1] download_file 直写最终路径、失败不清理：改 .part + rename +
+  失败清理。
+- [P1] sync-server WS/SSE 把 broadcast Lagged 当服务停机踢客户端：
+  Lagged 继续推流；SSE 先订阅广播再补发历史（闭合丢事件窗口，靠
+  seq 去重）；WS binary 帧按 max_frame_size 复核（默认 64MiB 可绕过）。
+- [P2] 含明文密码配置先 0644 再 chmod：改 0600 一步创建（两处）。
+- [P2] delete_market_package 无下载/安装守卫：补齐。
+- [P2] start_op 后台线程 panic 卡死 busy：catch_unwind 落结果。
+- [P2] sync-store tmp 名仅 PID 并发互踩：加进程内原子计数。
+- [P2] rime_deploy 复制失败静默 + 每启动整文件读比对：失败收集并
+  warn 上报；(len,mtime) stat 短路（filetime 保留源 mtime）。
+- [P2] xime-sync-domain Storage trait 新 clippy double_must_use（宏
+  展开问题）：allow 修复（工具链更新导致的既有失败）。
+
+**审查通过未动的已知设计**：1ms 轮询主循环、roundtrip dispatch、
+block_on 托盘调用、单目录模型、clean_exit _exit(0)、launcher 看门狗。
+
+**遗留（有意未修，需独立功能点/更评估）**：
+- 每键 SHM buffer 全量重建（memfd+ftruncate+mmap，尺寸未变可复用）
+- 每键候选栏 3 次完整 iced layout（measure/draw/candidate_width）
+- sync-service SQLite 写在 async 上下文且持全局锁（spawn_blocking）
+- 插件 push_backup 以 JSON 数字数组过桥（>2-3MB 触发 QuickJS OOM，
+  应改 base64）；librime Context 的 &str 逃逸为 'static（当前调用方
+  均安全，改 owned 是 API 重构）；merge_configs 的 style/hotkeys 缺键
+  继承语义（改 Option 涉及 setup 保存流）
+- xime-setup `sidebar_probe` 探针测试需 `--features voice-page` 才过
+  （预先存在，与本批改动无关）
+
+**验证**：两仓库 clippy -D warnings 零警告；XimeChe 203 测试全过；
+libximecore 触及 crate 89 过 1（即上述预存探针）。真机回归项：菜单
+按钮点击、CapsLock 场景空格/字根、托盘 Exit 无 coredump、语音中切窗。
+
+## 本次变更（2026-10-07 早）：托盘中英状态同步修复
 
 ## 本次变更（2026-10-07）：托盘中英状态同步修复
 

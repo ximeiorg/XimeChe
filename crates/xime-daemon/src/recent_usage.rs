@@ -109,10 +109,11 @@ pub fn push(kind: RecentKind, value: &str) {
     state[kind.key()] = serde_json::json!(list);
     *slot = Some(state.clone());
     let path = store_path();
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    if let Err(e) = std::fs::write(&path, serde_json::to_string(&state).unwrap_or_default()) {
+    // 原子写：半截 JSON 会让下次启动静默丢掉全部最近使用记录。
+    if let Err(e) = xime_config::atomic_write(
+        &path,
+        serde_json::to_string(&state).unwrap_or_default().as_bytes(),
+    ) {
         tracing::debug!("recent_usage write failed: {e}");
     }
 }

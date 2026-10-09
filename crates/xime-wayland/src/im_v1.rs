@@ -70,6 +70,8 @@ pub struct InputMethodV1Data {
     pub panel_grid: PanelGrid,
     pub modifiers: Arc<Mutex<(u32, u32, u32, u32)>>,
     pub keymap_pending: Arc<Mutex<Option<(OwnedFd, usize)>>>,
+    /// 应用侧请求清空组合（context.reset）。daemon 轮询取走并清理组合状态。
+    pub reset_pending: Arc<Mutex<bool>>,
 }
 
 impl Dispatch<WlRegistry, GlobalListContents> for InputMethodV1Data {
@@ -185,6 +187,11 @@ impl Dispatch<ZwpInputMethodContextV1, InputMethodV1Data> for InputMethodV1Data 
             }
             ContextEvent::Reset => {
                 debug!("Context RESET event received");
+                // 协议要求：应用 reset 后组合器应清空 IM 侧组合状态。
+                // 置位待 daemon 取走处理（协议层不持有 Rime）。
+                if let Ok(mut pending) = state.reset_pending.lock() {
+                    *pending = true;
+                }
             }
             _ => {
                 debug!("Context event: {:?}", event);
@@ -642,6 +649,16 @@ impl WaylandConnectionV1 {
         } else {
             None
         }
+    }
+
+    /// 应用侧请求清空组合（context.reset）。取走即清；v2 协议无此事件。
+    pub fn take_reset_pending(&self) -> bool {
+        self.state
+            .reset_pending
+            .lock()
+            .ok()
+            .map(|mut p| std::mem::take(&mut *p))
+            .unwrap_or(false)
     }
 
     pub fn connection(&self) -> &Connection {

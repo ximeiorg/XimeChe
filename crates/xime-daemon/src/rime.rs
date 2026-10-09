@@ -177,6 +177,15 @@ impl RimeEngine {
     /// 重新部署并返回结果（托盘「重新部署」后发桌面通知用）。
     pub fn redeploy_with_result(&mut self) -> librime::DeployResult {
         debug!("Redeploying Rime...");
+        // 先丢弃旧会话再 finalize。不能拖到下面 create_session 之后：
+        // Rust 赋值语义是先求值右值再 drop 旧值，旧句柄的 destroy_session
+        // 会在 finalize 之后执行（librime API 上是未定义行为）；且 librime
+        // 的 SessionId 就是 Session 对象的堆地址，部署期大量分配释放后新
+        // 会话可能恰好复用旧地址——destroy_session(旧地址) 会抹掉新会话，
+        // 输入法此后静默失灵。
+        if let Some(session) = self.session.take() {
+            drop(session);
+        }
         librime::finalize();
 
         let (shared_data_dir, _) = get_data_dirs();
