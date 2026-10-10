@@ -2,6 +2,7 @@ pub mod candidate;
 pub mod iced_view;
 pub mod menu;
 pub mod theme;
+pub mod voice;
 
 pub use candidate::CandidateItem;
 pub use candidate::CandidateList;

@@ -208,6 +208,7 @@ impl Dispatch<WlPointer, InputMethodData> for InputMethodData {
                         pressed,
                         button,
                         on_menu: false,
+                        on_voice: false,
                     });
                 }
             }

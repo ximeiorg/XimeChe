@@ -40,6 +40,8 @@ pub struct PointerEvent {
     pub button: u32,
     /// 点击是否发生在菜单面板 surface 上。
     pub on_menu: bool,
+    /// 点击是否发生在语音悬浮层 surface 上（悬浮层只读，点击 = 停止听写）。
+    pub on_voice: bool,
 }
 
 /// Common backend interface shared by the v1 (KWin) and v2 (GNOME/wlroots)
@@ -79,6 +81,21 @@ pub trait ImBackend {
     fn show_root_window(&mut self, key: char, root: &str, theme: &PanelTheme)
         -> Result<(), String>;
     fn hide_root_window(&mut self);
+    /// 是否支持独立定位的语音悬浮层（v1 输入面板 set_toplevel 可钉在
+    /// 屏幕底部居中；v2 的 popup surface 只能跟随光标，不支持）。
+    fn supports_voice_overlay(&self) -> bool {
+        false
+    }
+    /// 语音悬浮层整幅重绘（固定尺寸半透明频谱面板）。不支持的后端返回
+    /// Err，daemon 据此回落候选栏实时反馈。
+    fn show_voice_overlay(
+        &mut self,
+        _view: &xime_ui::voice::VoiceView,
+        _theme: &PanelTheme,
+    ) -> Result<(), String> {
+        Err("voice overlay not supported by this backend".into())
+    }
+    fn hide_voice_overlay(&mut self) {}
     /// Recreate the input method object after the compositor reports it
     /// unavailable (e.g. GNOME lock screen). No-op on v1.
     fn handle_unavailable(&mut self) -> Result<(), String>;
@@ -180,6 +197,23 @@ impl ImBackend for im_v1::WaylandConnectionV1 {
 
     fn hide_root_window(&mut self) {
         self.hide_root_window()
+    }
+
+    fn supports_voice_overlay(&self) -> bool {
+        true
+    }
+
+    fn show_voice_overlay(
+        &mut self,
+        view: &xime_ui::voice::VoiceView,
+        theme: &PanelTheme,
+    ) -> Result<(), String> {
+        self.show_voice_overlay(view, theme)
+            .map_err(|e| e.to_string())
+    }
+
+    fn hide_voice_overlay(&mut self) {
+        self.hide_voice_overlay()
     }
 
     fn handle_unavailable(&mut self) -> Result<(), String> {
@@ -433,6 +467,7 @@ mod tests {
             pressed: true,
             button: 272,
             on_menu: false,
+            on_voice: false,
         };
         assert_eq!(event.serial, 50);
         assert_eq!(event.x, 320);
@@ -452,6 +487,7 @@ mod tests {
             pressed: false,
             button: 272,
             on_menu: true,
+            on_voice: false,
         };
         assert!(!event.pressed);
         assert!(event.on_menu);

@@ -17,6 +17,7 @@
 //! 交互（对齐 XimeYao 设置页说明的设计意图）：点候选栏 🎙️ 开始听写，
 //! 停顿时自动上屏（端点检测断句），再点 🎙️ 结束。
 
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
@@ -381,6 +382,78 @@ fn ensure_model(
     Ok(dir)
 }
 
+// ── 音频电平（悬浮层频谱数据源）─────────────────────────────────────
+// worker 每块（~64ms）算一次 RMS 推入共享环形缓冲；语音悬浮层由主循环
+// 按 ~30fps 定时重绘时读取（不经过事件通道——电平是流数据，事件只在
+// 状态/文本变化时才有意义）。
+
+/// 频谱条数（悬浮层从左到右，新电平从右侧滚入；64ms/块 ≈ 1.5s 历史）。
+pub const LEVEL_BARS: usize = 24;
+/// RMS 增益：正常说话 RMS ~0.02-0.15，×10 后映射到可视条高。
+const LEVEL_GAIN: f32 = 10.0;
+/// 静音地板：低于此 RMS 视为无声（环境噪声不点亮频谱）。
+const LEVEL_FLOOR: f32 = 0.006;
+/// 电平衰减：单块回落系数，无新能量时"余音"指数收尾。
+const LEVEL_DECAY: f32 = 0.75;
+
+static LEVELS: OnceLock<Mutex<VecDeque<f32>>> = OnceLock::new();
+
+fn levels() -> &'static Mutex<VecDeque<f32>> {
+    LEVELS.get_or_init(|| Mutex::new(VecDeque::new()))
+}
+
+/// 一块 s16 样本的 RMS（振幅归一化到 0..1，/32768）。
+fn block_rms(samples: &[i16]) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    let sum_sq: f64 = samples.iter().map(|&s| (s as f64) * (s as f64)).sum();
+    ((sum_sq / samples.len() as f64).sqrt() / 32768.0) as f32
+}
+
+/// RMS → 0..1 电平（增益放大 + 静音地板 + 满幅钳制）。
+fn normalize_level(rms: f32) -> f32 {
+    if rms < LEVEL_FLOOR {
+        0.0
+    } else {
+        (rms * LEVEL_GAIN).clamp(0.0, 1.0)
+    }
+}
+
+/// 推入当前块电平（带衰减平滑：单块静音不清零，余音渐收）。
+fn push_level(rms: f32) {
+    let mut q = levels().lock().unwrap_or_else(|p| p.into_inner());
+    let prev = q.back().copied().unwrap_or(0.0);
+    let level = normalize_level(rms).max(prev * LEVEL_DECAY);
+    q.push_back(level);
+    while q.len() > LEVEL_BARS {
+        q.pop_front();
+    }
+}
+
+/// 清空电平缓冲（会话开始时调用，避免上一次会话的旧条形滚入）。
+fn reset_levels() {
+    levels().lock().unwrap_or_else(|p| p.into_inner()).clear();
+}
+
+/// 悬浮层频谱快照：左补零到固定条数（视觉上从左侧滚入）。
+pub fn levels_snapshot() -> Vec<f32> {
+    let q = levels().lock().unwrap_or_else(|p| p.into_inner());
+    let mut out = vec![0.0; LEVEL_BARS.saturating_sub(q.len())];
+    out.extend(q.iter().copied());
+    out
+}
+
+/// 清空滞留事件与电平（失活/重新激活时调用）：会话收尾的 Committed
+/// 不允许投递到下一个焦点窗口——A 窗说的话上屏到 B 窗是错乱行为。
+pub fn clear_events() {
+    if let Some(rx) = EVENT_RX.get() {
+        let rx = rx.lock().unwrap_or_else(|p| p.into_inner());
+        while rx.try_recv().is_ok() {}
+    }
+    reset_levels();
+}
+
 // ── 全局桥（DBus 线程与 wayland 主循环共享）─────────────────────────
 
 /// daemon 内部状态视图（worker/下载线程是写者，DBus/主循环是读者）。
@@ -628,6 +701,7 @@ fn worker_loop(cmd_rx: Receiver<SpeechCommand>, event_tx: Sender<SpeechEvent>) {
                     continue;
                 }
                 emit(SpeechEvent::State(SpeechState::Loading), &event_tx);
+                reset_levels();
                 match run_listening_session(&profile, &cmd_rx, &event_tx) {
                     Ok(()) => info!("Speech session ended normally"),
                     Err(e) => {
@@ -790,6 +864,7 @@ fn run_listening_session(
             .map(|pair| i16::from_ne_bytes(*pair))
             .collect();
         recognizer.accept_pcm16(SAMPLE_RATE as i32, &block);
+        push_level(block_rms(&block));
 
         emit(SpeechEvent::Partial(recognizer.partial_text()), event_tx);
 
@@ -843,6 +918,53 @@ mod tests {
         write_selected_id("zipformer-zh-int8").unwrap();
         assert_eq!(read_selected_id(), "zipformer-zh-int8");
         std::fs::remove_file(speech_config_path()).ok();
+    }
+
+    #[test]
+    fn block_rms_constant_amplitude() {
+        // 满幅方波 = 0.5 RMS（16384/32768）
+        let loud = vec![16384i16; 1024];
+        assert!((block_rms(&loud) - 0.5).abs() < 1e-6);
+        assert_eq!(block_rms(&[]), 0.0);
+    }
+
+    #[test]
+    fn normalize_level_gain_floor_and_clamp() {
+        // 静音地板以下为 0
+        assert_eq!(normalize_level(0.0), 0.0);
+        assert_eq!(normalize_level(LEVEL_FLOOR / 2.0), 0.0);
+        // 增益放大
+        assert!((normalize_level(0.05) - 0.5).abs() < 1e-6);
+        // 满幅钳制
+        assert_eq!(normalize_level(0.2), 1.0);
+    }
+
+    #[test]
+    fn level_ring_push_snapshot_and_clear() {
+        // LEVELS 是进程级静态（worker 线程与主循环共享的产物），测试只能
+        // 串行驱动一个用例内完成（并行用例会互相污染，同 recent_usage 教训）。
+        reset_levels();
+        // 快照左补零到固定条数
+        assert_eq!(levels_snapshot().len(), LEVEL_BARS);
+        push_level(0.0);
+        push_level(1.0); // rms=1 → clamp 1.0
+        push_level(0.0); // 无新能量：prev*DECAY 余音回落
+        let snap = levels_snapshot();
+        assert!(
+            (snap[LEVEL_BARS - 1] - LEVEL_DECAY).abs() < 1e-6,
+            "最新电平（静音块）按衰减回落"
+        );
+        assert_eq!(snap[LEVEL_BARS - 2], 1.0, "上一块满幅电平在其左侧");
+        // 溢出裁剪：缓冲不超过 LEVEL_BARS
+        for _ in 0..LEVEL_BARS * 2 {
+            push_level(0.5);
+        }
+        let q = levels().lock().unwrap_or_else(|p| p.into_inner());
+        assert_eq!(q.len(), LEVEL_BARS);
+        drop(q);
+        // 清空后全零（悬浮层不应残留上一次会话的条形）
+        clear_events();
+        assert!(levels_snapshot().iter().all(|&l| l == 0.0));
     }
 
     #[test]
