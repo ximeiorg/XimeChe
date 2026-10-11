@@ -2,11 +2,13 @@ use std::os::unix::io::{AsFd, FromRawFd, OwnedFd};
 use std::os::unix::net::UnixStream;
 use std::slice;
 use std::sync::{Arc, Mutex};
-use tracing::debug;
+use std::time::{Duration, Instant};
+use tracing::{debug, error};
 use wayland_backend::client::Backend;
 use wayland_client;
 use wayland_client::globals::{GlobalList, GlobalListContents};
 use wayland_client::protocol::wl_buffer::WlBuffer;
+use wayland_client::protocol::wl_callback::WlCallback;
 use wayland_client::protocol::wl_compositor::WlCompositor;
 use wayland_client::protocol::wl_keyboard::WlKeyboard;
 use wayland_client::protocol::wl_output::WlOutput;
@@ -78,6 +80,32 @@ pub struct InputMethodV1Data {
     pub keymap_pending: Arc<Mutex<Option<(OwnedFd, usize)>>>,
     /// 应用侧请求清空组合（context.reset）。daemon 轮询取走并清理组合状态。
     pub reset_pending: Arc<Mutex<bool>>,
+    /// 楔死探测：已发出未 ack 的 wl_display.sync 时刻（wl_callback Done 时
+    /// 清空）。超时未 ack = 合成器侧连接楔死，dispatch 返回 Err 交给自愈。
+    pub sync_outstanding: Arc<Mutex<Option<Instant>>>,
+}
+
+/// sync 探针发送间隔（每秒一次，代价可忽略）。
+const SYNC_PROBE_INTERVAL: Duration = Duration::from_secs(1);
+/// sync 超时判定：合成器正常应答是毫秒级，2 秒无 ack 视为连接楔死。
+const SYNC_ACK_TIMEOUT: Duration = Duration::from_secs(2);
+
+impl Dispatch<WlCallback, InputMethodV1Data> for InputMethodV1Data {
+    fn event(
+        state: &mut InputMethodV1Data,
+        _proxy: &WlCallback,
+        event: <WlCallback as Proxy>::Event,
+        _data: &InputMethodV1Data,
+        _conn: &wayland_client::Connection,
+        _qhandle: &QueueHandle<InputMethodV1Data>,
+    ) {
+        if matches!(event, wl_callback::Event::Done { .. }) {
+            if let Ok(mut pending) = state.sync_outstanding.lock() {
+                *pending = None;
+            }
+            // done 事件本身是析构（wayland.xml：type="destructor"），无需发送 destroy
+        }
+    }
 }
 
 impl Dispatch<WlRegistry, GlobalListContents> for InputMethodV1Data {
@@ -526,6 +554,8 @@ pub struct WaylandConnectionV1 {
     voice_surface_obj: Option<WlSurface>,
     voice_buffer: Option<WlBuffer>,
     voice_pool: Option<WlShmPool>,
+    /// 上次 sync 探针发送时刻（楔死探测节流）。
+    last_sync_probe: Instant,
 }
 
 impl WaylandConnectionV1 {
@@ -598,6 +628,7 @@ impl WaylandConnectionV1 {
             voice_surface_obj: None,
             voice_buffer: None,
             voice_pool: None,
+            last_sync_probe: Instant::now(),
         })
     }
 
@@ -614,10 +645,71 @@ impl WaylandConnectionV1 {
     }
 
     pub fn dispatch_events(&mut self) -> Result<()> {
-        // Blocking dispatch - wait for at least one event
+        // 非阻塞事件泵 + 合成器健康探测。此前是阻塞 roundtrip：KWin 侧
+        // 停止应答时（连接楔死，socket 不报错）blocking_read 永久挂起，
+        // 主循环连同按键处理/DBus 命令全部冻结，且 2026-10-05 的断连自愈
+        // 只在 dispatch 返回 Err 时触发——挂起状态下自愈永远不会启动，
+        // IM 激活的窗口里所有按键（含 Ctrl+A 等应用快捷键）被吸进黑洞。
+        // 改为：已到事件立即派发 + 0 超时探可读（保住 1ms 按键延迟），
+        // 另以周期性 wl_display.sync 的 ack 超时（2s）判定楔死并返回 Err，
+        // 交给 daemon 的 HealScheduler 走既有恢复链（杀 launcher → KWin
+        // 重拉 → 新 fd 重连）。
+        self.flush()?;
+
         self.event_queue
-            .roundtrip(&mut self.state)
+            .dispatch_pending(&mut self.state)
             .map_err(|e| Error::Io(std::io::Error::other(e)))?;
+
+        // 非阻塞读：socket 可读才 read_events（0 超时 = 纯探测）。
+        if let Some(guard) = self.event_queue.prepare_read() {
+            let backend = self.connection.backend();
+            let fd = backend.poll_fd();
+            let mut fds = [nix::poll::PollFd::new(fd, nix::poll::PollFlags::POLLIN)];
+            match nix::poll::poll(&mut fds, nix::poll::PollTimeout::ZERO) {
+                Ok(n)
+                    if n > 0
+                        && fds[0]
+                            .revents()
+                            .is_some_and(|f| f.contains(nix::poll::PollFlags::POLLIN)) =>
+                {
+                    guard
+                        .read()
+                        .map_err(|e| Error::Io(std::io::Error::other(e)))?;
+                    self.event_queue
+                        .dispatch_pending(&mut self.state)
+                        .map_err(|e| Error::Io(std::io::Error::other(e)))?;
+                }
+                Ok(_) => {}
+                Err(e) => return Err(Error::Io(std::io::Error::from(e))),
+            }
+        }
+
+        // 楔死探测：有未 ack 的 sync 且超时 → 连接已死；到期则补发探针。
+        let outstanding = self.state.sync_outstanding.lock().ok().and_then(|p| *p);
+        match outstanding {
+            Some(sent_at) => {
+                if sent_at.elapsed() > SYNC_ACK_TIMEOUT {
+                    error!("Compositor sync not acked in {SYNC_ACK_TIMEOUT:?}, connection wedged");
+                    return Err(Error::Io(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "wayland sync probe not acked (compositor wedged)",
+                    )));
+                }
+            }
+            None => {
+                let now = Instant::now();
+                if now.duration_since(self.last_sync_probe) >= SYNC_PROBE_INTERVAL {
+                    self.connection
+                        .display()
+                        .sync(&self.event_queue.handle(), self.state.clone());
+                    if let Ok(mut pending) = self.state.sync_outstanding.lock() {
+                        *pending = Some(now);
+                    }
+                    self.last_sync_probe = now;
+                }
+            }
+        }
+
         Ok(())
     }
 

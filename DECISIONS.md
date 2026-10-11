@@ -1,5 +1,33 @@
 # XimeChe（曦码·澈输入法）重要决策
 
+## 2026-10-11: Wayland 事件泵非阻塞化 + sync 楔死探测
+
+**问题**：`dispatch_events()` 用阻塞 `roundtrip()`（内含 `blocking_read`）。
+2026-10-11 实锤（gdb 栈 + 7.5 小时零日志）：KWin 侧停止应答后 socket 不报
+错、roundtrip 永久挂起——wayland 线程连同按键处理、DBus 命令全部冻结；
+而 2026-10-05 的断连自愈只在 dispatch **返回 Err** 时触发，挂起状态下自愈
+永远不启动。后果：IM 激活的窗口里所有按键（用户报"Ctrl+A 无法全选"）被
+楔死的键盘 grab 吸进黑洞，且托盘一切操作无效，只能整进程 kill。
+
+**决策**：`dispatch_events` 重写为三段式（v1/v2 同构）：
+1. `flush()` + `dispatch_pending()`——已到达事件立即派发；
+2. `prepare_read()` + `poll(fd, 0)` + `read_events()`——0 超时探可读，
+   没有事件立即返回（主循环保持 ~1ms 节奏，按键延迟不变）；
+3. **sync 楔死探测**：每 1s 发一次 `wl_display.sync`（回调 Done 时清
+   标记），未 ack 超 2s 判定连接楔死，dispatch 返回 `Err(TimedOut)`——
+   复用既有 HealScheduler 恢复链（杀 launcher → KWin 重拉 → 新 fd）。
+
+**理由**：
+1. 楔死检测必须有"主动探针"：安静（无事件）与死亡（不回 sync）在纯
+   被动读上不可区分，sync 是最小代价的心跳；
+2. 超时返回 Err 而非线程内自救：conn 所有权在主循环，沿用 2026-10-05
+   已验证的恢复链是最小改动；
+3. poll(0) 而非长超时阻塞：按键路径的延迟预算是毫秒级。
+
+**验证**：213 tests 全过；真机重启后 v1 Context 事件持续流入（serial
+递增）、12+ 探针周期零误报；楔死场景恢复依赖下次复现（错误日志已带
+"connection wedged" 标记可取证）。
+
 ## 2026-10-01: rime 数据目录迁移单目录模型（对齐 XimeYao）
 
 **问题**：Unix 沿用双目录模型（shared=`~/.local/share/xime/rime-data` 只读装

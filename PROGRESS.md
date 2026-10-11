@@ -1,9 +1,34 @@
 # XimeChe（曦码·澈输入法）开发进度
 
 ## 当前状态
-**语音交互层：托盘/快捷键入口 + 屏幕底部居中半透明频谱悬浮层**
-（2026-10-11）。此前日志体系 + 全仓深度审查修复（2026-10-07）、
-托盘同步修复（0284244）、断连自愈（2026-10-05）。
+**修复：Wayland 连接楔死导致按键黑洞（Ctrl+A 全选失灵的根因）**
+（2026-10-11）。此前语音交互层（5dc47e3）、日志体系 + 全仓审查（2026-10-07）。
+
+## 本次变更（2026-10-11）：dispatch 永久阻塞修复（按键黑洞根治）
+
+**现象**：用户报"一些 app 里 Ctrl+A 无法全选文本（Android Studio logcat
+页）"。排查链：Android Studio 为 Flatpak 原生 Wayland 客户端（无 DISPLAY、
+wayland socket fd 实锤）；librime 探针（examples/key_probe.rs）实锤非组词
+态 Ctrl+A **不**被消费（组词态被 emacs 绑定消费是 `when: composing` 设计）；
+daemon 日志 7.5 小时零输出（连 ReloadStyle 必产的 INFO 都没有）→ Deploy
+探针无桌面通知 → **gdb 栈实锤 wayland 线程卡死在
+`roundtrip() → blocking_read()`**。
+
+**根因**：KWin 侧停止应答后 wayland socket 不报错，阻塞 roundtrip 永久
+挂起；主循环冻结 = 按键处理/DBus 命令/语音事件全停；IM 激活窗口的键盘
+grab 把按键吸进黑洞。2026-10-05 的断连自愈只覆盖 dispatch **返回 Err** 的
+场景，"dispatch 永不返回"是自愈的盲区。
+
+**修复**（DECISIONS.md 2026-10-11 详述）：`dispatch_events` 三段式
+（v1/v2 同构）——flush + dispatch_pending → prepare_read + poll(fd, 0)
++ read_events（0 超时保 1ms 按键延迟）→ 每 1s 发 `wl_display.sync`、
+2s 未 ack 判楔死返回 Err，交 HealScheduler 走既有恢复链。新增
+`Dispatch<WlCallback>`（done 事件清探针标记；done 是析构事件无需 destroy）。
+
+**验证**：213 tests 全过、clippy -D warnings 全绿；真机重启后 Context
+事件持续流入（serial 递增）、探针周期零误报；下次楔死会在 error 日志留
+"connection wedged" 现场可取证。`log_level: debug` 已临时写入用户
+xime.custom.yaml 供复测取证（排障后可关）。
 
 ## 本次变更（2026-10-11）：语音输入交互层（悬浮频谱 + 托盘/快捷键入口）
 
