@@ -226,6 +226,9 @@ fn main() -> anyhow::Result<()> {
                         MenuAction::ToggleMode => {
                             command_tx.send(DaemonCommand::ToggleMode).ok();
                         }
+                        MenuAction::ToggleSpeech => {
+                            command_tx.send(DaemonCommand::ToggleSpeech).ok();
+                        }
                         MenuAction::Settings => {
                             let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
                             let setup_path = format!("{}/.local/bin/xime-setup", home);

@@ -6976,6 +6976,7 @@ dependencies = [
 name = "xime-config"
 version = "0.1.0"
 dependencies = [
+ "filetime",
  "hex",
  "librime",
  "once_cell",

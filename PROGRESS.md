@@ -1,8 +1,74 @@
 # XimeChe（曦码·澈输入法）开发进度
 
 ## 当前状态
-**分发适配：日志体系（log_level/panic hook/版本行）+ 全仓深度审查修复**
-（2026-10-07）。此前托盘同步修复（0284244）、断连自愈（2026-10-05）。
+**修复：Wayland 连接楔死导致按键黑洞（Ctrl+A 全选失灵的根因）**
+（2026-10-11）。此前语音交互层（5dc47e3）、日志体系 + 全仓审查（2026-10-07）。
+
+## 本次变更（2026-10-11）：dispatch 永久阻塞修复（按键黑洞根治）
+
+**现象**：用户报"一些 app 里 Ctrl+A 无法全选文本（Android Studio logcat
+页）"。排查链：Android Studio 为 Flatpak 原生 Wayland 客户端（无 DISPLAY、
+wayland socket fd 实锤）；librime 探针（examples/key_probe.rs）实锤非组词
+态 Ctrl+A **不**被消费（组词态被 emacs 绑定消费是 `when: composing` 设计）；
+daemon 日志 7.5 小时零输出（连 ReloadStyle 必产的 INFO 都没有）→ Deploy
+探针无桌面通知 → **gdb 栈实锤 wayland 线程卡死在
+`roundtrip() → blocking_read()`**。
+
+**根因**：KWin 侧停止应答后 wayland socket 不报错，阻塞 roundtrip 永久
+挂起；主循环冻结 = 按键处理/DBus 命令/语音事件全停；IM 激活窗口的键盘
+grab 把按键吸进黑洞。2026-10-05 的断连自愈只覆盖 dispatch **返回 Err** 的
+场景，"dispatch 永不返回"是自愈的盲区。
+
+**修复**（DECISIONS.md 2026-10-11 详述）：`dispatch_events` 三段式
+（v1/v2 同构）——flush + dispatch_pending → prepare_read + poll(fd, 0)
++ read_events（0 超时保 1ms 按键延迟）→ 每 1s 发 `wl_display.sync`、
+2s 未 ack 判楔死返回 Err，交 HealScheduler 走既有恢复链。新增
+`Dispatch<WlCallback>`（done 事件清探针标记；done 是析构事件无需 destroy）。
+
+**验证**：213 tests 全过、clippy -D warnings 全绿；真机重启后 Context
+事件持续流入（serial 递增）、探针周期零误报；下次楔死会在 error 日志留
+"connection wedged" 现场可取证。`log_level: debug` 已临时写入用户
+xime.custom.yaml 供复测取证（排障后可关）。
+
+## 本次变更（2026-10-11）：语音输入交互层（悬浮频谱 + 托盘/快捷键入口）
+
+用户需求：语音转文本不该只有候选栏反馈，要有独立交互——托盘/组合键开启，
+屏幕中间偏下显示半透明频谱悬浮层表示正在语音中，快捷键开关。
+
+- **悬浮层绘制**（xime-ui/src/voice.rs 新模块）：固定 440×72 半透明圆角
+  面板（SDF 背景 alpha 进预乘通道，`paint_rounded_panel_alpha` 变体，整体
+  0.78 不透明度）；24 根镜像频谱条（主题高亮色，预乘实心矩形逐像素 over，
+  `blend_solid_rect`）；iced 文本（🎙️ + partial 文本 + 「Ctrl+Alt+V 结束」
+  状态行）；几何常量绘制/命中/单测同源（voice_bar_rect/text_zone_x）。
+  `examples/voice_snapshot.rs` 渲染亮/暗 PNG 目检（注意：预乘数据被 PNG
+  查看器当直通 alpha 显示会整体偏暗，真实合成器解释正确）。
+- **音频电平**（speech.rs）：worker 每块（1024 样本 ≈ 64ms）算 RMS →
+  增益 ×10 + 静音地板 + 衰减平滑（余音渐收）→ 共享环形缓冲
+  （LEVEL_BARS=24 ≈ 1.5s 历史）；`levels_snapshot()` 左补零供悬浮层滚动。
+- **悬浮层 surface**（im_v1.rs）：第二个 `zwp_input_panel_surface_v1`，
+  `set_toplevel(output, center_bottom)` 钉屏幕底部居中（v1 协议唯一位置
+  枚举；keyboard surface 只在 text-input 激活时显示，与语音会话的存活
+  条件天然一致）；专属 buffer/pool 逐帧整幅重绘（~30fps 节拍，
+  VOICE_FRAME_INTERVAL=33ms，事件间也滚动/衰减）。v2 无面板协议 →
+  `supports_voice_overlay()==false` 回落 P10 候选栏实时反馈（trait 默认
+  实现，v2 零改动）。
+- **入口三路 + 停止四路**：托盘菜单新增「语音输入」（DBusMenu id 7 →
+  `MenuAction::ToggleSpeech` → `DaemonCommand::ToggleSpeech`；IM 未激活时
+  拒绝并桌面通知——commit 需要 text-input 上下文，盲录只会丢文本）；
+  快捷键 Ctrl+Alt+V（IM 激活时键盘路径拦截，`is_voice_toggle_hotkey` 纯
+  函数 + 测试；硬编码绑定，配置化等 libximecore hotkeys 缺键继承语义修复
+  后一并做）；候选栏 🎙️ 卡片（原有）。听写中模态：Esc = 停止收尾，其余
+  按键吞掉（孤儿释放抑制）；点击悬浮层 = 停止（im_v1 指针 Enter 判别
+  来源 surface，`PointerEvent` 新增 `on_voice` 字段）。
+- **失焦/停用清理**：deactivate、Ctrl+Space 停用、重新激活三处统一
+  `speech::clear_events()`——会话收尾的 Committed 不允许迟到投递到下一个
+  焦点窗口（A 窗说的话上屏到 B 窗）；电平缓冲一并清空（旧条形不滚入
+  新会话）。语音会话进入时清组合/面板/候选栏（模态，不与上屏交织）。
+- **验证**：213 tests 全过（+6：电平环形缓冲/归一化/快捷键判定/悬浮层
+  渲染冒烟/几何）；clippy -D warnings 全绿；dev-install 真机重启，daemon
+  经 launcher fd 连上（v1 路径），Speech bridge 初始化无错误。
+  **待用户实测**：悬浮层 KWin 实际定位效果、说话时频谱动感、partial
+  文本显示、托盘/快捷键/🎙️/点悬浮层四种启停路径。
 
 ## 本次变更一（2026-10-07）：面向分发的日志改造
 

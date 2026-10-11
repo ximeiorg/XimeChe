@@ -2,11 +2,13 @@ use std::os::unix::io::{AsFd, FromRawFd, OwnedFd};
 use std::os::unix::net::UnixStream;
 use std::slice;
 use std::sync::{Arc, Mutex};
-use tracing::debug;
+use std::time::{Duration, Instant};
+use tracing::{debug, error};
 use wayland_backend::client::Backend;
 use wayland_client;
 use wayland_client::globals::{GlobalList, GlobalListContents};
 use wayland_client::protocol::wl_buffer::WlBuffer;
+use wayland_client::protocol::wl_callback::WlCallback;
 use wayland_client::protocol::wl_compositor::WlCompositor;
 use wayland_client::protocol::wl_keyboard::WlKeyboard;
 use wayland_client::protocol::wl_output::WlOutput;
@@ -19,6 +21,7 @@ use wayland_client::protocol::wl_surface::WlSurface;
 use wayland_client::protocol::*;
 use wayland_client::{event_created_child, globals::registry_queue_init, Connection, EventQueue};
 use wayland_client::{Dispatch, Proxy, QueueHandle};
+use xime_ui::voice::VoiceView;
 use xime_ui::{
     grid_panel_height, list_panel_height, menu_panel_height, CandidateItem, IcedSurface, PanelGrid,
     PanelList, PanelPage, PanelTheme, PANEL_MIN_WIDTH,
@@ -63,6 +66,11 @@ pub struct InputMethodV1Data {
     pub key_events: Arc<Mutex<Vec<KeyEvent>>>,
     pub pointer_events: Arc<Mutex<Vec<PointerEvent>>>,
     pub pointer_pos: Arc<Mutex<(f64, f64)>>,
+    /// 语音悬浮层 surface（show_voice_overlay 创建时登记；指针 Enter 用它
+    /// 判别事件来源 surface——悬浮层点击不参与候选栏命中）。
+    pub voice_surface: Arc<Mutex<Option<WlSurface>>>,
+    /// 当前指针悬停的 surface 是否为语音悬浮层（Enter 时判定）。
+    pub pointer_on_voice: Arc<Mutex<bool>>,
     /// 面板展开视图（菜单网格/内容网格），影响候选栏增高与渲染。
     /// 当前面板页面（None = 收起）；数据（列表/网格）由 daemon 注入。
     pub panel_page: Option<PanelPage>,
@@ -72,6 +80,32 @@ pub struct InputMethodV1Data {
     pub keymap_pending: Arc<Mutex<Option<(OwnedFd, usize)>>>,
     /// 应用侧请求清空组合（context.reset）。daemon 轮询取走并清理组合状态。
     pub reset_pending: Arc<Mutex<bool>>,
+    /// 楔死探测：已发出未 ack 的 wl_display.sync 时刻（wl_callback Done 时
+    /// 清空）。超时未 ack = 合成器侧连接楔死，dispatch 返回 Err 交给自愈。
+    pub sync_outstanding: Arc<Mutex<Option<Instant>>>,
+}
+
+/// sync 探针发送间隔（每秒一次，代价可忽略）。
+const SYNC_PROBE_INTERVAL: Duration = Duration::from_secs(1);
+/// sync 超时判定：合成器正常应答是毫秒级，2 秒无 ack 视为连接楔死。
+const SYNC_ACK_TIMEOUT: Duration = Duration::from_secs(2);
+
+impl Dispatch<WlCallback, InputMethodV1Data> for InputMethodV1Data {
+    fn event(
+        state: &mut InputMethodV1Data,
+        _proxy: &WlCallback,
+        event: <WlCallback as Proxy>::Event,
+        _data: &InputMethodV1Data,
+        _conn: &wayland_client::Connection,
+        _qhandle: &QueueHandle<InputMethodV1Data>,
+    ) {
+        if matches!(event, wl_callback::Event::Done { .. }) {
+            if let Ok(mut pending) = state.sync_outstanding.lock() {
+                *pending = None;
+            }
+            // done 事件本身是析构（wayland.xml：type="destructor"），无需发送 destroy
+        }
+    }
 }
 
 impl Dispatch<WlRegistry, GlobalListContents> for InputMethodV1Data {
@@ -212,12 +246,23 @@ impl Dispatch<WlPointer, InputMethodV1Data> for InputMethodV1Data {
         match event {
             wl_pointer::Event::Enter {
                 serial: _,
-                surface: _,
+                surface,
                 surface_x,
                 surface_y,
             } => {
                 if let Ok(mut pos) = state.pointer_pos.lock() {
                     *pos = (surface_x, surface_y);
+                }
+                // 记录指针所在 surface 的类别：语音悬浮层的点击与候选栏命中
+                // 几何无关，daemon 端按 on_voice 单独处理。
+                let on_voice = state
+                    .voice_surface
+                    .lock()
+                    .ok()
+                    .and_then(|v| v.clone())
+                    .is_some_and(|v| v.id() == surface.id());
+                if let Ok(mut flag) = state.pointer_on_voice.lock() {
+                    *flag = on_voice;
                 }
             }
             wl_pointer::Event::Motion {
@@ -240,9 +285,10 @@ impl Dispatch<WlPointer, InputMethodV1Data> for InputMethodV1Data {
                     wayland_client::WEnum::Value(wl_pointer::ButtonState::Pressed)
                 );
                 let pos = state.pointer_pos.lock().map(|p| *p).unwrap_or((0.0, 0.0));
+                let on_voice = state.pointer_on_voice.lock().map(|f| *f).unwrap_or(false);
                 debug!(
-                    "Pointer button: serial={}, button={}, pressed={}, pos=({:.0},{:.0})",
-                    serial, button, pressed, pos.0, pos.1
+                    "Pointer button: serial={}, button={}, pressed={}, pos=({:.0},{:.0}) on_voice={}",
+                    serial, button, pressed, pos.0, pos.1, on_voice
                 );
                 if let Ok(mut events) = state.pointer_events.lock() {
                     events.push(PointerEvent {
@@ -253,6 +299,7 @@ impl Dispatch<WlPointer, InputMethodV1Data> for InputMethodV1Data {
                         pressed,
                         button,
                         on_menu: false,
+                        on_voice,
                     });
                 }
             }
@@ -501,6 +548,14 @@ pub struct WaylandConnectionV1 {
     current_buffer: Option<WlBuffer>,
     current_pool: Option<WlShmPool>,
     renderer: Option<IcedSurface>,
+    /// 语音悬浮层：独立 surface + 输入面板对象（set_toplevel 钉屏幕底部居中）
+    /// 与专属 buffer/pool（与候选栏互不干扰，逐帧整幅重绘）。
+    voice_panel_surface: Option<ZwpInputPanelSurfaceV1>,
+    voice_surface_obj: Option<WlSurface>,
+    voice_buffer: Option<WlBuffer>,
+    voice_pool: Option<WlShmPool>,
+    /// 上次 sync 探针发送时刻（楔死探测节流）。
+    last_sync_probe: Instant,
 }
 
 impl WaylandConnectionV1 {
@@ -569,6 +624,11 @@ impl WaylandConnectionV1 {
             current_buffer: None,
             current_pool: None,
             renderer: None,
+            voice_panel_surface: None,
+            voice_surface_obj: None,
+            voice_buffer: None,
+            voice_pool: None,
+            last_sync_probe: Instant::now(),
         })
     }
 
@@ -585,10 +645,71 @@ impl WaylandConnectionV1 {
     }
 
     pub fn dispatch_events(&mut self) -> Result<()> {
-        // Blocking dispatch - wait for at least one event
+        // 非阻塞事件泵 + 合成器健康探测。此前是阻塞 roundtrip：KWin 侧
+        // 停止应答时（连接楔死，socket 不报错）blocking_read 永久挂起，
+        // 主循环连同按键处理/DBus 命令全部冻结，且 2026-10-05 的断连自愈
+        // 只在 dispatch 返回 Err 时触发——挂起状态下自愈永远不会启动，
+        // IM 激活的窗口里所有按键（含 Ctrl+A 等应用快捷键）被吸进黑洞。
+        // 改为：已到事件立即派发 + 0 超时探可读（保住 1ms 按键延迟），
+        // 另以周期性 wl_display.sync 的 ack 超时（2s）判定楔死并返回 Err，
+        // 交给 daemon 的 HealScheduler 走既有恢复链（杀 launcher → KWin
+        // 重拉 → 新 fd 重连）。
+        self.flush()?;
+
         self.event_queue
-            .roundtrip(&mut self.state)
+            .dispatch_pending(&mut self.state)
             .map_err(|e| Error::Io(std::io::Error::other(e)))?;
+
+        // 非阻塞读：socket 可读才 read_events（0 超时 = 纯探测）。
+        if let Some(guard) = self.event_queue.prepare_read() {
+            let backend = self.connection.backend();
+            let fd = backend.poll_fd();
+            let mut fds = [nix::poll::PollFd::new(fd, nix::poll::PollFlags::POLLIN)];
+            match nix::poll::poll(&mut fds, nix::poll::PollTimeout::ZERO) {
+                Ok(n)
+                    if n > 0
+                        && fds[0]
+                            .revents()
+                            .is_some_and(|f| f.contains(nix::poll::PollFlags::POLLIN)) =>
+                {
+                    guard
+                        .read()
+                        .map_err(|e| Error::Io(std::io::Error::other(e)))?;
+                    self.event_queue
+                        .dispatch_pending(&mut self.state)
+                        .map_err(|e| Error::Io(std::io::Error::other(e)))?;
+                }
+                Ok(_) => {}
+                Err(e) => return Err(Error::Io(std::io::Error::from(e))),
+            }
+        }
+
+        // 楔死探测：有未 ack 的 sync 且超时 → 连接已死；到期则补发探针。
+        let outstanding = self.state.sync_outstanding.lock().ok().and_then(|p| *p);
+        match outstanding {
+            Some(sent_at) => {
+                if sent_at.elapsed() > SYNC_ACK_TIMEOUT {
+                    error!("Compositor sync not acked in {SYNC_ACK_TIMEOUT:?}, connection wedged");
+                    return Err(Error::Io(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "wayland sync probe not acked (compositor wedged)",
+                    )));
+                }
+            }
+            None => {
+                let now = Instant::now();
+                if now.duration_since(self.last_sync_probe) >= SYNC_PROBE_INTERVAL {
+                    self.connection
+                        .display()
+                        .sync(&self.event_queue.handle(), self.state.clone());
+                    if let Ok(mut pending) = self.state.sync_outstanding.lock() {
+                        *pending = Some(now);
+                    }
+                    self.last_sync_probe = now;
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -937,6 +1058,115 @@ impl WaylandConnectionV1 {
 
     pub fn hide_root_window(&mut self) {
         // No need to hide, main loop will restore candidate display
+    }
+
+    /// 语音悬浮层整幅重绘：固定尺寸半透明频谱面板，屏幕底部居中。
+    ///
+    /// 定位用 `set_toplevel(output, center_bottom)`（v1 输入面板协议唯一的
+    /// 位置枚举；keyboard surface 只在 text-input 激活时显示，与语音会话
+    /// 的存活条件一致）。首次调用创建 surface 并定位；每帧整幅重绘
+    /// （电平是流数据，memfd buffer 与候选栏同款生命周期，帧后即毁）。
+    pub fn show_voice_overlay(&mut self, view: &VoiceView, theme: &PanelTheme) -> Result<()> {
+        let width = xime_ui::voice::VOICE_WIDTH;
+        let height = xime_ui::voice::VOICE_HEIGHT;
+
+        if self.voice_panel_surface.is_none() {
+            let compositor = self.compositor.as_ref().ok_or(Error::NoCompositor)?;
+            let input_panel = self.input_panel.as_ref().ok_or(Error::NoInputPanel)?;
+            let qh = self.event_queue.handle();
+            let surface = compositor.create_surface(&qh, self.state.clone());
+            let panel_surface =
+                input_panel.get_input_panel_surface(&surface, &qh, self.state.clone());
+            // 无 output（绑定失败的罕见环境）回退 overlay panel（跟随光标）。
+            if let Some(output) = self.output.as_ref() {
+                panel_surface.set_toplevel(
+                    output,
+                    u32::from(zwp_input_panel_surface_v1::Position::CenterBottom),
+                );
+            } else {
+                panel_surface.set_overlay_panel();
+            }
+            // 登记到共享 state：指针 Enter 判别事件来源（悬浮层点击 =
+            // 停止听写，不进候选栏命中几何）。
+            if let Ok(mut registered) = self.state.voice_surface.lock() {
+                *registered = Some(surface.clone());
+            }
+            self.voice_surface_obj = Some(surface);
+            self.voice_panel_surface = Some(panel_surface);
+        }
+
+        let shm = self.shm.clone().ok_or(Error::NoShm)?;
+        let surface_obj = self
+            .voice_surface_obj
+            .clone()
+            .ok_or(Error::Io(std::io::Error::other("No voice surface")))?;
+
+        if let Some(buffer) = self.voice_buffer.take() {
+            buffer.destroy();
+        }
+        if let Some(pool) = self.voice_pool.take() {
+            pool.destroy();
+        }
+
+        let qh = self.event_queue.handle();
+        let stride = width * 4;
+        let size = stride * height;
+
+        let fd = Self::create_anonymous_file(size)?;
+        let pool = shm.create_pool(fd.as_fd(), size as i32, &qh, self.state.clone());
+        self.voice_pool = Some(pool.clone());
+
+        let mut surface = self.renderer.take().unwrap_or_default();
+        {
+            let buf_size = (width * height * 4) as usize;
+            let size_nonzero = std::num::NonZero::new(buf_size).expect("size should be non-zero");
+            let ptr = unsafe {
+                nix::sys::mman::mmap(
+                    None,
+                    size_nonzero,
+                    nix::sys::mman::ProtFlags::PROT_READ | nix::sys::mman::ProtFlags::PROT_WRITE,
+                    nix::sys::mman::MapFlags::MAP_SHARED,
+                    &fd,
+                    0,
+                )
+                .map_err(|e| Error::Io(std::io::Error::from_raw_os_error(e as i32)))?
+            };
+            let pixels: &mut [u8] =
+                unsafe { slice::from_raw_parts_mut(ptr.as_ptr() as *mut u8, buf_size) };
+            surface.draw_voice_overlay(pixels, view, theme);
+            unsafe {
+                nix::sys::mman::munmap(ptr, buf_size)
+                    .map_err(|e| Error::Io(std::io::Error::from_raw_os_error(e as i32)))?;
+            }
+        }
+        self.renderer = Some(surface);
+
+        let buffer = pool.create_buffer(
+            0,
+            width as i32,
+            height as i32,
+            stride as i32,
+            wl_shm::Format::Argb8888,
+            &qh,
+            self.state.clone(),
+        );
+        self.voice_buffer = Some(buffer.clone());
+
+        surface_obj.attach(Some(&buffer), 0, 0);
+        surface_obj.damage_buffer(0, 0, width as i32, height as i32);
+        surface_obj.commit();
+
+        self.connection
+            .flush()
+            .map_err(|e| Error::Io(std::io::Error::other(e)))?;
+        Ok(())
+    }
+
+    pub fn hide_voice_overlay(&mut self) {
+        if let Some(surface) = &self.voice_surface_obj {
+            surface.attach(None::<&WlBuffer>, 0, 0);
+            surface.commit();
+        }
     }
 
     #[allow(clippy::too_many_arguments)]

@@ -137,8 +137,35 @@ fn tray_mode_for(is_ascii: bool) -> InputMode {
     }
 }
 
+/// 语音输入开关快捷键：Ctrl+Alt+V（大小写不敏感；Super 修饰不触发）。
+/// 硬编码绑定——悬浮层状态行文案 `VOICE_HOTKEY_LABEL` 与此同源；配置化
+/// 等 libximecore hotkeys 缺键继承语义修复后一并做（见 PROGRESS 遗留）。
+fn is_voice_toggle_hotkey(sym_raw: u32, modifiers: &ModifierState) -> bool {
+    modifiers.ctrl
+        && modifiers.alt
+        && !modifiers.super_key
+        && keysym_to_letter(sym_raw).is_some_and(|l| l == 'v')
+}
+
 /// 最近一次候选窗内容（菜单开/关后重绘用，主题以当前值为准）。
 type CandidateCache = (Vec<xime_ui::CandidateItem>, usize);
+
+/// 语音悬浮层重绘节拍（~30fps；电平是流数据，事件之间也要滚动/衰减）。
+const VOICE_FRAME_INTERVAL: Duration = Duration::from_millis(33);
+
+/// 语音悬浮层的 daemon 侧状态（数据权威在 speech 模块：电平快照经
+/// levels_snapshot() 取，这里只存绘制所需的文本/相位与重绘节拍）。
+#[derive(Default)]
+struct VoiceUiState {
+    /// 悬浮层是否在屏（v1 后端才可能为 true；v2 回落候选栏反馈）。
+    visible: bool,
+    /// 模型装载中（状态行提示装载，频谱静止）。
+    loading: bool,
+    /// 当前 partial 文本（Partial 事件写入，重绘时读取）。
+    text: String,
+    /// 上次悬浮层重绘时刻（节流用）。
+    last_frame: Option<Instant>,
+}
 
 /// 断连自愈的节奏控制：
 /// - 首次断连后 1 秒即尝试（给可能在途的 launcher fd 让路）；
@@ -296,6 +323,8 @@ impl WaylandLoop {
         let mut pending_theme_redraw = false;
         // 断连自愈调度：见 HealScheduler。
         let mut heal = HealScheduler::new();
+        // 语音悬浮层状态（v1 后端支持时替代候选栏反馈）。
+        let mut voice = VoiceUiState::default();
 
         // 剪贴板同步桥初始化：加载 clipboard_sync 插件并拉取一次
         let _ = self.sync_tx.send(SyncMessage::Reload(scan_descriptors()));
@@ -371,6 +400,21 @@ impl WaylandLoop {
                             debug!("IM inactive on toggle, requesting KWin forceActivate");
                             self.rt_handle.block_on(self.tray.force_activate_im());
                         }
+                    }
+                }
+                Ok(DaemonCommand::ToggleSpeech) => {
+                    // 托盘「语音输入」入口。键盘快捷键只在 IM 激活（键盘
+                    // grab）时可达；未激活时启动会话，识别文本无处上屏
+                    // （commit 需要 text-input 上下文），如实拒绝并提示。
+                    if !last_active {
+                        info!("Voice toggle requested while IM inactive, rejected");
+                        let handle = self.rt_handle.clone();
+                        handle.spawn(async move {
+                            notify_desktop("语音输入", "请先点击要输入的输入框，再开始语音输入")
+                                .await;
+                        });
+                    } else {
+                        crate::speech::toggle();
                     }
                 }
                 Ok(DaemonCommand::Deploy) => {
@@ -525,17 +569,24 @@ impl WaylandLoop {
                         debug!("Residual panel on re-activate, dismissing");
                         panel_state = PanelState::Closed;
                         panel = PanelData::default();
+                        // 兜底清滞留语音事件：失活路径的 clear_events 可能早于
+                        // worker finalize 发出 Committed（收尾是异步的），不清
+                        // 的话上一窗口的尾巴文本会在新窗口首次 drain 时上屏。
+                        crate::speech::clear_events();
                     }
 
                     if !is_active {
                         // 失焦（切换窗口/输入框）时彻底清理 UI 状态：
-                        // 立即隐藏候选栏/菜单面板/Ctrl 字根窗口，关闭 emoji 面板，
-                        // 清除按键消费记录与字根缓存。
+                        // 立即隐藏候选栏/菜单面板/Ctrl 字根/语音悬浮窗口，
+                        // 关闭 emoji 面板，清除按键消费记录与字根缓存。
                         // 否则残留的候选栏会一直显示在新输入框上，遮挡并吞掉
                         // 点击事件，导致新输入框无法获得焦点、输入法无法重新激活。
                         c.hide_candidate_window();
                         c.hide_panel();
                         c.hide_root_window();
+                        c.hide_voice_overlay();
+                        voice.visible = false;
+                        voice.text.clear();
                         let _ = c.flush();
                         candidate_window_visible = false;
                         quick_send.clear();
@@ -549,11 +600,14 @@ impl WaylandLoop {
                         if let Ok(mut cache) = self.candidate_cache.lock() {
                             *cache = None;
                         }
-                        // 听写中失焦：停止会话（剩余文本经 finalize 迟到上屏，
-                        // 没有焦点的窗口上继续录音没有意义）。
+                        // 听写中失焦：停止会话（没有焦点的窗口上继续录音没有
+                        // 意义）。滞留事件与电平一并清空——收尾的 Committed
+                        // 不允许迟到投递到下一个焦点窗口（A 窗说的话上屏到
+                        // B 窗是错乱行为）；重新激活时再兜底清一次。
                         if crate::speech::state() != crate::speech::SpeechState::Idle {
                             crate::speech::toggle();
                         }
+                        crate::speech::clear_events();
                         continue;
                     }
                 }
@@ -576,6 +630,7 @@ impl WaylandLoop {
                         &mut ctrl_root_visible,
                         &mut last_ascii_mode,
                         &mut im_enabled,
+                        &mut voice,
                     );
                 }
 
@@ -617,6 +672,7 @@ impl WaylandLoop {
         ctrl_root_visible: &mut bool,
         last_ascii_mode: &mut bool,
         im_enabled: &mut bool,
+        voice: &mut VoiceUiState,
     ) {
         if let Some(ref mut x) = xkb {
             if let Some((fd, size)) = c.get_keymap_pending() {
@@ -652,10 +708,29 @@ impl WaylandLoop {
             );
         }
 
-        // 语音听写事件：上屏 / 候选栏实时反馈（worker 在后台线程，主循环只消费）。
+        // 语音听写事件：上屏 / 悬浮层（v1）或候选栏（v2 回落）实时反馈
+        // （worker 在后台线程，主循环只消费）。
         crate::speech::drain_events(|event| {
-            self.handle_speech_event(c, plugin_host, event, theme, candidate_window_visible);
+            self.handle_speech_event(
+                c,
+                rime,
+                plugin_host,
+                event,
+                theme,
+                candidate_window_visible,
+                voice,
+            );
         });
+
+        // 语音悬浮层动画节拍（~30fps）：电平是流数据，partial 事件之间
+        // 也要滚动/衰减；Loading 阶段无事件，靠节拍维持画面。
+        if voice.visible
+            && voice
+                .last_frame
+                .is_none_or(|t| t.elapsed() >= VOICE_FRAME_INTERVAL)
+        {
+            self.redraw_voice_overlay(c, voice, theme);
+        }
 
         // 应用侧 reset（浏览器地址栏 Esc 等）：协议要求清空 IM 组合状态，
         // 否则随后的 commit 会插进已被应用重置的上下文。
@@ -702,6 +777,7 @@ impl WaylandLoop {
                         ctrl_root_visible,
                         last_ascii_mode,
                         im_enabled,
+                        voice,
                     );
                 }
             }
@@ -729,6 +805,7 @@ impl WaylandLoop {
         ctrl_root_visible: &mut bool,
         last_ascii_mode: &mut bool,
         im_enabled: &mut bool,
+        voice: &mut VoiceUiState,
     ) {
         let modifiers = xkb.get_modifiers();
         let release_mask = if !event.pressed {
@@ -771,6 +848,9 @@ impl WaylandLoop {
                 c.hide_candidate_window();
                 c.hide_panel();
                 c.hide_root_window();
+                c.hide_voice_overlay();
+                voice.visible = false;
+                voice.text.clear();
                 let _ = c.flush();
                 *candidate_window_visible = false;
                 quick_send.clear();
@@ -778,6 +858,12 @@ impl WaylandLoop {
                 *ctrl_root_visible = false;
                 *last_input_keysym = None;
                 consumed_presses.clear();
+                // 听写中停用 IM：会话一并停止（直通模式下 commit 无处落），
+                // 滞留事件清空（同 deactivate 路径的理由）。
+                if crate::speech::state() != crate::speech::SpeechState::Idle {
+                    crate::speech::toggle();
+                }
+                crate::speech::clear_events();
                 // 停用即视同失焦：候选缓存一并清（同 deactivate 路径的理由）。
                 if let Ok(mut cache) = self.candidate_cache.lock() {
                     *cache = None;
@@ -795,6 +881,31 @@ impl WaylandLoop {
         if !*im_enabled {
             if event.pressed || !consumed_presses.contains(&event.key) {
                 c.forward_key(event.serial, event.time, event.key, event.pressed);
+            } else {
+                consumed_presses.remove(&event.key);
+            }
+            return;
+        }
+
+        // 语音输入开关（Ctrl+Alt+V）：听写的键盘入口（托盘/🎙️ 之外）。
+        // 仅在 IM 激活（键盘 grab）时可达——Wayland 无全局快捷键，未激活
+        // 时键事件不经过 IM，那条路径由托盘菜单覆盖（含未激活拒绝提示）。
+        if event.pressed && is_voice_toggle_hotkey(sym.raw(), &modifiers) {
+            debug!("Voice toggle hotkey (Ctrl+Alt+V)");
+            crate::speech::toggle();
+            consumed_presses.insert(event.key);
+            return;
+        }
+
+        // 听写中键盘为模态：吞掉所有按键（组合/面板不与语音上屏交织），
+        // Esc = 停止并收尾上屏（与快捷键/托盘/点悬浮层同一 toggle 路径）。
+        if crate::speech::state() == crate::speech::SpeechState::Listening {
+            if event.pressed {
+                consumed_presses.insert(event.key);
+                if sym.raw() == 0xFF1B {
+                    debug!("Escape during dictation, stopping speech");
+                    crate::speech::toggle();
+                }
             } else {
                 consumed_presses.remove(&event.key);
             }
@@ -1271,16 +1382,23 @@ impl WaylandLoop {
         }
     }
 
-    /// 语音听写事件处理：Committed 上屏；状态/中间文本驱动候选栏实时反馈。
+    /// 语音听写事件处理：Committed 上屏；状态/中间文本驱动语音悬浮层
+    /// （v1 输入面板支持独立定位）或候选栏实时反馈（v2 回落）。
+    #[allow(clippy::too_many_arguments)]
     fn handle_speech_event(
         &self,
         c: &mut dyn ImBackend,
+        rime: &mut RimeEngine,
         plugin_host: &mut PluginHost,
         event: crate::speech::SpeechEvent,
         theme: &PanelTheme,
         candidate_window_visible: &mut bool,
+        voice: &mut VoiceUiState,
     ) {
         use crate::speech::{SpeechEvent as Ev, SpeechState};
+        // v1 输入面板的 set_toplevel 可把悬浮层钉在屏幕底部居中；v2 的
+        // popup surface 只能跟随光标，回落 P10 的候选栏实时反馈。
+        let overlay = c.supports_voice_overlay();
         match event {
             Ev::Committed(text) => {
                 // 停顿断句自动上屏（对齐 XimeYao：识别文本直接落光标处）。
@@ -1294,8 +1412,13 @@ impl WaylandLoop {
                 );
             }
             Ev::Partial(text) => {
-                // 听写中的实时反馈：候选栏显示 partial（空文本显示占位）。
+                // 听写中的实时反馈：悬浮层只存数据（重绘走 ~30fps 节拍），
+                // 候选栏模式（v2）立即渲染。
                 if !matches!(crate::speech::state(), SpeechState::Listening) {
+                    return;
+                }
+                if overlay {
+                    voice.text = text;
                     return;
                 }
                 // 听写视图是纯候选栏：清掉可能残留的面板（同 redraw）。
@@ -1318,6 +1441,23 @@ impl WaylandLoop {
             }
             Ev::State(state) => match state {
                 SpeechState::Loading => {
+                    if overlay {
+                        // 语音是模态会话：清掉进行中的组合/面板/候选栏，
+                        // 避免候选窗与语音上屏交织；悬浮层立即可见。
+                        rime.clear_composition();
+                        c.clear_preedit();
+                        c.hide_panel();
+                        c.hide_candidate_window();
+                        if let Ok(mut cache) = self.candidate_cache.lock() {
+                            *cache = None;
+                        }
+                        *candidate_window_visible = false;
+                        voice.visible = true;
+                        voice.loading = true;
+                        voice.text.clear();
+                        self.redraw_voice_overlay(c, voice, theme);
+                        return;
+                    }
                     let candidates = vec![xime_ui::CandidateItem {
                         text: "🎙️ 正在装载语音引擎…".to_string(),
                         comment: String::new(),
@@ -1328,16 +1468,32 @@ impl WaylandLoop {
                     *candidate_window_visible = true;
                 }
                 SpeechState::Listening => {
+                    if overlay {
+                        voice.loading = false;
+                        self.redraw_voice_overlay(c, voice, theme);
+                        return;
+                    }
                     // partial 事件随后就到，这里只标记可见。
                     *candidate_window_visible = true;
                 }
                 SpeechState::Idle => {
-                    // 会话结束（用户停止或失败后）：恢复原候选栏。
+                    // 会话结束（用户停止或失败后）：悬浮层收起，恢复原候选栏。
+                    if overlay {
+                        c.hide_voice_overlay();
+                        voice.visible = false;
+                        voice.loading = false;
+                        voice.text.clear();
+                    }
                     self.redraw_menu_candidates(c, theme, candidate_window_visible);
                 }
             },
             Ev::Error(message) => {
-                // 失败兜底：桌面通知 + 恢复候选栏。
+                // 失败兜底：桌面通知 + 悬浮层收起 + 恢复候选栏。
+                if overlay {
+                    c.hide_voice_overlay();
+                    voice.visible = false;
+                    voice.text.clear();
+                }
                 let handle = self.rt_handle.clone();
                 handle.spawn(async move {
                     notify_desktop("语音输入", &message).await;
@@ -1345,6 +1501,28 @@ impl WaylandLoop {
                 self.redraw_menu_candidates(c, theme, candidate_window_visible);
             }
         }
+    }
+
+    /// 语音悬浮层整幅重绘（固定尺寸；电平取 speech 环形缓冲快照，
+    /// 节流由调用方控制——事件回调立即重绘，动画节拍 ~30fps 重绘）。
+    fn redraw_voice_overlay(
+        &self,
+        c: &mut dyn ImBackend,
+        voice: &mut VoiceUiState,
+        theme: &PanelTheme,
+    ) {
+        let view = xime_ui::voice::VoiceView {
+            loading: voice.loading,
+            levels: crate::speech::levels_snapshot(),
+            text: voice.text.clone(),
+        };
+        if let Err(e) = c.show_voice_overlay(&view, theme) {
+            debug!("Voice overlay show error: {e}");
+            voice.visible = false;
+            return;
+        }
+        let _ = c.flush();
+        voice.last_frame = Some(Instant::now());
     }
 
     /// 处理候选栏菜单按钮 / 面板点击（命中测试与绘制同源：xime_ui::panel_hit）。
@@ -1363,6 +1541,15 @@ impl WaylandLoop {
     ) {
         if pe.button != 272 || !pe.pressed {
             return; // 只处理左键按下
+        }
+        // 语音悬浮层点击（只读 surface）：停止听写（与快捷键/托盘同一
+        // toggle 路径）。悬浮层只在听写/装载时在屏，滞留点击到 Idle 时
+        // 忽略（toggle 在 Idle 是"开始"，不能被幽灵点击触发）。
+        if pe.on_voice {
+            if crate::speech::state() != crate::speech::SpeechState::Idle {
+                crate::speech::toggle();
+            }
+            return;
         }
         let width = (*last_panel_width).max(PANEL_MIN_WIDTH);
         let bar = theme.bar_height();
@@ -1972,6 +2159,38 @@ mod tests {
         // Ctrl+Space 停/启与切方案后的托盘恢复都依赖这个映射。
         assert_eq!(tray_mode_for(true), InputMode::English);
         assert_eq!(tray_mode_for(false), InputMode::Chinese);
+    }
+
+    #[test]
+    fn test_voice_toggle_hotkey() {
+        // Ctrl+Alt+V（大小写不敏感）：触发
+        let combo = ModifierState {
+            ctrl: true,
+            alt: true,
+            ..ModifierState::default()
+        };
+        assert!(is_voice_toggle_hotkey(0x76, &combo)); // v
+        assert!(is_voice_toggle_hotkey(0x56, &combo)); // V（CapsLock 态）
+                                                       // 缺修饰 / 带 Super：不触发
+        assert!(!is_voice_toggle_hotkey(0x76, &ModifierState::default()));
+        let ctrl_only = ModifierState {
+            ctrl: true,
+            ..ModifierState::default()
+        };
+        assert!(!is_voice_toggle_hotkey(0x76, &ctrl_only), "缺 Alt 不触发");
+        let with_super = ModifierState {
+            ctrl: true,
+            alt: true,
+            super_key: true,
+            ..ModifierState::default()
+        };
+        assert!(
+            !is_voice_toggle_hotkey(0x76, &with_super),
+            "带 Super 不触发"
+        );
+        // 非字母 V 键：不触发
+        assert!(!is_voice_toggle_hotkey(0x63, &combo)); // c
+        assert!(!is_voice_toggle_hotkey(0x20, &combo)); // space
     }
 
     #[test]

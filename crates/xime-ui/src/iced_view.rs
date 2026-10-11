@@ -10,7 +10,7 @@ use iced_tiny_skia::core::{layout, Element};
 use iced_tiny_skia::core::{mouse, renderer::Style, Color, Font, Pixels, Rectangle, Size, Theme};
 use iced_tiny_skia::graphics::Viewport;
 use iced_tiny_skia::Renderer;
-use iced_widget::{container, row, text, Space, Svg};
+use iced_widget::{column, container, row, text, Space, Svg};
 // 与 iced_tiny_skia 同版本的 tiny-skia（0.11），避免版本冲突
 type Pixmap = tiny_skia11::Pixmap;
 type Mask = tiny_skia11::Mask;
@@ -24,6 +24,7 @@ use crate::menu::{
     PANEL_ROW_GAP, RECENT_EMPTY_TEXT,
 };
 use crate::theme::PanelTheme;
+use crate::voice::{self, VoiceView};
 use crate::CandidateItem;
 
 const MENU_SVG: &[u8] = include_bytes!("../resources/menu.svg");
@@ -234,6 +235,36 @@ impl IcedSurface {
         // 3. 内容合成到背景
         blend_over(pixels, &content);
     }
+
+    /// 绘制语音输入悬浮层（固定 [`voice::VOICE_WIDTH`]×[`voice::VOICE_HEIGHT`]）。
+    ///
+    /// 三层合成：半透明圆角背景（fill alpha 进预乘通道）→ 频谱条（预乘
+    /// 实心矩形逐像素 over）→ iced 文本内容（premultiplied-over）。
+    pub fn draw_voice_overlay(&mut self, pixels: &mut [u8], view: &VoiceView, theme: &PanelTheme) {
+        let width = voice::VOICE_WIDTH;
+        let height = voice::VOICE_HEIGHT;
+
+        // 1. 半透明圆角背景 + 边框（整体 alpha：theme.bg 自身 0.96~0.98 × VOICE_BG_ALPHA）
+        paint_rounded_panel_alpha(
+            pixels,
+            width,
+            height,
+            theme.corner_radius,
+            2.0,
+            theme.border,
+            theme.bg,
+            voice::VOICE_BG_ALPHA,
+        );
+
+        // 2. 频谱条（镜像条形，主题高亮色）
+        paint_voice_bars(pixels, view, theme);
+
+        // 3. iced 渲染文本内容（透明背景）到临时 buffer，再合成
+        let mut content = vec![0u8; (width * height * 4) as usize];
+        let mut element = voice_view(view, theme);
+        self.render(&mut element, &mut content, width, height);
+        blend_over(pixels, &content);
+    }
 }
 
 impl Default for IcedSurface {
@@ -314,6 +345,31 @@ fn paint_rounded_panel(
     border_color: Color,
     fill_color: Color,
 ) {
+    paint_rounded_panel_alpha(
+        pixels,
+        width,
+        height,
+        radius,
+        border_width,
+        border_color,
+        fill_color,
+        1.0,
+    );
+}
+
+/// [`paint_rounded_panel`] 的整体透明度变体：`alpha` 同时乘到填充与边框
+/// 的覆盖率上（1.0 = 原语义）。语音悬浮层用它做"整体半透明"。
+#[allow(clippy::too_many_arguments)]
+fn paint_rounded_panel_alpha(
+    pixels: &mut [u8],
+    width: u32,
+    height: u32,
+    radius: f32,
+    border_width: f32,
+    border_color: Color,
+    fill_color: Color,
+    alpha: f32,
+) {
     let (fw, fh) = (width as f32, height as f32);
     let (fr, fg, fb) = (
         fill_color.r * 255.0,
@@ -325,6 +381,8 @@ fn paint_rounded_panel(
         border_color.g * 255.0,
         border_color.b * 255.0,
     );
+    // fill 自身设计 alpha（theme.bg 0.96~0.98）与整体 alpha 相乘。
+    let fill_alpha = fill_color.a * alpha;
     let w = width as usize;
     for y in 0..height as usize {
         for x in 0..width as usize {
@@ -334,11 +392,11 @@ fn paint_rounded_panel(
             let fill_a = rounded_alpha(d + border_width);
             let idx = (y * w + x) * 4;
             // 合成：边框在上层，填充在下层（目标为透明背景）
-            let mut r_ = fill_a * fr;
-            let mut g_ = fill_a * fg;
-            let mut b_ = fill_a * fb;
-            let mut a_ = fill_a;
-            let ba = (border_a - fill_a).max(0.0);
+            let mut r_ = fill_a * fill_alpha * fr;
+            let mut g_ = fill_a * fill_alpha * fg;
+            let mut b_ = fill_a * fill_alpha * fb;
+            let mut a_ = fill_a * fill_alpha;
+            let ba = (border_a - fill_a).max(0.0) * alpha;
             if ba > 0.0 {
                 // 边框叠加在填充上
                 let oa = a_;
@@ -353,6 +411,86 @@ fn paint_rounded_panel(
             pixels[idx + 3] = (a_ * 255.0).clamp(0.0, 255.0) as u8;
         }
     }
+}
+
+/// 频谱条：镜像条形逐根画到背景上（预乘实心矩形 over，dst 已是预乘语义）。
+fn paint_voice_bars(pixels: &mut [u8], view: &VoiceView, theme: &PanelTheme) {
+    let color = voice::bar_color(theme);
+    for (i, &level) in view.levels.iter().take(voice::BAR_COUNT).enumerate() {
+        let (x, w) = voice::voice_bar_rect(i);
+        let h = voice::voice_bar_height(level);
+        let y = voice::voice_bar_top(h);
+        blend_solid_rect(
+            pixels,
+            voice::VOICE_WIDTH,
+            voice::VOICE_HEIGHT,
+            x,
+            y,
+            w,
+            h,
+            color,
+        );
+    }
+}
+
+/// 预乘实心矩形 over 合成：`out = src + dst*(1-sa)`（通道均为预乘值，
+/// 与 [`blend_over`] 同一语义，只是源为纯色，免整幅 src buffer）。
+#[allow(clippy::too_many_arguments)]
+fn blend_solid_rect(
+    dst: &mut [u8],
+    stride: u32,
+    height: u32,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    color: Color,
+) {
+    let x0 = x.round().max(0.0) as u32;
+    let y0 = y.round().max(0.0) as u32;
+    let x1 = (x + w).round().min(stride as f32) as u32;
+    let y1 = (y + h).round().min(height as f32) as u32;
+    let (sr, sg, sb, sa) = (color.r * 255.0, color.g * 255.0, color.b * 255.0, color.a);
+    let keep = 1.0 - sa;
+    for py in y0..y1 {
+        for px in x0..x1 {
+            let idx = ((py * stride + px) * 4) as usize;
+            dst[idx] = (sb * sa + dst[idx] as f32 * keep).clamp(0.0, 255.0) as u8;
+            dst[idx + 1] = (sg * sa + dst[idx + 1] as f32 * keep).clamp(0.0, 255.0) as u8;
+            dst[idx + 2] = (sr * sa + dst[idx + 2] as f32 * keep).clamp(0.0, 255.0) as u8;
+            let out_a = sa + (dst[idx + 3] as f32 / 255.0) * keep;
+            dst[idx + 3] = (out_a * 255.0).clamp(0.0, 255.0) as u8;
+        }
+    }
+}
+
+/// 语音悬浮层文本内容（背景/频谱条由像素层绘制；iced 只负责图标与文本）。
+/// 行布局：`[图标 32][spacer 通到频谱区终点][文本列]`，与 voice.rs 几何
+/// 常量同源（text_zone_x）。
+fn voice_view<'a>(view: &'a VoiceView, theme: &'a PanelTheme) -> Element<'a, (), Theme, Renderer> {
+    let icon = container(text(view.icon().to_string()).size(theme.font_size + 6.0))
+        .width(voice::ICON_ZONE_WIDTH)
+        .height(voice::VOICE_HEIGHT)
+        .align_x(iced_widget::core::alignment::Horizontal::Center)
+        .align_y(iced_widget::core::alignment::Vertical::Center);
+    // spacer：从图标区终点通到频谱区终点（频谱条由像素层画在此区间）。
+    let spacer_w = voice::text_zone_x() - voice::VOICE_PAD - voice::ICON_ZONE_WIDTH;
+    let status = text(view.status_text())
+        .size((theme.font_size - 3.0).max(9.0))
+        .color(theme.text_comment);
+    let partial = text(view.display_text())
+        .size(theme.font_size)
+        .color(theme.text_main);
+    let text_col = column![partial, status].spacing(4);
+    container(
+        row![icon, Space::new().width(spacer_w), text_col]
+            .align_y(iced_widget::core::alignment::Vertical::Center),
+    )
+    .width(iced_widget::core::Length::Fill)
+    .height(voice::VOICE_HEIGHT)
+    .padding([0, voice::VOICE_PAD as u16])
+    .align_y(iced_widget::core::alignment::Vertical::Center)
+    .into()
 }
 
 /// 将内容 buffer 合成到目标 buffer。
@@ -1284,5 +1422,45 @@ mod tests {
         surface.draw_candidates(&mut pixels, w, h, &candidates, 0, &theme);
         let at = |x: u32, y: u32| pixels[((y * w + x) * 4 + 3) as usize];
         assert!(at(w / 2, 1) != 0, "dark theme should paint background");
+    }
+
+    /// 语音悬浮层：整体半透明（背景 alpha < 255）、频谱条落在频谱区、
+    /// 文本区有内容、圆角外像素保持全透明。
+    #[test]
+    fn test_voice_overlay_renders_translucent() {
+        let theme = test_theme();
+        let mut surface = IcedSurface::new();
+        let (w, h) = (crate::voice::VOICE_WIDTH, crate::voice::VOICE_HEIGHT);
+        let mut levels = vec![0.0f32; crate::voice::BAR_COUNT];
+        levels[12] = 1.0; // 中间一根满幅条
+        let view = crate::voice::VoiceView {
+            loading: false,
+            levels,
+            text: "你好世界".to_string(),
+        };
+        let mut pixels = vec![0u8; (w * h * 4) as usize];
+        surface.draw_voice_overlay(&mut pixels, &view, &theme);
+        let px = |x: u32, y: u32| {
+            let i = ((y * w + x) * 4) as usize;
+            (pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3])
+        };
+        // 背景半透明：面板内上方（无文本无频谱）alpha ≈ 0.78×0.98×255 ≈ 195
+        let (_, _, _, bg_a) = px(w - 60, 8);
+        assert!(bg_a > 140 && bg_a < 240, "背景应半透明，实际 alpha={bg_a}");
+        // 圆角外（左上角外侧）保持全透明
+        let (_, _, _, corner_a) = px(0, 0);
+        assert_eq!(corner_a, 0, "圆角外不应有像素");
+        // 满幅频谱条（第 12 根中心）呈主题色且接近不透明（SHM 为 BGRA 序）
+        let (b12_x, b12_w) = crate::voice::voice_bar_rect(12);
+        let (b, _, r, a) = px(b12_x as u32 + b12_w as u32 / 2, h / 2);
+        assert!(a > 220, "频谱条应接近不透明，实际 alpha={a}");
+        assert!(
+            b > 100 && b > r,
+            "频谱条应为主题紫色系（蓝>红），实际 BGRA=({b},?,{r},{a})"
+        );
+        // 文本区（partial 行）有像素
+        let text_x = crate::voice::text_zone_x() as u32;
+        let has_text = (16..h - 8).any(|y| px(text_x + 2, y).3 > 60);
+        assert!(has_text, "文本区应渲染出文字");
     }
 }
