@@ -1,4 +1,4 @@
 /target
 # Local cargo config (created by dev-install.sh for libximecore patch)
 .cargo/config.toml
-/PROGRESS.md.zcode/
+.zcode/
