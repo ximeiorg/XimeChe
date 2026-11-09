@@ -36,12 +36,23 @@ find ~/.config/xime/rime -name "*.log" -type f -delete 2>/dev/null || true
 # 清理 Rime 构建缓存日志
 rm -f ~/.config/xime/rime/build/*.log 2>/dev/null || true
 
-# 6. 重置 KWin 虚拟键盘配置
+# 6. 重置 KWin 虚拟键盘配置（Plasma 6 只有 kwriteconfig6，5.x 是 kwriteconfig5）
 echo "重置 KWin 配置..."
-kwriteconfig5 --file kwinrc --group Wayland --key VirtualKeyboard ""
-kwriteconfig5 --file kwinrc --group Wayland --key InputMethod ""
-kwriteconfig5 --file kwinrc --group Wayland --key VirtualKeyboardEnabled "" 2>/dev/null || true
-echo "KWin 配置已重置，重新登录后生效"
+KWRITECONFIG=""
+for cmd in kwriteconfig6 kwriteconfig5; do
+    if command -v "$cmd" >/dev/null 2>&1; then
+        KWRITECONFIG="$cmd"
+        break
+    fi
+done
+if [ -n "${KWRITECONFIG}" ]; then
+    "${KWRITECONFIG}" --file kwinrc --group Wayland --key VirtualKeyboard ""
+    "${KWRITECONFIG}" --file kwinrc --group Wayland --key InputMethod ""
+    "${KWRITECONFIG}" --file kwinrc --group Wayland --key VirtualKeyboardEnabled "" 2>/dev/null || true
+    echo "KWin 配置已重置，重新登录后生效"
+else
+    echo "warning: 未找到 kwriteconfig6/kwriteconfig5，请手动清空 kwinrc 的 [Wayland] VirtualKeyboard" >&2
+fi
 
 # 7. 清理配置文件（只有明确指定 --purge 才删除）
 if [[ "$1" == "--purge" ]]; then

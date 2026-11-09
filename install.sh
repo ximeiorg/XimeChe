@@ -12,9 +12,16 @@ PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "Installing xime-wayland to ${PREFIX}"
 
+# 编译产物目录同样不能假设在 <repo>/target：~/.cargo/config.toml 可能设了
+# 全局 build.target-dir（如 /home/kkch/.cargo/target），问 cargo 要真实路径。
+TARGET_DIR="$(cargo metadata --format-version 1 --no-deps \
+    --manifest-path "${PROJECT_ROOT}/Cargo.toml" 2>/dev/null \
+    | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')"
+[ -n "${TARGET_DIR}" ] || TARGET_DIR="${PROJECT_ROOT}/target"
+
 # Install binaries
-install -Dm755 "${PROJECT_ROOT}/target/release/xime-daemon" "${BINDIR}/xime-daemon"
-install -Dm755 "${PROJECT_ROOT}/target/release/xime-launcher" "${BINDIR}/xime-launcher"
+install -Dm755 "${TARGET_DIR}/release/xime-daemon" "${BINDIR}/xime-daemon"
+install -Dm755 "${TARGET_DIR}/release/xime-launcher" "${BINDIR}/xime-launcher"
 
 # Generate and install DBus service file
 install -Dm644 "${PROJECT_ROOT}/resources/dbus/org.xime.Xime.service.in" \
@@ -70,6 +77,7 @@ echo "Installation complete!"
 echo ""
 echo "To use with KDE Plasma:"
 echo "1. Configure in System Settings > Virtual Keyboard"
-echo "   OR run: kwriteconfig5 --file kwinrc --group Wayland --key VirtualKeyboard xime-launcher.desktop"
+echo "   OR run: kwriteconfig6 --file kwinrc --group Wayland --key VirtualKeyboard xime-launcher.desktop"
+echo "   （Plasma 5 用 kwriteconfig5，参数相同）"
 echo "2. Restart KDE Plasma (logout/login)"
 echo ""

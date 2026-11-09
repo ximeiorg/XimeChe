@@ -9,6 +9,18 @@ DATADIR="${HOME}/.local/share"
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIBXIMECORE="${PROJECT_ROOT}/../libximecore"
 
+# 编译产物目录：~/.cargo/config.toml 里可能设了全局 build.target-dir
+# （本机就是 /home/kkch/.cargo/target），产物不在 <repo>/target 下。
+# 一律问 cargo 要真实路径（cargo metadata 会带上配置解析结果），
+# 问不到才退回默认的 <manifest 同级>/target。
+cargo_target_dir() { # <manifest-path>
+    local dir
+    dir="$(cargo metadata --format-version 1 --no-deps --manifest-path "$1" 2>/dev/null \
+        | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')"
+    [ -n "$dir" ] || dir="$(dirname "$1")/target"
+    printf '%s\n' "$dir"
+}
+
 echo "Installing xime-wayland for development to ${HOME}/.local"
 
 # Ensure .cargo/config.toml exists with local libximecore patch
@@ -44,16 +56,19 @@ cargo clippy --all-targets --all-features -- -D warnings
 # Build release (librime build is handled by librime-sys2/build.rs)
 cargo build --release -p xime-daemon -p xime-launcher -p xime-setup
 
+TARGET_DIR="$(cargo_target_dir "${PROJECT_ROOT}/Cargo.toml")"
+LIBXIMECORE_TARGET_DIR="$(cargo_target_dir "${LIBXIMECORE}/Cargo.toml")"
+
 # Build & install xime-sync-server (clipboard sync server, from libximecore)
 if [ -f "${LIBXIMECORE}/Cargo.toml" ]; then
     cargo build --release --manifest-path "${LIBXIMECORE}/Cargo.toml" -p xime-sync-server
-    install -Dm755 "${LIBXIMECORE}/target/release/xime-sync-server" "${BINDIR}/xime-sync-server"
+    install -Dm755 "${LIBXIMECORE_TARGET_DIR}/release/xime-sync-server" "${BINDIR}/xime-sync-server"
 fi
 
 # Install binaries
-install -Dm755 "${PROJECT_ROOT}/target/release/xime-daemon" "${BINDIR}/xime-daemon"
-install -Dm755 "${PROJECT_ROOT}/target/release/xime-launcher" "${BINDIR}/xime-launcher"
-install -Dm755 "${PROJECT_ROOT}/target/release/xime-setup" "${BINDIR}/xime-setup"
+install -Dm755 "${TARGET_DIR}/release/xime-daemon" "${BINDIR}/xime-daemon"
+install -Dm755 "${TARGET_DIR}/release/xime-launcher" "${BINDIR}/xime-launcher"
+install -Dm755 "${TARGET_DIR}/release/xime-setup" "${BINDIR}/xime-setup"
 
 # Generate and install DBus service file
 install -Dm644 "${PROJECT_ROOT}/resources/dbus/org.xime.Xime.service.in" \
@@ -112,13 +127,25 @@ if [ -d "${PROJECT_ROOT}/rime-wubi" ]; then
     echo "Installed rime-wubi schemas to ${RIMEDATADIR}"
 fi
 
-# Configure KWin
-kwriteconfig5 --file kwinrc --group Wayland --key VirtualKeyboard xime-launcher.desktop
-kwriteconfig5 --file kwinrc --group Wayland --key VirtualKeyboardEnabled true
+# Configure KWin（Plasma 6 只提供 kwriteconfig6，5.x 才是 kwriteconfig5；
+# 都没有时不要让 set -e 把整个安装判成失败，只提示手动设置）
+KWRITECONFIG=""
+for cmd in kwriteconfig6 kwriteconfig5; do
+    if command -v "$cmd" >/dev/null 2>&1; then
+        KWRITECONFIG="$cmd"
+        break
+    fi
+done
+if [ -n "${KWRITECONFIG}" ]; then
+    "${KWRITECONFIG}" --file kwinrc --group Wayland --key VirtualKeyboard xime-launcher.desktop
+    "${KWRITECONFIG}" --file kwinrc --group Wayland --key VirtualKeyboardEnabled true
+    echo "KWin configured to use xime-launcher.desktop"
+else
+    echo "warning: 未找到 kwriteconfig6/kwriteconfig5，请手动把虚拟键盘设为 xime-launcher.desktop" >&2
+fi
 
 echo ""
 echo "Development installation complete!"
-echo "KWin configured to use xime-launcher.desktop"
 echo ""
 echo "To test:"
 echo "1. Restart KDE Plasma (logout/login) OR restart KWin"
@@ -127,7 +154,7 @@ echo ""
 # 语音运行库（sherpa-onnx / onnxruntime）：xime-daemon 的 rpath 指向
 # $ORIGIN/../share/xime/lib，这里从构建缓存拷入。
 SPEECH_LIB_DIR="${DATADIR}/xime/lib"
-SPEECH_SRC=$(dirname "$(find "${PROJECT_ROOT}/target/sherpa-onnx-prebuilt" -name "libsherpa-onnx-c-api.so" 2>/dev/null | head -1)" 2>/dev/null)
+SPEECH_SRC=$(dirname "$(find "${TARGET_DIR}/sherpa-onnx-prebuilt" -name "libsherpa-onnx-c-api.so" 2>/dev/null | head -1)" 2>/dev/null)
 if [ -n "${SPEECH_SRC}" ] && [ -d "${SPEECH_SRC}" ]; then
     install -d "${SPEECH_LIB_DIR}"
     for so in "${SPEECH_SRC}"/*.so; do

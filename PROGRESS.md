@@ -1,7 +1,33 @@
 # XimeChe（曦码·澈输入法）开发进度
 
 ## 当前状态
-**修复：libsqlite3-sys 链接冲突导致依赖解析失败**（2026-11-09）。
+**修复：安装脚本写死 `target/release`，在全局 target-dir 下找不到产物**（2026-11-09）。
+
+**现象**：`./dev-install.sh` 编译完成后报
+`install: 对 'XimeChe/../libximecore/target/release/xime-sync-server' 调用 stat 失败`。
+
+**根因**：`~/.cargo/config.toml` 设了全局 `[build] target-dir = /home/kkch/.cargo/target`，
+所有 Rust 项目的产物都落在那里，而 `dev-install.sh` / `install.sh` /
+`packaging/stage.sh` 一律按 `<repo>/target/release/...` 取文件。
+
+**修复**：三个脚本都改成先用
+`cargo metadata --format-version 1 --no-deps --manifest-path <manifest>` 读
+`target_directory`（该字段已包含配置解析结果），读不到才回退 `<manifest 同级>/target`；
+`dev-install.sh` 分别解析本仓与 libximecore 两套（同步服务端在后者）。
+语音运行库的 `sherpa-onnx-prebuilt` 查找同步改为 `$TARGET_DIR` 下。
+
+顺带修掉两个同源问题（都在全新机器上必现）：
+- `dev-install.sh` / `uninstall.sh` 调 `kwriteconfig5`：Plasma 6 只装
+  `kwriteconfig6`，`set -e` 下脚本在"安装其实已成功"之后仍以失败退出。
+  改为按 `kwriteconfig6 → kwriteconfig5` 探测，都没有则打印手工设置提示。
+- `install.sh` 的提示文案跟上（`kwriteconfig6`，并说明 Plasma 5 用 5）。
+
+验证：`./dev-install.sh` 全流程跑通（4 个二进制进 `~/.local/bin`，语音库 7 个 .so
+进 `~/.local/share/xime/lib`，kwinrc 写入 `VirtualKeyboard=xime-launcher.desktop`）；
+`packaging/stage.sh /tmp/xime-stage /usr` 成功 stage 38 个文件；
+`PREFIX=/tmp/xime-prefix ./install.sh` 通过；四个脚本 `bash -n` 干净。
+
+**此前：libsqlite3-sys 链接冲突导致依赖解析失败**（2026-11-09）。
 
 **现象**：`cargo build` / `cargo update` 直接失败，报
 `libsqlite3-sys links to the native library sqlite3, but it conflicts with a
