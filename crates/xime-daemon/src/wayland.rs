@@ -13,7 +13,7 @@ use xime_wayland::{connect_im_from_fd, connect_im_to_env, ImBackend};
 use xime_xkb::XkbContext;
 use xime_xkb::{keysym_to_letter, Keysym, ModifierState};
 
-use crate::clipboard_sync::{scan_descriptors, SyncMessage};
+use crate::clipboard_sync::{scan_backend, SyncMessage};
 use crate::{symbols, DaemonCommand, PluginHost, RimeEngine};
 
 /// 面板路由状态（对齐 XimeYao：菜单为默认页，子页共用面板区）。
@@ -382,8 +382,10 @@ impl WaylandLoop {
         // 语音悬浮层状态（v1 后端支持时替代候选栏反馈）。
         let mut voice = VoiceUiState::default();
 
-        // 剪贴板同步桥初始化：加载 clipboard_sync 插件并拉取一次
-        let _ = self.sync_tx.send(SyncMessage::Reload(scan_descriptors()));
+        // 剪贴板同步桥初始化：按 clipboard_sync.toml 选择后端（插件/P2P）并拉取一次
+        let _ = self
+            .sync_tx
+            .send(SyncMessage::Reload(Box::new(scan_backend())));
         let _ = self.sync_tx.send(SyncMessage::Pull);
 
         // 无 launcher 的会话（GNOME 等）：直接连接 $WAYLAND_DISPLAY 使用 v2 协议。
@@ -562,8 +564,10 @@ impl WaylandLoop {
                 Ok(DaemonCommand::ReloadPlugins) => {
                     debug!("ReloadPlugins command received, reloading plugins...");
                     plugin_host.reload();
-                    // 同步桥：重载 clipboard_sync 插件并立即拉取一次
-                    let _ = self.sync_tx.send(SyncMessage::Reload(scan_descriptors()));
+                    // 同步桥：按最新配置重选后端（插件/P2P）并立即拉取一次
+                    let _ = self
+                        .sync_tx
+                        .send(SyncMessage::Reload(Box::new(scan_backend())));
                     let _ = self.sync_tx.send(SyncMessage::Pull);
                 }
                 Ok(DaemonCommand::SelectSchema(schema_id, result_tx)) => {

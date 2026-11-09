@@ -26,6 +26,9 @@ xime-config = { git = "https://github.com/ximeiorg/libximecore.git", package = "
 xime-setup-lib = { git = "https://github.com/ximeiorg/libximecore.git", package = "xime-setup-lib" }
 xime-plugin = { git = "https://github.com/ximeiorg/libximecore.git", package = "xime-plugin" }
 xime-speech = { git = "https://github.com/ximeiorg/libximecore.git", package = "xime-speech" }
+# 跨设备剪贴板 P2P 传输层。rev 必须与 libximecore 里 xime-setup-lib 的
+# optional 依赖一致，否则同一仓会解析出两份 git 源。
+xime-p2p = { git = "https://github.com/ximeiorg/libximep2p.git", rev = "bdf5f39bcb7644b0b06fb2ba1c96c078ec4d8e25" }
 
 # local crates
 xime-wayland = { path = "crates/xime-wayland" }

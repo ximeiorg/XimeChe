@@ -12,7 +12,9 @@ mod symbols;
 mod user_dict;
 mod wayland;
 
-pub use clipboard_sync::{scan_descriptors, spawn_bridge, SyncMessage, SyncPluginDescriptor};
+pub use clipboard_sync::{
+    scan_backend, spawn_bridge, SyncBackend, SyncMessage, SyncPluginDescriptor,
+};
 pub use command::DaemonCommand;
 pub use daemon::XimeDaemon;
 pub use plugin_host::{plugins_dir, PluginHost};

@@ -14,6 +14,8 @@ xime-ui.workspace = true
 xime-clipboard.workspace = true
 xime-tray.workspace = true
 xime-speech.workspace = true
+# 剪贴板同步的「设备互传」后端（局域网 P2P，不经服务器）。
+xime-p2p.workspace = true
 librime.workspace = true
 thiserror.workspace = true
 anyhow.workspace = true

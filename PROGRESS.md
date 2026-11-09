@@ -1,7 +1,47 @@
 # XimeChe（曦码·澈输入法）开发进度
 
 ## 当前状态
-**修复：安装脚本写死 `target/release`，在全局 target-dir 下找不到产物**（2026-11-09）。
+**接入：剪贴板同步的「设备互传」（P2P）后端**（2026-11-09）。
+
+**背景**：设置程序的「剪贴板」页早已能选「关闭 / 同步插件 / 设备互传」，
+`clipboard_sync.toml` 也会写出 `transport = "p2p"`，但 daemon 的
+`SyncSelection` 只有 `enabled` / `plugin_id`（serde 静默忽略 `transport`），
+选中互传后仍按插件模式跑——没有插件就什么都不做，且无任何日志。
+
+**改动**（`crates/xime-daemon/src/clipboard_sync.rs`）：
+1. `SyncSelection` 增加 `transport`，缺省 `plugin`（老配置必须维持插件行为，
+   默认 p2p 会让存量服务器用户升级后静默停同步）；与 setup 的
+   `ClipboardSyncConfig` 字段名/取值完全对齐。
+2. 后端收成显式枚举 `SyncBackend { Off, Plugins(..), P2p(..) }`：
+   `scan_backend()` 按配置二选一，P2P 走 `p2p/identity.bin` +
+   `p2p/peers.json`（与设置程序 `p2p_dir()` 同一目录，各算各的就会出现
+   「设置里配对成功、输入法认为没配对」）。
+3. 桥线程由阻塞 `recv()` 改为 `recv_timeout(200ms)` + 每轮
+   `Node::poll_event()`（`xime-p2p` 是轮询式接口，入站内容不会自己变成
+   `SyncMessage`）；切后端时 `Node::shutdown()` 释放 47821/47822。
+4. 回声抑制复用 `last_pushed_hash`；新增 `last_local_text` + `peer_connected`：
+   `Node::set_clipboard` 在无连接时直接丢指令，所以对端连上后补推一次最近内容
+   （「先复制、后连上」也能同步）。
+5. **配置热重载**：setup 改完配置只写文件、不通知 daemon，桥线程每轮比
+   `clipboard_sync.toml` 的 mtime，变了就重选后端——否则要重启输入法才生效。
+6. 依赖：workspace 增加 `xime-p2p`（git libximep2p，rev `bdf5f39`，与
+   libximecore 的 pin 一致，cargo 才能合并成一份）。
+
+**验证**：19 个 `clipboard_sync` 测试全过，其中两个是**真实 P2P 环回**
+（本机起一对已配对节点，走 Noise IK 握手 + 加密帧）：A 推 `p2p hello` →
+B 的 `clipboard.db` 收到；A 不收录自己的推送；另测配置 mtime 变化触发重载、
+`transport = "p2p"` 时不再加载插件。`cargo test --workspace` 223 项通过，
+`clippy --all-targets --all-features -D warnings` 干净。release 已装。
+
+**仍缺**（下一个功能点）：
+- **系统剪贴板写入**：远端内容目前只进 `clipboard.db`（面板/候选可选用），
+  没有 `data-control` 的 `set_selection`，所以「另一台复制、这边 Ctrl+V」
+  还不成立——这是 P2P 可用性的最后一块。
+- 双机实测（P4）：需要第二台设备配对后才能验。
+- `identity.bin` 首次生成的并发竞争：daemon 与 setup 同时首启时可能各生成
+  一份，后写覆盖先写，导致配对身份错位（概率低，未处理）。
+
+**此前：修复安装脚本写死 `target/release`**（2026-11-09）。
 
 **现象**：`./dev-install.sh` 编译完成后报
 `install: 对 'XimeChe/../libximecore/target/release/xime-sync-server' 调用 stat 失败`。

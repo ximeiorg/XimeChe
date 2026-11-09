@@ -7346,6 +7346,7 @@ dependencies = [
  "tracing-subscriber",
  "xime-clipboard",
  "xime-config",
+ "xime-p2p",
  "xime-plugin",
  "xime-speech",
  "xime-tray",
