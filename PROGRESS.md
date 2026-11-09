@@ -1,7 +1,31 @@
 # XimeChe（曦码·澈输入法）开发进度
 
 ## 当前状态
-**修复：修饰键转发把系统级 Ctrl 卡死**（2026-10-27）。
+**修复：libsqlite3-sys 链接冲突导致依赖解析失败**（2026-11-09）。
+
+**现象**：`cargo build` / `cargo update` 直接失败，报
+`libsqlite3-sys links to the native library sqlite3, but it conflicts with a
+previous package`。
+
+**根因**：`libximecore` 的 `xime-config` 已升级到 `rusqlite 0.41.1`
+（`libsqlite3-sys 0.39.x`），而本仓 `xime-clipboard` 仍钉着 `rusqlite 0.32`
+（`libsqlite3-sys 0.30.x`）。`libsqlite3-sys` 声明了 `links = "sqlite3"`，
+依赖图里只允许一份，二者无法共存。
+
+**修复**：
+1. `xime-clipboard` 的 `rusqlite` 升到 `0.41.1`（features 仍为 `bundled`），
+   Cargo.toml 里加注释说明与 `xime-config` 必须同版本；`store.rs` 的
+   `Connection`/`params!`/`OptionalExtension` API 在 0.41 无破坏性变化，
+   13 个既有测试全部通过。
+2. 顺带修掉本地 `libximecore` 新版 `AppMetadata` 新增字段导致的编译错误：
+   `xime-setup` 与 `xime-daemon` 补上 `settings_name` / `subtitle` /
+   `tagline` / `homepage`（此前 `cargo update` 拉取新 git 提交后暴露）。
+
+验证：`cargo build` 通过，`cargo clippy --all-targets --all-features -D warnings`
+仅剩 `libximecore` 内部 `Nonce::from_slice` 的弃用告警（外部 crate，非本仓），
+`cargo test -p xime-clipboard` 13 passed。
+
+**此前：修复修饰键转发把系统级 Ctrl 卡死**（2026-10-27）。
 
 **现象**：用户报"一切换到这个输入法，所有操作都带有 Ctrl 按下效果"。
 

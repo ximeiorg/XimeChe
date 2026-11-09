@@ -298,6 +298,10 @@ fn main() -> iced::Result {
     // 注入应用元数据（目录沿用 xime，librime 分发标识为 XimeChe）。
     let _ = xime_setup_lib::set_app_metadata(xime_setup_lib::AppMetadata {
         display_name: "曦码·澈输入法",
+        settings_name: "曦码·澈输入法设置",
+        subtitle: "输入法设置",
+        tagline: "基于 Rime 引擎的五笔输入法",
+        homepage: "https://github.com/ximeiorg/XimeChe",
         config_dir_name: "xime",
         config_file_base: "xime",
         distribution_name: "XimeChe",
