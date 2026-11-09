@@ -7,7 +7,17 @@ license = "GPL-3.0"
 repository.workspace = true
 
 [dependencies]
-xime-setup-lib = { workspace = true, features = ["clipboard-page", "dict-page", "backup-page", "voice-page"] }
+# xime-setup-lib 的各页面是 feature 门控的：这里没开的页面在设置程序里
+# 直接编不进去（侧栏条目消失），不是运行期开关。
+# - pair-page：设备关联页（局域网 P2P 配对），剪贴板页的「设备互传」模式
+#   依赖它才能完成配对，未开时该模式只显示"当前版本未包含设备关联页"。
+xime-setup-lib = { workspace = true, features = [
+    "clipboard-page",
+    "dict-page",
+    "backup-page",
+    "voice-page",
+    "pair-page",
+] }
 iced = { version = "0.14", default-features = false, features = [
     "tokio",
     "wgpu",
