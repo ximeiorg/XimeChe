@@ -693,11 +693,12 @@ impl SyncState {
                     info!("Sync p2p: peer {name} ({did}) connected={connected}");
                     self.peer_connected = connected;
                     if connected {
-                        // 见 `last_local_text` 注释：连上后补推一次最近内容。
+                        // 补发「daemon 启动前就已存在」的那条本地内容：新版节点
+                        // 只会补发曾经经过 `set_clipboard` 的内容，而这条是从
+                        // clipboard.db 读出来的，节点缓存里没有。最近一次本地复制
+                        // 则可能已经被节点补发过，重复一条由对端按文本去重。
                         if let Some(text) = self.last_local_text.clone() {
                             self.push_p2p(&text);
-                            // 补推后 hash 已被记为「自己推的」，避免把对端回传
-                            // 的同一条当新内容再入库。
                         }
                     } else {
                         // 自动模式掉线：下一轮立刻拉一次插件，别等满一个间隔。
