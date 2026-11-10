@@ -423,6 +423,10 @@ impl SyncState {
     /// - 只有直连通道：节点在就推（无连接时节点会缓存，连上后补发）；
     /// - 直连 + 插件（自动）：只有真的连上才推直连，否则压给插件；
     /// - 插件没装/加载失败：直连是唯一可用通道，退化为「节点在就推」。
+    ///
+    /// 这里不做 ximed 那种 5s/10s 健康窗口：剪贴板是单值资源，直连一断就把
+    /// 内容压给插件比「等它恢复」更重要——等的那几秒里用户复制的内容没有
+    /// 任何通道可走，只在本地历史里。恢复直连后由 `last_local_text` 补推。
     fn use_p2p_for_push(&self) -> bool {
         self.node.is_some() && (self.runtimes.is_empty() || self.peer_connected)
     }
@@ -443,6 +447,9 @@ impl SyncState {
             debug!("Sync: captured echo of applied remote text, skipping push");
             return;
         }
+        // 记住最近一次本地内容：自动模式下此刻可能推去了插件，等直连恢复时
+        // 要由 `Event::Peer` 把这条补推给对端（节点缓存里没有它）。
+        self.last_local_text = Some(text.to_string());
         if self.use_p2p_for_push() {
             self.push_p2p(text);
             return;
@@ -970,6 +977,43 @@ mod tests {
         state.apply_remote_text("offline", None, "test");
         assert_eq!(store.count_clipboard().unwrap(), 1);
         assert!(state.suppressed_captures.is_empty(), "没写成就不要抑制回声");
+    }
+
+    #[test]
+    fn test_plugin_pull_is_throttled() {
+        let (dir, _store, mut state) = setup();
+        load_fake_plugin(&mut state, dir.path());
+        assert!(state.last_plugin_pull.is_none());
+
+        state.maybe_pull_plugins();
+        let first = state.last_plugin_pull.expect("首次应拉取");
+        state.maybe_pull_plugins();
+        assert_eq!(
+            state.last_plugin_pull,
+            Some(first),
+            "间隔内不应重复拉取（时间戳不该被刷新）"
+        );
+
+        state.last_plugin_pull =
+            Some(Instant::now() - PLUGIN_PULL_INTERVAL - Duration::from_millis(1));
+        state.maybe_pull_plugins();
+        assert!(
+            state.last_plugin_pull.is_some_and(|at| at > first),
+            "超过间隔应再次拉取"
+        );
+    }
+
+    #[test]
+    fn test_local_capture_updates_last_local_text() {
+        // 自动模式掉线时内容只能推插件；直连恢复后靠这条补推给对端。
+        let (dir, _store, mut state) = setup();
+        load_fake_plugin(&mut state, dir.path());
+        state.handle_captured("during disconnect");
+        assert_eq!(
+            state.last_local_text.as_deref(),
+            Some("during disconnect"),
+            "本地捕获应更新补推内容，不能只依赖 push_p2p"
+        );
     }
 
     #[test]
@@ -1567,5 +1611,26 @@ mod tests {
             texts.iter().any(|t| t == "from plugin"),
             "插件远端内容应入库，实际: {texts:?}"
         );
+    }
+
+    #[test]
+    fn test_auto_skips_plugin_pull_while_p2p_connected() {
+        let (_tmp, mut a, _b) = p2p_pair();
+        let plugin_dir = tempfile::tempdir().unwrap();
+        load_fake_plugin(&mut a, plugin_dir.path());
+        assert!(
+            wait_until(&mut a, Duration::from_secs(10), |s| s.peer_connected),
+            "A 端未在超时内连上 B"
+        );
+
+        a.maybe_pull_plugins();
+        assert!(
+            a.last_plugin_pull.is_none(),
+            "直连已连上时不应再拉插件（避免双写）"
+        );
+
+        a.peer_connected = false;
+        a.maybe_pull_plugins();
+        assert!(a.last_plugin_pull.is_some(), "掉线后应立刻拉一次插件");
     }
 }
