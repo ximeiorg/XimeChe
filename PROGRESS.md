@@ -1,6 +1,50 @@
 # XimeChe（曦码·澈输入法）开发进度
 
 ## 当前状态
+**接入：剪贴板同步的通道模型 / 系统剪贴板 / 自动模式**（2026-11-11）。
+
+**背景**：libximecore 的剪贴板页已把「关闭 / 自动 / 同步插件 / 设备互传」改成
+两个独立开关，配置从单选 `transport` 改为有序 `channels` 数组；libximep2p 也
+补了公告角色、连上补发与发现阶段重读配对表。daemon 仍按旧契约读 `transport`，
+选中「设备互传」会静默按插件跑；远端内容只进 `clipboard.db`，别的应用里
+`Ctrl+V` 拿不到。
+
+**改动**：
+1. `SyncSelection` 增加 `channels`：`channels` 非空时完全以它为准，空时回退旧
+   `transport` / `plugin_id`（存量配置行为不变）。新增 `SyncBackend::Auto`
+   （直连 + 插件同时加载）：连上直连只走 P2P，掉线退回插件；装配失败时退化为
+   可用的一侧，不再静默关闭。
+2. 远端内容写回系统剪贴板：`xime-clipboard::system_clipboard`（arboard，Linux
+   走 wl-clipboard-rs 的 data-control，懒初始化）。P2P 事件与插件 pull 统一经
+   `apply_remote_text` 落库 + 写入；写回的 hash 进一次性回声窗口，watcher 再
+   捕获到同一文本时不推回对端。
+3. 插件通道 2s 定时拉取（对齐 Android），直连掉线立即拉一次；本地捕获更新
+   `last_local_text`，直连恢复时由 `Event::Peer` 补推「断开期间复制」的内容
+   （节点缓存里没有这条）。
+4. `xime-p2p` 升到 `b19ecde`（公告角色 / 连上补发 / 发现重读 peers.json），
+   `Cargo.lock` 从两份合并为一份。
+5. 公告端口 UDP 47822 用 `SO_REUSEADDR` 共享：输入法常驻节点与设置程序
+   「输入配对码」可同时监听。修复在本地 libximep2p `ca07a02`，**尚未推送**；
+   本机经 `.cargo/config.toml` 的 patch 生效，`dev-install.sh` 模板已同步。
+   推送后应删除 patch 并把 workspace 的 rev 指向新提交。
+6. `xime-setup` 的词典 `restore/export/import` 回调跟随 libximecore 改为
+   `Result`（此前 `cargo build` 直接失败），DBus 失败原因会带回设置页。
+
+**验证**：`cargo test --workspace` 全绿（clipboard_sync 31 项，含真实 P2P
+loopback 的推送 / 回声 / 系统剪贴板 / 自动回退）；`clippy --all-targets
+--all-features -D warnings` 干净；`cargo fmt --check` 干净。注意：本机
+KWallet 锁着时插件配置加密会弹解锁框，测试需 `dbus-run-session -- cargo test`
+（无 Secret Service 时降级明文，不阻塞）。
+
+**仍缺**：
+- **双机实测**：第二台设备配对、双向文本、断线重连、自动模式切换。
+- **libximep2p `ca07a02` 尚未推送**；推送前 CI 用 b19ecde 不含 SO_REUSEADDR，
+  桌面↔桌面配对输入侧仍会撞 47822（设置页「手动地址」`join_at` 可绕过）。
+- 图片 / 文件同步仍不支持（本端只做文本，`supports_attachments=false` 语义）。
+- 协议 v2 的 topic 消息（`Event::Message`）daemon 只忽略，未订阅。
+
+## 此前：设备互传后端（2026-11-09）
+
 **接入：剪贴板同步的「设备互传」（P2P）后端**（2026-11-09）。
 
 **背景**：设置程序的「剪贴板」页早已能选「关闭 / 同步插件 / 设备互传」，
@@ -1076,32 +1120,32 @@ alt-tab 切走再切回。
 - **xime-ui**: 22 tests - CandidateList 状态机、渲染器、root_display 绘制、blend 边界、菜单/内容网格命中
 - **xime-tray**: 28 tests - 状态切换、颜色设置、文字图标渲染、MenuAction、rounded_rect
 - **xime-wayland**: 17 tests - IM 状态机、错误类型、KeyEvent 数据
-- **xime-daemon**: 29 tests - DaemonCommand 枚举、get_config_dir、插件宿主、symbols 搜索、面板提交/翻页
+- **xime-daemon**: 94 tests - DaemonCommand、插件宿主、symbols、面板、剪贴板同步（31 项，含真实 P2P loopback）
 - **xime-predict**: 17 tests (1 个预先存在失败：test_predict_basic 分数断言)
 - **xime-setup/launcher/pack**: 0 tests (UI 密集型，需集成测试)
-- **总计**: ~247 tests
+- **workspace 合计**: 237 tests（`cargo test --workspace`）
 
 ## 下一步
-1. **GNOME 实机验证 v2 后端**（输入、候选窗定位、Shift 切换、锁屏恢复）
-2. GNOME 自启动机制（XDG autostart 或 systemd user unit，直接启动 xime-daemon）
-3. 测试 xime-setup（Iced 版）单例锁 + DBus 通知 + SelectSchema 切换方案
-4. 测试主题颜色实时更新功能（重新安装后验证）
-5. 测试 Ctrl 键字根显示功能
-6. 考虑为 xime-daemon/xime-launcher 添加集成测试
-7. 修复 xime-predict 中 test_predict_basic 的分数范围断言
-8. 添加 xime-setup 组件测试（state.rs, theme.rs）
+1. **剪贴板同步双机实测**（见下节；本机 loopback 已覆盖协议路径）
+2. **GNOME 实机验证 v2 后端**（输入、候选窗定位、Shift 切换、锁屏恢复）
+3. GNOME 自启动机制（XDG autostart 或 systemd user unit，直接启动 xime-daemon）
+4. 测试 xime-setup（Iced 版）单例锁 + DBus 通知 + SelectSchema 切换方案
+5. 测试主题颜色实时更新功能（重新安装后验证）
+6. 测试 Ctrl 键字根显示功能
+7. 考虑为 xime-daemon/xime-launcher 添加集成测试
+8. 修复 xime-predict 中 test_predict_basic 的分数范围断言
+9. 添加 xime-setup 组件测试（state.rs, theme.rs）
 
 ## 剪切板同步待完成功能
-1. **托盘集成**：在 `xime-tray` 添加配对确认菜单
+1. **双机实测**：第二台设备配对（含「已开同步再配第二台」的 47822 场景）、
+   双向文本、断线重连、自动模式（直连掉线退插件 / 恢复切回）。
+2. **推送 libximep2p `ca07a02`**：推送后删除 `.cargo/config.toml` 的本地 patch，
+   把 workspace 的 `xime-p2p` rev 指向该提交，CI 才能拿到 SO_REUSEADDR。
+3. **托盘集成**：在 `xime-tray` 添加配对确认 / 已配对设备菜单
    - 收到配对请求时弹出菜单："xxx 设备请求配对，码 123456，允许？"
    - 添加"已配对设备"菜单项，支持查看/移除
-2. **剪切板读写**：接入 `zbus` 读取/写入桌面剪切板
-   - 使用 `org.freedesktop.portal.Desktop` clipboard portal
-   - 或使用 `arboard` crate 直接读写
-3. **mDNS 发现**：添加 `mdns-sd` crate
-   - PC 发布 `_xime._tcp` 服务
-   - 手机扫描局域网发现 PC
-4. **端口配置**：从 `xime.yaml` 读取端口
-   - 配置项：`server.port: 16888`
-   - 配置项：`server.enabled: true/false`
-5. **词库同步接口预留**：为未来扩展预留 `/dict/*` 路由
+4. **mDNS 发现**：添加 `mdns-sd` crate，PC 发布 `_xime-clip._tcp`，替代 UDP 广播
+5. **协议 v2 topic**：需要「快捷发送 / 文本直传」等新功能时，再订阅
+   `Event::Message` 并给 `Node::send_message` 接线
+6. **图片 / 文件同步**：`Profile` 已有 `data` 字段，本端仍只处理文本
+7. **端口配置**：从 `xime.yaml` 读取同步端口（当前协议固定 47821/47822）

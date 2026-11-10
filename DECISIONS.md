@@ -1,5 +1,34 @@
 # XimeChe（曦码·澈输入法）重要决策
 
+## 2026-11-11: 剪贴板同步的通道契约、系统剪贴板与自动模式
+
+**问题**：设置程序把剪贴板同步配置从单选 `transport` 换成了有序 `channels`
+数组（可同时勾直连与插件 = 自动），daemon 仍只读 `transport`；同时远端内容
+只进 `clipboard.db`，没有写回系统剪贴板；两台桌面同时跑 daemon 时，配对
+输入侧与常驻节点抢 UDP 47822。
+
+**决策**：
+
+1. **`channels` 优先，旧字段只做兼容**：`channels` 非空时完全以它为准，
+   为空时才回退 `transport` / `plugin_id`。存量服务器用户升级后行为必须
+   零变化，所以旧路径的缺省仍是 plugin。
+2. **自动模式不做健康窗口**：同时勾直连与插件时，`peer_connected` 为真就
+   只走 P2P，否则立刻压给插件。ximed 的 5s/10s 窗口是为了避免远程服务
+   来回切撞限流；剪贴板是单值资源，直连一断就延迟回退，等于把用户刚复制的
+   内容关在本地——**宁可多走一次插件，也不要丢内容**。直连恢复后由
+   `last_local_text` 补推断开期间的内容（节点缓存里没有）。
+3. **系统剪贴板写回用 arboard**：与 ximed、libximecore 设置程序同一实现
+   （Linux 走 wl-clipboard-rs 的 data-control），不改 watcher 的
+   `blocking_dispatch` 循环去实现 data source。写回的 hash 进一次性回声
+   窗口，watcher 再捕获时不推回对端；取走即失效，不影响用户之后复制同一
+   段文本。以后若要去掉依赖，再在 watcher 连接上实现 `set_selection`。
+4. **UDP 47822 用 SO_REUSEADDR 共享，而不是暂停 daemon 节点**：配对与
+   常驻同步应当能并存；ximed 的「配对前 shutdown 节点」是临时绕行。
+   修复放在 libximep2p 的 `Watcher::bind`，两端共用同一份库即可。
+5. **插件通道 2s 定时拉取**（对齐 Android `ClipboardSyncBridge`）：插件是
+   拉取式，自动模式退到插件后没有定时器就收不到远端内容；直连掉线时重置
+   计时，下一轮立刻拉一次。
+
 ## 2026-10-27: 修饰键必须一对一转发，禁止任何缓存或条件门控
 
 **问题**：修终端 Ctrl+C 时，在 daemon 里加了 `forward_modifiers`，并且
