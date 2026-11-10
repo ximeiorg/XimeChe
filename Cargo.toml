@@ -28,8 +28,8 @@ xime-plugin = { git = "https://github.com/ximeiorg/libximecore.git", package = "
 xime-speech = { git = "https://github.com/ximeiorg/libximecore.git", package = "xime-speech" }
 # 跨设备剪贴板 P2P 传输层。rev 必须与 libximecore 里 xime-setup-lib 的
 # optional 依赖一致，否则同一仓会解析出两份 git 源。
-# b19ecde：公告角色（Node/Pair）、连上补发、发现阶段重读 peers.json。
-xime-p2p = { git = "https://github.com/ximeiorg/libximep2p.git", rev = "b19ecdec2c0336669897cafe909541906024dc29" }
+# ca07a02：b19ecde 的公告角色/连上补发/发现重读，加上公告端口 SO_REUSEADDR。
+xime-p2p = { git = "https://github.com/ximeiorg/libximep2p.git", rev = "ca07a02c73edcb56fefb4aaf7eda45d6c720a24f" }
 
 # local crates
 xime-wayland = { path = "crates/xime-wayland" }
