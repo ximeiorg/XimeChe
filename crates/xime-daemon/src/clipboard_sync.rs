@@ -706,6 +706,12 @@ impl SyncState {
                     }
                 }
                 xime_p2p::Event::Warning(msg) => warn!("Sync p2p: {msg}"),
+                // 新版协议的 topic 消息（剪贴板不走它）：当前版本不订阅。
+                // 用通配而不是显式 `Event::Message`：workspace 的 git pin
+                // （b19ecde）还没有这个变体，显式匹配会让 CI 编不过；本地
+                // patch 到 HEAD 时这里也能接住。
+                #[allow(unreachable_patterns)]
+                _ => debug!("Sync p2p: ignore unhandled event"),
             }
         }
     }

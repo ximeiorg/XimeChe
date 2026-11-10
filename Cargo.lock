@@ -7343,7 +7343,6 @@ dependencies = [
 [[package]]
 name = "xime-p2p"
 version = "0.1.0"
-source = "git+https://github.com/ximeiorg/libximep2p.git?rev=b19ecdec2c0336669897cafe909541906024dc29#b19ecdec2c0336669897cafe909541906024dc29"
 dependencies = [
  "base64 0.23.1",
  "chacha20poly1305 0.11.0",
@@ -7356,6 +7355,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.1",
  "snow",
+ "socket2",
  "spake2",
  "subtle",
  "thiserror 2.0.21",
@@ -7445,7 +7445,6 @@ dependencies = [
 [[package]]
 name = "xime-sync-domain"
 version = "0.1.0"
-source = "git+https://github.com/ximeiorg/libximep2p.git?rev=b19ecdec2c0336669897cafe909541906024dc29#b19ecdec2c0336669897cafe909541906024dc29"
 dependencies = [
  "async-trait",
  "base64 0.23.1",

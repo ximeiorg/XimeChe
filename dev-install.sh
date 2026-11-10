@@ -34,6 +34,12 @@ if [ ! -f "${CARGO_CONF}" ]; then
 librime = { path = "../libximecore/crates/librime" }
 xime-config = { path = "../libximecore/crates/xime-config" }
 xime-setup-lib = { path = "../libximecore/crates/xime-setup" }
+
+# 公告端口（UDP 47822）要在 daemon 与设置程序之间用 SO_REUSEADDR 共享，
+# 修复先走本地 libximep2p checkout（推送后改为升级 rev）。
+[patch."https://github.com/ximeiorg/libximep2p"]
+xime-p2p = { path = "../libximep2p/crates/xime-p2p" }
+xime-sync-domain = { path = "../libximep2p/crates/xime-sync-domain" }
 EOF
     echo "Created ${CARGO_CONF} with local libximecore patch"
 fi
