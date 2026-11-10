@@ -18,7 +18,7 @@
 //! - **回声抑制**：自己刚推出去的 hash 不再写回本地；
 //! - **独立线程**：插件网络请求、P2P 握手都不阻塞按键处理。
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::Arc;
@@ -31,6 +31,7 @@ use xime_p2p::{Profile, ProfileType};
 use xime_plugin::{PluginManager, PluginManifest, PluginRuntime};
 
 use xime_clipboard::store::ClipboardStore;
+use xime_clipboard::system_clipboard::{ClipboardSink, SystemClipboard};
 
 /// P2P 模式下桥线程的轮询间隔。
 ///
@@ -44,6 +45,13 @@ const P2P_POLL_INTERVAL: Duration = Duration::from_millis(200);
 /// 插件侧的新内容就只能等用户打开剪贴板面板才看得到。2 秒对齐 Android
 /// `ClipboardSyncBridge` 的轮询节奏。
 const PLUGIN_PULL_INTERVAL: Duration = Duration::from_secs(2);
+
+/// 系统剪贴板回声抑制窗口。
+///
+/// 写回系统剪贴板会触发自家 watcher 的 `Captured` 回调；这些 hash 用来识别
+/// 「这是刚应用的对端内容」。用队列而不是单值：短时间内连续收到两条远端内容时，
+/// 两条回声都会到；取走即失效，也不会永久屏蔽用户之后再复制同一段文本。
+const MAX_SUPPRESSED_ECHOES: usize = 8;
 
 /// 同步插件加载描述（运行时在桥线程内创建，规避 QuickJS Context 跨线程约束）。
 #[derive(Debug, Clone)]
@@ -403,6 +411,10 @@ struct SyncState {
     last_local_text: Option<String>,
     /// 上次轮询插件通道的时刻（自动模式退回插件时使用）。
     last_plugin_pull: Option<Instant>,
+    /// 写回系统剪贴板（`None` = 测试环境/初始化失败）。
+    clipboard: Option<Box<dyn ClipboardSink>>,
+    /// 刚写入系统剪贴板的 hash，用于吃掉 watcher 的自身回声。
+    suppressed_captures: VecDeque<String>,
 }
 
 impl SyncState {
@@ -424,6 +436,13 @@ impl SyncState {
         if text.is_empty() {
             return;
         }
+        let hash = text_hash(text);
+        // 自己刚写回系统剪贴板的远端内容：watcher 会再捕获一次，不能推回对端。
+        if let Some(pos) = self.suppressed_captures.iter().position(|h| h == &hash) {
+            self.suppressed_captures.remove(pos);
+            debug!("Sync: captured echo of applied remote text, skipping push");
+            return;
+        }
         if self.use_p2p_for_push() {
             self.push_p2p(text);
             return;
@@ -431,7 +450,6 @@ impl SyncState {
         if self.runtimes.is_empty() {
             return;
         }
-        let hash = text_hash(text);
         if self.last_pushed_hash.as_deref() == Some(hash.as_str()) {
             debug!("Sync push: identical to last pushed, skipping");
             return;
@@ -475,6 +493,9 @@ impl SyncState {
             debug!("Sync pull: plugin channel not active, skipping");
             return;
         }
+        // 先把拉取结果全部取出来，再统一落库：`apply_remote_text` 要可变借用
+        // self，不能在遍历 runtimes 的循环里直接调。
+        let mut incoming: Vec<(String, String, Option<String>)> = Vec::new();
         for (id, runtime) in &self.runtimes {
             let Some(value) = runtime.clipboard_pull() else {
                 debug!("Sync pull from '{}': no change", id);
@@ -492,25 +513,64 @@ impl SyncState {
                 if text.is_empty() {
                     continue;
                 }
-                // 回声抑制：自己刚推送的内容不写回本地
-                let remote_hash = profile
+                let hash = profile
                     .get("hash")
                     .and_then(|h| h.as_str())
                     .map(str::to_owned);
-                if remote_hash.as_deref() == self.last_pushed_hash.as_deref() {
-                    debug!("Sync pull: echo of own push, skipping");
-                    continue;
-                }
-                if let Err(e) = self
-                    .store
-                    .upsert_and_trim(text, xime_clipboard::store::now_millis())
-                {
-                    error!("Sync pull: store failed: {e}");
-                } else {
-                    debug!("Sync pulled from '{}': {} chars", id, text.chars().count());
-                }
+                incoming.push((id.clone(), text.to_string(), hash));
             }
         }
+        for (id, text, hash) in incoming {
+            self.apply_remote_text(&text, hash.as_deref(), &format!("plugin:{id}"));
+        }
+    }
+
+    /// 把一条远端文本落到本地：入库 + 写回系统剪贴板 + 记录回声抑制。
+    ///
+    /// 三个入口（P2P 事件、插件 pull、测试）共用，避免只有某一条路径忘了
+    /// 写系统剪贴板——那正是「面板里看得到、Ctrl+V 拿不到」的根因。
+    fn apply_remote_text(&mut self, text: &str, hash: Option<&str>, from: &str) {
+        // 回声抑制：自己刚推出去的内容不写回本地。
+        if let Some(h) = hash {
+            if !h.is_empty() && Some(h) == self.last_pushed_hash.as_deref() {
+                debug!("Sync: echo of own push from {from}, skipping");
+                return;
+            }
+        }
+        match self
+            .store
+            .upsert_and_trim(text, xime_clipboard::store::now_millis())
+        {
+            Ok(()) => debug!("Sync pulled from {from}: {} chars", text.chars().count()),
+            Err(e) => {
+                error!("Sync: store failed: {e}");
+                return;
+            }
+        }
+        self.write_system_clipboard(text, hash);
+    }
+
+    /// 把远端内容写回系统剪贴板，并记住它的 hash 以吞掉 watcher 回声。
+    fn write_system_clipboard(&mut self, text: &str, hash: Option<&str>) {
+        let Some(sink) = self.clipboard.as_mut() else {
+            return;
+        };
+        if !sink.set_text(text) {
+            debug!("Sync: system clipboard unavailable, kept in history only");
+            return;
+        }
+        let hash = hash
+            .filter(|h| !h.is_empty())
+            .map(str::to_owned)
+            .unwrap_or_else(|| text_hash(text));
+        if self.suppressed_captures.len() >= MAX_SUPPRESSED_ECHOES {
+            self.suppressed_captures.pop_front();
+        }
+        self.suppressed_captures.push_back(hash);
+        debug!(
+            "Sync: wrote {} chars to system clipboard",
+            text.chars().count()
+        );
     }
 
     /// 自动模式/插件通道的定时拉取（每个桥循环调用一次）。
@@ -657,24 +717,16 @@ impl SyncState {
         if profile.text.is_empty() {
             return;
         }
-        // 回声抑制：自己刚推出去的内容不写回本地。
-        if !profile.hash.is_empty()
-            && Some(profile.hash.as_str()) == self.last_pushed_hash.as_deref()
-        {
-            debug!("Sync p2p: echo of own push, skipping");
-            return;
-        }
-        match self
-            .store
-            .upsert_and_trim(&profile.text, xime_clipboard::store::now_millis())
-        {
-            Ok(()) => debug!(
-                "Sync p2p: pulled ({} chars, from {:?})",
-                profile.text.chars().count(),
-                profile.source
-            ),
-            Err(e) => error!("Sync p2p: store failed: {e}"),
-        }
+        let hash = if profile.hash.is_empty() {
+            None
+        } else {
+            Some(profile.hash.as_str())
+        };
+        let from = match profile.source.as_deref() {
+            Some(src) if !src.is_empty() => format!("p2p:{src}"),
+            _ => "p2p".to_string(),
+        };
+        self.apply_remote_text(&profile.text, hash, &from);
     }
 }
 
@@ -692,6 +744,8 @@ pub fn spawn_bridge(store: Arc<ClipboardStore>, rx: Receiver<SyncMessage>) -> Jo
                 last_pushed_hash: None,
                 last_local_text: None,
                 last_plugin_pull: None,
+                clipboard: Some(Box::new(SystemClipboard::new())),
+                suppressed_captures: VecDeque::new(),
             };
             loop {
                 // 轮询而不是阻塞 recv：P2P 的入站内容只在 `Node` 的事件队列里，
@@ -766,6 +820,8 @@ mod tests {
             last_pushed_hash: None,
             last_local_text: None,
             last_plugin_pull: None,
+            clipboard: None,
+            suppressed_captures: VecDeque::new(),
         };
         (dir, store, state)
     }
@@ -787,6 +843,30 @@ mod tests {
             .and_then(|r| r.call_plugin_fn("clipboardSync.remoteCount", &[]))
             .and_then(|v| v.as_u64())
             .unwrap_or(u64::from(u32::MAX)) as usize
+    }
+
+    /// 内存版系统剪贴板：记录写入内容，供「远端内容要 Ctrl+V 拿得到」的断言。
+    struct MockClipboard {
+        writes: Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    impl MockClipboard {
+        fn new() -> (Self, Arc<std::sync::Mutex<Vec<String>>>) {
+            let writes = Arc::new(std::sync::Mutex::new(Vec::new()));
+            (
+                Self {
+                    writes: Arc::clone(&writes),
+                },
+                writes,
+            )
+        }
+    }
+
+    impl ClipboardSink for MockClipboard {
+        fn set_text(&mut self, text: &str) -> bool {
+            self.writes.lock().unwrap().push(text.to_string());
+            true
+        }
     }
 
     #[test]
@@ -844,6 +924,45 @@ mod tests {
         let items = store.list_clipboard(10).unwrap();
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].text, "B");
+    }
+
+    #[test]
+    fn test_remote_pull_writes_system_clipboard_and_suppresses_echo() {
+        let (dir, store, mut state) = setup();
+        load_fake_plugin(&mut state, dir.path());
+        let (sink, writes) = MockClipboard::new();
+        state.clipboard = Some(Box::new(sink));
+
+        // 模拟另一台设备写入远端
+        let h = text_hash("peer text");
+        if let Some(runtime) = state.runtimes.values().next() {
+            assert!(runtime.clipboard_push(&profile_json("peer text", &h)));
+        }
+
+        state.handle_pull();
+        assert_eq!(store.count_clipboard().unwrap(), 1);
+        assert_eq!(
+            &*writes.lock().unwrap(),
+            &["peer text".to_string()],
+            "远端内容必须写回系统剪贴板（Ctrl+V 才能拿到）"
+        );
+
+        // watcher 捕获自己刚写进去的内容：不应再推回插件
+        state.handle_captured("peer text");
+        assert_eq!(remote_count(&state), 1, "系统剪贴板回声不应再推一条");
+        // 抑制是一次性的：用户之后再次复制同一段文本要正常推送
+        state.handle_captured("peer text");
+        assert_eq!(remote_count(&state), 2, "相同文本的二次复制应正常推送");
+    }
+
+    #[test]
+    fn test_remote_apply_without_system_clipboard_still_stores() {
+        // 没有 Wayland 合成器（测试环境）时写回失败不能连带丢历史。
+        let (_dir, store, mut state) = setup();
+        assert!(state.clipboard.is_none());
+        state.apply_remote_text("offline", None, "test");
+        assert_eq!(store.count_clipboard().unwrap(), 1);
+        assert!(state.suppressed_captures.is_empty(), "没写成就不要抑制回声");
     }
 
     #[test]
@@ -1304,6 +1423,8 @@ mod tests {
             last_pushed_hash: None,
             last_local_text: None,
             last_plugin_pull: None,
+            clipboard: None,
+            suppressed_captures: VecDeque::new(),
         };
         (tmp, state(store_a, node_a), state(store_b, node_b))
     }
@@ -1351,6 +1472,30 @@ mod tests {
             a.store.count_clipboard().unwrap(),
             0,
             "A 不应收录自己的推送"
+        );
+    }
+
+    #[test]
+    fn test_p2p_push_writes_peer_system_clipboard() {
+        let (_tmp, mut a, mut b) = p2p_pair();
+        let (sink, writes) = MockClipboard::new();
+        b.clipboard = Some(Box::new(sink));
+
+        assert!(
+            wait_until(&mut a, Duration::from_secs(10), |s| s.peer_connected),
+            "A 端未在超时内连上 B"
+        );
+        a.handle_captured("clip me");
+        assert!(
+            wait_until(&mut b, Duration::from_secs(10), |s| {
+                s.store.count_clipboard().unwrap() > 0
+            }),
+            "B 端未在超时内收到剪贴板"
+        );
+        assert_eq!(
+            &*writes.lock().unwrap(),
+            &["clip me".to_string()],
+            "P2P 收到的内容必须写回系统剪贴板"
         );
     }
 
