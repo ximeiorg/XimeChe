@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::Arc;
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use sha2::{Digest, Sha256};
 use tracing::{debug, error, info, warn};
@@ -37,6 +37,13 @@ use xime_clipboard::store::ClipboardStore;
 /// `Node` 是轮询式 API（剪贴板到达、连接变化都进事件队列），所以桥线程不能
 /// 在 `recv()` 上无限期阻塞；200ms 对剪贴板这种交互级延迟足够，又不至于空转。
 const P2P_POLL_INTERVAL: Duration = Duration::from_millis(200);
+
+/// 自动模式退回插件通道后的拉取间隔。
+///
+/// P2P 是推送式（事件队列），插件通道是拉取式；没有这个定时器，直连一断，
+/// 插件侧的新内容就只能等用户打开剪贴板面板才看得到。2 秒对齐 Android
+/// `ClipboardSyncBridge` 的轮询节奏。
+const PLUGIN_PULL_INTERVAL: Duration = Duration::from_secs(2);
 
 /// 同步插件加载描述（运行时在桥线程内创建，规避 QuickJS Context 跨线程约束）。
 #[derive(Debug, Clone)]
@@ -83,16 +90,27 @@ pub struct SyncSelection {
     /// 总开关：false 时同步桥不加载任何后端。
     #[serde(default)]
     pub enabled: bool,
-    /// 选中的同步插件 id（空或失效时回落到首个已启用的 clipboard_sync 插件）。
+    /// 选中的同步插件 id（旧配置用；新配置以 `channels` 为准）。
+    ///
+    /// 空或失效时回落到首个已启用的 clipboard_sync 插件。
     #[serde(default)]
     pub plugin_id: String,
-    /// 传输方式：`plugin`（经插件/服务器）或 `p2p`（局域网直连）。
+    /// 启用的通道，有序：`"p2p"` = 局域网直连，其它值是剪贴板同步插件 id。
     ///
-    /// 老配置没有这个字段时必须默认成 `plugin`——默认 `p2p` 会让所有存量
-    /// 服务器用户升级后静默停同步（只会留一句「未配对」的日志）。
+    /// 设置程序当前写这个字段；同时含 `p2p` 与插件 id 即「自动」模式
+    /// （优先直连，连不上退插件）。旧配置没有它，只能靠 `transport` 判断。
+    #[serde(default)]
+    pub channels: Vec<String>,
+    /// 旧字段：`plugin`（经插件/服务器）或 `p2p`（局域网直连）。
+    ///
+    /// 只在 `channels` 为空时生效。老配置必须维持原有行为，因此缺省值仍是
+    /// `plugin`——默认 `p2p` 会让所有存量服务器用户升级后静默停同步。
     #[serde(default = "default_transport")]
     pub transport: String,
 }
+
+/// 通道 id：局域网直连。其余取值一律当作 clipboard_sync 插件 id。
+const P2P_CHANNEL: &str = "p2p";
 
 fn default_transport() -> String {
     "plugin".to_string()
@@ -103,20 +121,69 @@ impl Default for SyncSelection {
         Self {
             enabled: false,
             plugin_id: String::new(),
+            channels: Vec::new(),
             transport: default_transport(),
         }
     }
 }
 
+/// 选中的插件通道。
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PluginPick {
+    /// 没有插件通道（关闭 / 只选了直连）。
+    None,
+    /// 老配置只写了 `enabled` + 空的 `plugin_id`：沿用「首个已启用插件」。
+    FirstAvailable,
+    /// 指定插件 id（失效时仍回落首个已启用项，和旧行为一致）。
+    Id(String),
+}
+
 impl SyncSelection {
-    /// 是否选择了局域网直连。未识别的 transport 一律按插件处理：宁可保持既有
-    /// 行为，也不要因为一个拼错的字段让同步静默失效。
-    fn is_p2p(&self) -> bool {
-        self.transport == "p2p"
+    /// 是否启用了局域网直连。
+    ///
+    /// `channels` 非空时完全以它为准；为空时才看旧 `transport`。
+    fn has_p2p(&self) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        if self.channels.iter().any(|c| !c.trim().is_empty()) {
+            return self.channels.iter().any(|c| c.trim() == P2P_CHANNEL);
+        }
+        self.transport.trim() == P2P_CHANNEL
+    }
+
+    /// 选中的插件通道。未识别的通道值按插件 id 处理——宁可保持既有行为，
+    /// 也不要因为一个拼错的字段让同步静默失效。
+    fn plugin_pick(&self) -> PluginPick {
+        if !self.enabled {
+            return PluginPick::None;
+        }
+        let has_new = self.channels.iter().any(|c| !c.trim().is_empty());
+        if has_new {
+            return match self
+                .channels
+                .iter()
+                .map(|c| c.trim())
+                .find(|c| !c.is_empty() && *c != P2P_CHANNEL)
+            {
+                Some(id) => PluginPick::Id(id.to_string()),
+                None => PluginPick::None,
+            };
+        }
+        // 旧配置：transport 是唯一判据，plugin_id 只用于选插件。
+        if self.transport.trim() == P2P_CHANNEL {
+            return PluginPick::None;
+        }
+        let id = self.plugin_id.trim();
+        if id.is_empty() {
+            PluginPick::FirstAvailable
+        } else {
+            PluginPick::Id(id.to_string())
+        }
     }
 }
 
-/// 同步后端（三选一，互斥）。
+/// 同步后端。
 ///
 /// 原来是「enabled + 有没有插件」两件事拼出来的，选了「设备互传」也只是在
 /// 插件列表里找，结果什么都不做且无日志。收成显式枚举后，桥只有一个分支判断。
@@ -128,6 +195,11 @@ pub enum SyncBackend {
     Plugins(Vec<SyncPluginDescriptor>),
     /// 局域网直连（xime-p2p）。
     P2p(Box<P2pConfig>),
+    /// 自动：直连与插件同时加载，直连可用时优先，掉线后退回插件。
+    Auto {
+        p2p: Box<P2pConfig>,
+        plugins: Vec<SyncPluginDescriptor>,
+    },
 }
 
 /// P2P 后端启动参数。
@@ -194,39 +266,85 @@ pub fn scan_backend() -> SyncBackend {
 }
 
 /// [`scan_backend`] 的可测试内核：目录由参数传入。
+///
+/// 通道语义（与设置程序 `SyncMode` 对齐）：
+/// - 只有插件通道 → [`SyncBackend::Plugins`]；
+/// - 只有 `p2p` → [`SyncBackend::P2p`]；
+/// - 两者都有 → [`SyncBackend::Auto`]（直连优先，连不上走插件）；
+/// - 选中的通道一个都装配不起来 → [`SyncBackend::Off`]（并保留日志，不再静默）。
 pub fn scan_backend_from(plugins_root: &Path, p2p_root: &Path, sel: &SyncSelection) -> SyncBackend {
     if !sel.enabled {
         return SyncBackend::Off;
     }
-    if sel.is_p2p() {
-        if let Err(e) = std::fs::create_dir_all(p2p_root) {
-            error!("Sync p2p: create {} failed: {e}", p2p_root.display());
-            return SyncBackend::Off;
-        }
-        let Some(identity) = xime_p2p::load_or_create_identity(p2p_root) else {
-            error!(
-                "Sync p2p: identity unavailable under {}",
-                p2p_root.display()
-            );
-            return SyncBackend::Off;
+    let plugins = resolve_descriptors(plugins_root, sel);
+    let wants_p2p = sel.has_p2p();
+    if !wants_p2p {
+        return if plugins.is_empty() {
+            warn!("Sync bridge: 插件通道没有可用插件，同步未启用");
+            SyncBackend::Off
+        } else {
+            SyncBackend::Plugins(plugins)
         };
-        return SyncBackend::P2p(Box::new(P2pConfig {
-            identity,
-            store_path: p2p_root.join("peers.json"),
-        }));
     }
-    SyncBackend::Plugins(resolve_descriptors(plugins_root, sel))
+
+    match p2p_config(p2p_root) {
+        Some(p2p) => {
+            if plugins.is_empty() {
+                SyncBackend::P2p(Box::new(p2p))
+            } else {
+                SyncBackend::Auto {
+                    p2p: Box::new(p2p),
+                    plugins,
+                }
+            }
+        }
+        None => {
+            // 自动模式里直连装配失败还有插件可用：退化成纯插件，总比整个关掉好。
+            if plugins.is_empty() {
+                SyncBackend::Off
+            } else {
+                warn!("Sync bridge: 直连不可用，自动模式退化为插件通道");
+                SyncBackend::Plugins(plugins)
+            }
+        }
+    }
+}
+
+/// 创建 P2P 后端参数（身份与配对表）。
+///
+/// 身份生成失败（目录不可写 / 无随机源）返回 `None`，由调用方决定降级。
+fn p2p_config(p2p_root: &Path) -> Option<P2pConfig> {
+    if let Err(e) = std::fs::create_dir_all(p2p_root) {
+        error!("Sync p2p: create {} failed: {e}", p2p_root.display());
+        return None;
+    }
+    let Some(identity) = xime_p2p::load_or_create_identity(p2p_root) else {
+        error!(
+            "Sync p2p: identity unavailable under {}",
+            p2p_root.display()
+        );
+        return None;
+    };
+    Some(P2pConfig {
+        identity,
+        store_path: p2p_root.join("peers.json"),
+    })
 }
 
 /// 按 `SyncSelection` 解析要加载的插件：偏好插件有效则只用它，否则回落首个
-/// 已启用的 clipboard_sync 插件；总开关关闭或无候选返回空。
+/// 已启用的 clipboard_sync 插件；总开关关闭、只选了直连或无候选返回空。
 pub fn resolve_descriptors(
     root: &std::path::Path,
     sel: &SyncSelection,
 ) -> Vec<SyncPluginDescriptor> {
-    if !sel.enabled {
+    let pick = sel.plugin_pick();
+    if pick == PluginPick::None {
         return Vec::new();
     }
+    let preferred = match &pick {
+        PluginPick::Id(id) => Some(id.clone()),
+        PluginPick::FirstAvailable | PluginPick::None => None,
+    };
     let manager = PluginManager::new(root);
     let mut candidates: Vec<SyncPluginDescriptor> = manager
         .list()
@@ -249,9 +367,11 @@ pub fn resolve_descriptors(
             })
         })
         .collect();
-    if let Some(pos) = candidates.iter().position(|d| d.id == sel.plugin_id) {
-        let preferred = candidates.swap_remove(pos);
-        return vec![preferred];
+    if let Some(id) = preferred {
+        if let Some(pos) = candidates.iter().position(|d| d.id == id) {
+            let preferred = candidates.swap_remove(pos);
+            return vec![preferred];
+        }
     }
     candidates.truncate(1);
     candidates
@@ -281,14 +401,30 @@ struct SyncState {
     /// 所以对端连上时（`Event::Peer { connected: true }`）要补推一次，
     /// 否则「先复制、后连上」的内容永远同步不过去。
     last_local_text: Option<String>,
+    /// 上次轮询插件通道的时刻（自动模式退回插件时使用）。
+    last_plugin_pull: Option<Instant>,
 }
 
 impl SyncState {
+    /// 当前是否该用 P2P 推送。
+    ///
+    /// - 只有直连通道：节点在就推（无连接时节点会缓存，连上后补发）；
+    /// - 直连 + 插件（自动）：只有真的连上才推直连，否则压给插件；
+    /// - 插件没装/加载失败：直连是唯一可用通道，退化为「节点在就推」。
+    fn use_p2p_for_push(&self) -> bool {
+        self.node.is_some() && (self.runtimes.is_empty() || self.peer_connected)
+    }
+
+    /// 当前是否该从插件通道拉取（自动模式下直连已连上时不拉，避免双写）。
+    fn use_plugin_for_pull(&self) -> bool {
+        !self.runtimes.is_empty() && !(self.node.is_some() && self.peer_connected)
+    }
+
     fn handle_captured(&mut self, text: &str) {
         if text.is_empty() {
             return;
         }
-        if self.node.is_some() {
+        if self.use_p2p_for_push() {
             self.push_p2p(text);
             return;
         }
@@ -334,12 +470,9 @@ impl SyncState {
     }
 
     fn handle_pull(&mut self) {
-        if self.node.is_some() {
-            // P2P 是推送式：远端变更由 `poll_events` 实时取，没有「拉」这一步。
-            debug!("Sync p2p: pull is a no-op (push based)");
-            return;
-        }
-        if self.runtimes.is_empty() {
+        if !self.use_plugin_for_pull() {
+            // 纯直连时插件为空；自动模式下直连已连上时由 P2P 推送，不再拉插件。
+            debug!("Sync pull: plugin channel not active, skipping");
             return;
         }
         for (id, runtime) in &self.runtimes {
@@ -380,6 +513,26 @@ impl SyncState {
         }
     }
 
+    /// 自动模式/插件通道的定时拉取（每个桥循环调用一次）。
+    ///
+    /// 只在插件通道是当前接收通道时节流到 [`PLUGIN_PULL_INTERVAL`]；直连一断
+    /// 就重置计时，下一轮立刻拉一次，不用等满 2 秒。
+    fn maybe_pull_plugins(&mut self) {
+        if !self.use_plugin_for_pull() {
+            self.last_plugin_pull = None;
+            return;
+        }
+        let now = Instant::now();
+        if self
+            .last_plugin_pull
+            .is_some_and(|at| now.duration_since(at) < PLUGIN_PULL_INTERVAL)
+        {
+            return;
+        }
+        self.last_plugin_pull = Some(now);
+        self.handle_pull();
+    }
+
     fn handle_reload(&mut self, backend: SyncBackend) {
         // 旧后端统一先卸：插件运行时与 P2P 节点都持有线程/网络资源。
         for runtime in self.runtimes.values() {
@@ -392,11 +545,17 @@ impl SyncState {
         }
         self.last_pushed_hash = None;
         self.peer_connected = false;
+        self.last_plugin_pull = None;
 
         match backend {
             SyncBackend::Off => info!("Sync bridge: disabled"),
             SyncBackend::Plugins(descriptors) => self.load_plugins(&descriptors),
             SyncBackend::P2p(cfg) => self.start_p2p(*cfg),
+            SyncBackend::Auto { p2p, plugins } => {
+                info!("Sync bridge: auto mode (p2p preferred, plugin fallback)");
+                self.load_plugins(&plugins);
+                self.start_p2p(*p2p);
+            }
         }
     }
 
@@ -480,6 +639,9 @@ impl SyncState {
                             // 补推后 hash 已被记为「自己推的」，避免把对端回传
                             // 的同一条当新内容再入库。
                         }
+                    } else {
+                        // 自动模式掉线：下一轮立刻拉一次插件，别等满一个间隔。
+                        self.last_plugin_pull = None;
                     }
                 }
                 xime_p2p::Event::Warning(msg) => warn!("Sync p2p: {msg}"),
@@ -529,6 +691,7 @@ pub fn spawn_bridge(store: Arc<ClipboardStore>, rx: Receiver<SyncMessage>) -> Jo
                 peer_connected: false,
                 last_pushed_hash: None,
                 last_local_text: None,
+                last_plugin_pull: None,
             };
             loop {
                 // 轮询而不是阻塞 recv：P2P 的入站内容只在 `Node` 的事件队列里，
@@ -544,6 +707,7 @@ pub fn spawn_bridge(store: Arc<ClipboardStore>, rx: Receiver<SyncMessage>) -> Jo
                     }
                 }
                 state.poll_events();
+                state.maybe_pull_plugins();
                 let _ = state.reload_if_config_changed();
             }
             if let Some(node) = state.node.take() {
@@ -601,6 +765,7 @@ mod tests {
             peer_connected: false,
             last_pushed_hash: None,
             last_local_text: None,
+            last_plugin_pull: None,
         };
         (dir, store, state)
     }
@@ -829,28 +994,44 @@ mod tests {
         let path = dir.path().join("clipboard_sync.toml");
         assert_eq!(read_sync_selection_from(&path), SyncSelection::default());
 
+        // 旧配置：没有 channels，只有 plugin_id
         std::fs::write(&path, "enabled = true\nplugin_id = \"com.b.sync\"\n").unwrap();
+        let sel = read_sync_selection_from(&path);
+        assert!(sel.enabled);
+        assert_eq!(sel.plugin_id, "com.b.sync");
+        assert!(sel.channels.is_empty());
         assert_eq!(
-            read_sync_selection_from(&path),
-            SyncSelection {
-                enabled: true,
-                plugin_id: "com.b.sync".into(),
-                ..SyncSelection::default()
-            }
+            sel.transport, "plugin",
+            "老配置缺 transport 必须默认 plugin"
         );
-        // 老配置没有 transport：默认 plugin（不能默认 p2p，否则存量用户静默停同步）
-        assert_eq!(read_sync_selection_from(&path).transport, "plugin");
+        assert_eq!(sel.plugin_pick(), PluginPick::Id("com.b.sync".into()));
+        assert!(!sel.has_p2p());
 
-        // 设置程序写出的「设备互传」
+        // 旧配置里的「设备互传」
+        std::fs::write(&path, "enabled = true\ntransport = \"p2p\"\n").unwrap();
+        let sel = read_sync_selection_from(&path);
+        assert!(sel.has_p2p());
+        assert_eq!(sel.plugin_pick(), PluginPick::None);
+
+        // 当前设置程序：只勾局域网直连
         std::fs::write(
             &path,
-            "enabled = true\nplugin_id = \"\"\ntransport = \"p2p\"\n",
+            "enabled = true\nplugin_id = \"\"\nchannels = [\"p2p\"]\n",
         )
         .unwrap();
         let sel = read_sync_selection_from(&path);
-        assert!(sel.enabled);
-        assert!(sel.is_p2p());
-        assert_eq!(sel.transport, "p2p");
+        assert!(sel.has_p2p());
+        assert_eq!(sel.plugin_pick(), PluginPick::None);
+
+        // 当前设置程序：自动（插件 + 直连）。channels 优先，旧 transport 不再生效。
+        std::fs::write(
+            &path,
+            "enabled = true\ntransport = \"p2p\"\nchannels = [\"com.a.sync\", \"p2p\"]\n",
+        )
+        .unwrap();
+        let sel = read_sync_selection_from(&path);
+        assert!(sel.has_p2p());
+        assert_eq!(sel.plugin_pick(), PluginPick::Id("com.a.sync".into()));
     }
 
     // ---- scan_backend ----
@@ -891,6 +1072,7 @@ mod tests {
             enabled: true,
             plugin_id: String::new(),
             transport: "p2p".into(),
+            ..SyncSelection::default()
         };
         match scan_backend_from(plugins.path(), &p2p_root, &sel) {
             SyncBackend::P2p(cfg) => {
@@ -907,8 +1089,7 @@ mod tests {
 
     #[test]
     fn test_scan_backend_p2p_wins_over_plugins() {
-        // 选了设备互传就不该再加载插件：两条路同时同步会让同一内容有
-        // 两份来源（一份去服务器、一份走局域网），出问题无法定位。
+        // 旧配置 transport = p2p：不再加载插件（升级后行为不变）。
         let plugins = tempfile::tempdir().unwrap();
         write_plugin_dir(plugins.path(), "com.a.sync", "A", "clipboard_sync");
         write_registry(plugins.path(), &[("com.a.sync", true)]);
@@ -917,11 +1098,106 @@ mod tests {
             enabled: true,
             plugin_id: "com.a.sync".into(),
             transport: "p2p".into(),
+            ..SyncSelection::default()
         };
         assert!(matches!(
             scan_backend_from(plugins.path(), p2p.path(), &sel),
             SyncBackend::P2p(_)
         ));
+    }
+
+    #[test]
+    fn test_channels_only_p2p_does_not_load_plugins() {
+        // 新配置只勾直连：装了插件也不能偷偷走插件（用户以为只走局域网）。
+        let plugins = tempfile::tempdir().unwrap();
+        write_plugin_dir(plugins.path(), "com.a.sync", "A", "clipboard_sync");
+        write_registry(plugins.path(), &[("com.a.sync", true)]);
+        let p2p = tempfile::tempdir().unwrap();
+        let sel = SyncSelection {
+            enabled: true,
+            channels: vec!["p2p".into()],
+            ..SyncSelection::default()
+        };
+        assert!(
+            resolve_descriptors(plugins.path(), &sel).is_empty(),
+            "只勾直连时不应解析出插件"
+        );
+        assert!(matches!(
+            scan_backend_from(plugins.path(), p2p.path(), &sel),
+            SyncBackend::P2p(_)
+        ));
+    }
+
+    #[test]
+    fn test_channels_auto_loads_both() {
+        let plugins = tempfile::tempdir().unwrap();
+        write_plugin_dir(plugins.path(), "com.a.sync", "A", "clipboard_sync");
+        write_registry(plugins.path(), &[("com.a.sync", true)]);
+        let p2p = tempfile::tempdir().unwrap();
+        let sel = SyncSelection {
+            enabled: true,
+            channels: vec!["com.a.sync".into(), "p2p".into()],
+            ..SyncSelection::default()
+        };
+        match scan_backend_from(plugins.path(), p2p.path(), &sel) {
+            SyncBackend::Auto { p2p: _, plugins: d } => {
+                assert_eq!(ids(&d), vec!["com.a.sync".to_string()])
+            }
+            other => panic!("expected auto backend, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_channels_plugin_only() {
+        let plugins = tempfile::tempdir().unwrap();
+        write_plugin_dir(plugins.path(), "com.a.sync", "A", "clipboard_sync");
+        write_registry(plugins.path(), &[("com.a.sync", true)]);
+        let p2p = tempfile::tempdir().unwrap();
+        let sel = SyncSelection {
+            enabled: true,
+            channels: vec!["com.a.sync".into()],
+            ..SyncSelection::default()
+        };
+        match scan_backend_from(plugins.path(), p2p.path(), &sel) {
+            SyncBackend::Plugins(d) => assert_eq!(ids(&d), vec!["com.a.sync".to_string()]),
+            other => panic!("expected plugin backend, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_auto_degrades_to_p2p_when_plugin_missing() {
+        // 自动模式勾了插件但没装：直连仍在，不能因为缺插件把整个同步关掉。
+        let plugins = tempfile::tempdir().unwrap();
+        let p2p = tempfile::tempdir().unwrap();
+        let sel = SyncSelection {
+            enabled: true,
+            channels: vec!["com.gone.sync".into(), "p2p".into()],
+            ..SyncSelection::default()
+        };
+        assert!(matches!(
+            scan_backend_from(plugins.path(), p2p.path(), &sel),
+            SyncBackend::P2p(_)
+        ));
+    }
+
+    #[test]
+    fn test_auto_degrades_to_plugin_when_p2p_unavailable() {
+        // 身份目录不可创建（用文件占位）→ 自动模式退回插件，而不是整个关闭。
+        let plugins = tempfile::tempdir().unwrap();
+        write_plugin_dir(plugins.path(), "com.a.sync", "A", "clipboard_sync");
+        write_registry(plugins.path(), &[("com.a.sync", true)]);
+        let broken = tempfile::tempdir().unwrap();
+        let p2p_root = broken.path().join("p2p");
+        std::fs::write(&p2p_root, b"not a directory").unwrap();
+        let sel = SyncSelection {
+            enabled: true,
+            channels: vec!["com.a.sync".into(), "p2p".into()],
+            ..SyncSelection::default()
+        };
+        match scan_backend_from(plugins.path(), &p2p_root, &sel) {
+            SyncBackend::Plugins(d) => assert_eq!(ids(&d), vec!["com.a.sync".to_string()]),
+            other => panic!("expected plugin fallback, got {other:?}"),
+        }
     }
 
     #[test]
@@ -1027,6 +1303,7 @@ mod tests {
             peer_connected: false,
             last_pushed_hash: None,
             last_local_text: None,
+            last_plugin_pull: None,
         };
         (tmp, state(store_a, node_a), state(store_b, node_b))
     }
@@ -1094,5 +1371,49 @@ mod tests {
         assert!(wait_until(&mut b, Duration::from_secs(10), |s| {
             s.store.count_clipboard().unwrap() > 0
         }));
+    }
+
+    #[test]
+    fn test_auto_prefers_p2p_then_falls_back_to_plugin() {
+        // 自动模式：连上直连时内容只走 P2P；掉线后同一条路径改走插件。
+        let (_tmp, mut a, mut b) = p2p_pair();
+        assert!(
+            wait_until(&mut a, Duration::from_secs(10), |s| s.peer_connected),
+            "A 端未在超时内连上 B"
+        );
+        let plugin_dir = tempfile::tempdir().unwrap();
+        load_fake_plugin(&mut a, plugin_dir.path());
+
+        a.handle_captured("via p2p");
+        assert_eq!(remote_count(&a), 0, "直连已连上时不应再推插件");
+        assert!(
+            wait_until(&mut b, Duration::from_secs(10), |s| {
+                s.store.count_clipboard().unwrap() > 0
+            }),
+            "B 端未收到直连内容"
+        );
+
+        // 模拟掉线：自动模式退回插件。
+        a.peer_connected = false;
+        a.handle_captured("via plugin");
+        assert_eq!(remote_count(&a), 1, "掉线后应改推插件");
+
+        // 掉线时插件拉取生效（直连通道不参与）。
+        let h = text_hash("from plugin");
+        if let Some(runtime) = a.runtimes.values().next() {
+            assert!(runtime.clipboard_push(&profile_json("from plugin", &h)));
+        }
+        a.handle_pull();
+        let texts: Vec<String> = a
+            .store
+            .list_clipboard(10)
+            .unwrap()
+            .into_iter()
+            .map(|e| e.text)
+            .collect();
+        assert!(
+            texts.iter().any(|t| t == "from plugin"),
+            "插件远端内容应入库，实际: {texts:?}"
+        );
     }
 }
