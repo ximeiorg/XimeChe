@@ -24,9 +24,9 @@
 4. `xime-p2p` 升到 `b19ecde`（公告角色 / 连上补发 / 发现重读 peers.json），
    `Cargo.lock` 从两份合并为一份。
 5. 公告端口 UDP 47822 用 `SO_REUSEADDR` 共享：输入法常驻节点与设置程序
-   「输入配对码」可同时监听。修复在本地 libximep2p `ca07a02`，**尚未推送**；
-   本机经 `.cargo/config.toml` 的 patch 生效，`dev-install.sh` 模板已同步。
-   推送后应删除 patch 并把 workspace 的 rev 指向新提交。
+   「输入配对码」可同时监听。libximep2p `ca07a02` 已推送；workspace 的
+   `xime-p2p` rev 指向它，libximecore 的 setup-lib pin 同步升到同一提交
+   （`cda992c`），本地临时 patch 已移除。
 6. `xime-setup` 的词典 `restore/export/import` 回调跟随 libximecore 改为
    `Result`（此前 `cargo build` 直接失败），DBus 失败原因会带回设置页。
 
@@ -38,8 +38,6 @@ KWallet 锁着时插件配置加密会弹解锁框，测试需 `dbus-run-session
 
 **仍缺**：
 - **双机实测**：第二台设备配对、双向文本、断线重连、自动模式切换。
-- **libximep2p `ca07a02` 尚未推送**；推送前 CI 用 b19ecde 不含 SO_REUSEADDR，
-  桌面↔桌面配对输入侧仍会撞 47822（设置页「手动地址」`join_at` 可绕过）。
 - 图片 / 文件同步仍不支持（本端只做文本，`supports_attachments=false` 语义）。
 - 协议 v2 的 topic 消息（`Event::Message`）daemon 只忽略，未订阅。
 
@@ -1139,13 +1137,11 @@ alt-tab 切走再切回。
 ## 剪切板同步待完成功能
 1. **双机实测**：第二台设备配对（含「已开同步再配第二台」的 47822 场景）、
    双向文本、断线重连、自动模式（直连掉线退插件 / 恢复切回）。
-2. **推送 libximep2p `ca07a02`**：推送后删除 `.cargo/config.toml` 的本地 patch，
-   把 workspace 的 `xime-p2p` rev 指向该提交，CI 才能拿到 SO_REUSEADDR。
-3. **托盘集成**：在 `xime-tray` 添加配对确认 / 已配对设备菜单
+2. **托盘集成**：在 `xime-tray` 添加配对确认 / 已配对设备菜单
    - 收到配对请求时弹出菜单："xxx 设备请求配对，码 123456，允许？"
    - 添加"已配对设备"菜单项，支持查看/移除
-4. **mDNS 发现**：添加 `mdns-sd` crate，PC 发布 `_xime-clip._tcp`，替代 UDP 广播
-5. **协议 v2 topic**：需要「快捷发送 / 文本直传」等新功能时，再订阅
+3. **mDNS 发现**：添加 `mdns-sd` crate，PC 发布 `_xime-clip._tcp`，替代 UDP 广播
+4. **协议 v2 topic**：需要「快捷发送 / 文本直传」等新功能时，再订阅
    `Event::Message` 并给 `Node::send_message` 接线
-6. **图片 / 文件同步**：`Profile` 已有 `data` 字段，本端仍只处理文本
-7. **端口配置**：从 `xime.yaml` 读取同步端口（当前协议固定 47821/47822）
+5. **图片 / 文件同步**：`Profile` 已有 `data` 字段，本端仍只处理文本
+6. **端口配置**：从 `xime.yaml` 读取同步端口（当前协议固定 47821/47822）
