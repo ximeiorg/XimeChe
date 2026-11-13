@@ -1,7 +1,139 @@
 # XimeChe（曦码·澈输入法）开发进度
 
 ## 当前状态
-**修复：修饰键转发把系统级 Ctrl 卡死**（2026-10-27）。
+**接入：剪贴板同步的通道模型 / 系统剪贴板 / 自动模式**（2026-11-11）。
+
+**背景**：libximecore 的剪贴板页已把「关闭 / 自动 / 同步插件 / 设备互传」改成
+两个独立开关，配置从单选 `transport` 改为有序 `channels` 数组；libximep2p 也
+补了公告角色、连上补发与发现阶段重读配对表。daemon 仍按旧契约读 `transport`，
+选中「设备互传」会静默按插件跑；远端内容只进 `clipboard.db`，别的应用里
+`Ctrl+V` 拿不到。
+
+**改动**：
+1. `SyncSelection` 增加 `channels`：`channels` 非空时完全以它为准，空时回退旧
+   `transport` / `plugin_id`（存量配置行为不变）。新增 `SyncBackend::Auto`
+   （直连 + 插件同时加载）：连上直连只走 P2P，掉线退回插件；装配失败时退化为
+   可用的一侧，不再静默关闭。
+2. 远端内容写回系统剪贴板：`xime-clipboard::system_clipboard`（arboard，Linux
+   走 wl-clipboard-rs 的 data-control，懒初始化）。P2P 事件与插件 pull 统一经
+   `apply_remote_text` 落库 + 写入；写回的 hash 进一次性回声窗口，watcher 再
+   捕获到同一文本时不推回对端。
+3. 插件通道 2s 定时拉取（对齐 Android），直连掉线立即拉一次；本地捕获更新
+   `last_local_text`，直连恢复时由 `Event::Peer` 补推「断开期间复制」的内容
+   （节点缓存里没有这条）。
+4. `xime-p2p` 升到 `b19ecde`（公告角色 / 连上补发 / 发现重读 peers.json），
+   `Cargo.lock` 从两份合并为一份。
+5. 公告端口 UDP 47822 用 `SO_REUSEADDR` 共享：输入法常驻节点与设置程序
+   「输入配对码」可同时监听。libximep2p `ca07a02` 已推送；workspace 的
+   `xime-p2p` rev 指向它，libximecore 的 setup-lib pin 同步升到同一提交
+   （`cda992c`），本地临时 patch 已移除。
+6. `xime-setup` 的词典 `restore/export/import` 回调跟随 libximecore 改为
+   `Result`（此前 `cargo build` 直接失败），DBus 失败原因会带回设置页。
+
+**验证**：`cargo test --workspace` 全绿（clipboard_sync 31 项，含真实 P2P
+loopback 的推送 / 回声 / 系统剪贴板 / 自动回退）；`clippy --all-targets
+--all-features -D warnings` 干净；`cargo fmt --check` 干净。注意：本机
+KWallet 锁着时插件配置加密会弹解锁框，测试需 `dbus-run-session -- cargo test`
+（无 Secret Service 时降级明文，不阻塞）。
+
+**仍缺**：
+- **双机实测**：第二台设备配对、双向文本、断线重连、自动模式切换。
+- 图片 / 文件同步仍不支持（本端只做文本，`supports_attachments=false` 语义）。
+- 协议 v2 的 topic 消息（`Event::Message`）daemon 只忽略，未订阅。
+
+## 此前：设备互传后端（2026-11-09）
+
+**接入：剪贴板同步的「设备互传」（P2P）后端**（2026-11-09）。
+
+**背景**：设置程序的「剪贴板」页早已能选「关闭 / 同步插件 / 设备互传」，
+`clipboard_sync.toml` 也会写出 `transport = "p2p"`，但 daemon 的
+`SyncSelection` 只有 `enabled` / `plugin_id`（serde 静默忽略 `transport`），
+选中互传后仍按插件模式跑——没有插件就什么都不做，且无任何日志。
+
+**改动**（`crates/xime-daemon/src/clipboard_sync.rs`）：
+1. `SyncSelection` 增加 `transport`，缺省 `plugin`（老配置必须维持插件行为，
+   默认 p2p 会让存量服务器用户升级后静默停同步）；与 setup 的
+   `ClipboardSyncConfig` 字段名/取值完全对齐。
+2. 后端收成显式枚举 `SyncBackend { Off, Plugins(..), P2p(..) }`：
+   `scan_backend()` 按配置二选一，P2P 走 `p2p/identity.bin` +
+   `p2p/peers.json`（与设置程序 `p2p_dir()` 同一目录，各算各的就会出现
+   「设置里配对成功、输入法认为没配对」）。
+3. 桥线程由阻塞 `recv()` 改为 `recv_timeout(200ms)` + 每轮
+   `Node::poll_event()`（`xime-p2p` 是轮询式接口，入站内容不会自己变成
+   `SyncMessage`）；切后端时 `Node::shutdown()` 释放 47821/47822。
+4. 回声抑制复用 `last_pushed_hash`；新增 `last_local_text` + `peer_connected`：
+   `Node::set_clipboard` 在无连接时直接丢指令，所以对端连上后补推一次最近内容
+   （「先复制、后连上」也能同步）。
+5. **配置热重载**：setup 改完配置只写文件、不通知 daemon，桥线程每轮比
+   `clipboard_sync.toml` 的 mtime，变了就重选后端——否则要重启输入法才生效。
+6. 依赖：workspace 增加 `xime-p2p`（git libximep2p，rev `bdf5f39`，与
+   libximecore 的 pin 一致，cargo 才能合并成一份）。
+
+**验证**：19 个 `clipboard_sync` 测试全过，其中两个是**真实 P2P 环回**
+（本机起一对已配对节点，走 Noise IK 握手 + 加密帧）：A 推 `p2p hello` →
+B 的 `clipboard.db` 收到；A 不收录自己的推送；另测配置 mtime 变化触发重载、
+`transport = "p2p"` 时不再加载插件。`cargo test --workspace` 223 项通过，
+`clippy --all-targets --all-features -D warnings` 干净。release 已装。
+
+**仍缺**（下一个功能点）：
+- **系统剪贴板写入**：远端内容目前只进 `clipboard.db`（面板/候选可选用），
+  没有 `data-control` 的 `set_selection`，所以「另一台复制、这边 Ctrl+V」
+  还不成立——这是 P2P 可用性的最后一块。
+- 双机实测（P4）：需要第二台设备配对后才能验。
+- `identity.bin` 首次生成的并发竞争：daemon 与 setup 同时首启时可能各生成
+  一份，后写覆盖先写，导致配对身份错位（概率低，未处理）。
+
+**此前：修复安装脚本写死 `target/release`**（2026-11-09）。
+
+**现象**：`./dev-install.sh` 编译完成后报
+`install: 对 'XimeChe/../libximecore/target/release/xime-sync-server' 调用 stat 失败`。
+
+**根因**：`~/.cargo/config.toml` 设了全局 `[build] target-dir = /home/kkch/.cargo/target`，
+所有 Rust 项目的产物都落在那里，而 `dev-install.sh` / `install.sh` /
+`packaging/stage.sh` 一律按 `<repo>/target/release/...` 取文件。
+
+**修复**：三个脚本都改成先用
+`cargo metadata --format-version 1 --no-deps --manifest-path <manifest>` 读
+`target_directory`（该字段已包含配置解析结果），读不到才回退 `<manifest 同级>/target`；
+`dev-install.sh` 分别解析本仓与 libximecore 两套（同步服务端在后者）。
+语音运行库的 `sherpa-onnx-prebuilt` 查找同步改为 `$TARGET_DIR` 下。
+
+顺带修掉两个同源问题（都在全新机器上必现）：
+- `dev-install.sh` / `uninstall.sh` 调 `kwriteconfig5`：Plasma 6 只装
+  `kwriteconfig6`，`set -e` 下脚本在"安装其实已成功"之后仍以失败退出。
+  改为按 `kwriteconfig6 → kwriteconfig5` 探测，都没有则打印手工设置提示。
+- `install.sh` 的提示文案跟上（`kwriteconfig6`，并说明 Plasma 5 用 5）。
+
+验证：`./dev-install.sh` 全流程跑通（4 个二进制进 `~/.local/bin`，语音库 7 个 .so
+进 `~/.local/share/xime/lib`，kwinrc 写入 `VirtualKeyboard=xime-launcher.desktop`）；
+`packaging/stage.sh /tmp/xime-stage /usr` 成功 stage 38 个文件；
+`PREFIX=/tmp/xime-prefix ./install.sh` 通过；四个脚本 `bash -n` 干净。
+
+**此前：libsqlite3-sys 链接冲突导致依赖解析失败**（2026-11-09）。
+
+**现象**：`cargo build` / `cargo update` 直接失败，报
+`libsqlite3-sys links to the native library sqlite3, but it conflicts with a
+previous package`。
+
+**根因**：`libximecore` 的 `xime-config` 已升级到 `rusqlite 0.41.1`
+（`libsqlite3-sys 0.39.x`），而本仓 `xime-clipboard` 仍钉着 `rusqlite 0.32`
+（`libsqlite3-sys 0.30.x`）。`libsqlite3-sys` 声明了 `links = "sqlite3"`，
+依赖图里只允许一份，二者无法共存。
+
+**修复**：
+1. `xime-clipboard` 的 `rusqlite` 升到 `0.41.1`（features 仍为 `bundled`），
+   Cargo.toml 里加注释说明与 `xime-config` 必须同版本；`store.rs` 的
+   `Connection`/`params!`/`OptionalExtension` API 在 0.41 无破坏性变化，
+   13 个既有测试全部通过。
+2. 顺带修掉本地 `libximecore` 新版 `AppMetadata` 新增字段导致的编译错误：
+   `xime-setup` 与 `xime-daemon` 补上 `settings_name` / `subtitle` /
+   `tagline` / `homepage`（此前 `cargo update` 拉取新 git 提交后暴露）。
+
+验证：`cargo build` 通过，`cargo clippy --all-targets --all-features -D warnings`
+仅剩 `libximecore` 内部 `Nonce::from_slice` 的弃用告警（外部 crate，非本仓），
+`cargo test -p xime-clipboard` 13 passed。
+
+**此前：修复修饰键转发把系统级 Ctrl 卡死**（2026-10-27）。
 
 **现象**：用户报"一切换到这个输入法，所有操作都带有 Ctrl 按下效果"。
 
@@ -986,32 +1118,30 @@ alt-tab 切走再切回。
 - **xime-ui**: 22 tests - CandidateList 状态机、渲染器、root_display 绘制、blend 边界、菜单/内容网格命中
 - **xime-tray**: 28 tests - 状态切换、颜色设置、文字图标渲染、MenuAction、rounded_rect
 - **xime-wayland**: 17 tests - IM 状态机、错误类型、KeyEvent 数据
-- **xime-daemon**: 29 tests - DaemonCommand 枚举、get_config_dir、插件宿主、symbols 搜索、面板提交/翻页
+- **xime-daemon**: 94 tests - DaemonCommand、插件宿主、symbols、面板、剪贴板同步（31 项，含真实 P2P loopback）
 - **xime-predict**: 17 tests (1 个预先存在失败：test_predict_basic 分数断言)
 - **xime-setup/launcher/pack**: 0 tests (UI 密集型，需集成测试)
-- **总计**: ~247 tests
+- **workspace 合计**: 237 tests（`cargo test --workspace`）
 
 ## 下一步
-1. **GNOME 实机验证 v2 后端**（输入、候选窗定位、Shift 切换、锁屏恢复）
-2. GNOME 自启动机制（XDG autostart 或 systemd user unit，直接启动 xime-daemon）
-3. 测试 xime-setup（Iced 版）单例锁 + DBus 通知 + SelectSchema 切换方案
-4. 测试主题颜色实时更新功能（重新安装后验证）
-5. 测试 Ctrl 键字根显示功能
-6. 考虑为 xime-daemon/xime-launcher 添加集成测试
-7. 修复 xime-predict 中 test_predict_basic 的分数范围断言
-8. 添加 xime-setup 组件测试（state.rs, theme.rs）
+1. **剪贴板同步双机实测**（见下节；本机 loopback 已覆盖协议路径）
+2. **GNOME 实机验证 v2 后端**（输入、候选窗定位、Shift 切换、锁屏恢复）
+3. GNOME 自启动机制（XDG autostart 或 systemd user unit，直接启动 xime-daemon）
+4. 测试 xime-setup（Iced 版）单例锁 + DBus 通知 + SelectSchema 切换方案
+5. 测试主题颜色实时更新功能（重新安装后验证）
+6. 测试 Ctrl 键字根显示功能
+7. 考虑为 xime-daemon/xime-launcher 添加集成测试
+8. 修复 xime-predict 中 test_predict_basic 的分数范围断言
+9. 添加 xime-setup 组件测试（state.rs, theme.rs）
 
 ## 剪切板同步待完成功能
-1. **托盘集成**：在 `xime-tray` 添加配对确认菜单
+1. **双机实测**：第二台设备配对（含「已开同步再配第二台」的 47822 场景）、
+   双向文本、断线重连、自动模式（直连掉线退插件 / 恢复切回）。
+2. **托盘集成**：在 `xime-tray` 添加配对确认 / 已配对设备菜单
    - 收到配对请求时弹出菜单："xxx 设备请求配对，码 123456，允许？"
    - 添加"已配对设备"菜单项，支持查看/移除
-2. **剪切板读写**：接入 `zbus` 读取/写入桌面剪切板
-   - 使用 `org.freedesktop.portal.Desktop` clipboard portal
-   - 或使用 `arboard` crate 直接读写
-3. **mDNS 发现**：添加 `mdns-sd` crate
-   - PC 发布 `_xime._tcp` 服务
-   - 手机扫描局域网发现 PC
-4. **端口配置**：从 `xime.yaml` 读取端口
-   - 配置项：`server.port: 16888`
-   - 配置项：`server.enabled: true/false`
-5. **词库同步接口预留**：为未来扩展预留 `/dict/*` 路由
+3. **mDNS 发现**：添加 `mdns-sd` crate，PC 发布 `_xime-clip._tcp`，替代 UDP 广播
+4. **协议 v2 topic**：需要「快捷发送 / 文本直传」等新功能时，再订阅
+   `Event::Message` 并给 `Node::send_message` 接线
+5. **图片 / 文件同步**：`Profile` 已有 `data` 字段，本端仍只处理文本
+6. **端口配置**：从 `xime.yaml` 读取同步端口（当前协议固定 47821/47822）

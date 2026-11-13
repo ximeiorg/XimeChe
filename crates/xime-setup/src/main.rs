@@ -114,9 +114,13 @@ fn phrase_save_cb(schema_id: &str, entries: &[CustomPhraseRow]) -> Option<Phrase
         .and_then(|json| serde_json::from_str(&json).ok())
 }
 
-/// 调 daemon 的 UserDictOp（op 为 UserDictOp 的 JSON），返回条数。
-fn user_dict_op_json(op_json: String) -> Option<i64> {
-    let conn = zbus::blocking::Connection::session().ok()?;
+/// 调 daemon 的 UserDictOp（op 为 UserDictOp 的 JSON），返回条数；错误透传。
+///
+/// daemon 的 `UserDictOp` 以 DBus 错误返回失败原因（如「恢复失败：…」），
+/// 设置页要把它显示给用户，所以这里不能像早期版本那样 `.ok()` 掉——那样
+/// 失败与「返回 0 条」在界面上无法区分。
+fn user_dict_op_json_result(op_json: String) -> Result<i64, String> {
+    let conn = zbus::blocking::Connection::session().map_err(|e| e.to_string())?;
     let reply = conn
         .call_method(
             Some("org.xime.Xime"),
@@ -125,8 +129,13 @@ fn user_dict_op_json(op_json: String) -> Option<i64> {
             "UserDictOp",
             &(op_json,),
         )
-        .ok()?;
-    reply.body().deserialize::<i64>().ok()
+        .map_err(|e| e.to_string())?;
+    reply.body().deserialize::<i64>().map_err(|e| e.to_string())
+}
+
+/// [`user_dict_op_json_result`] 的宽松包装：只关心成败/条数的调用方用这个。
+fn user_dict_op_json(op_json: String) -> Option<i64> {
+    user_dict_op_json_result(op_json).ok()
 }
 
 /// 拼一个字符串字段版的 UserDictOp JSON（值做 JSON 转义）。
@@ -245,17 +254,17 @@ fn main() -> iced::Result {
         user_dict_op_json(op_json("backup", &[("dict", dict.to_string())])).is_some()
     });
     set_notify_dict_restore(|path| {
-        user_dict_op_json(op_json("restore", &[("path", path.to_string())])).is_some()
+        user_dict_op_json_result(op_json("restore", &[("path", path.to_string())])).map(|_| ())
     });
     set_notify_dict_export(|dict, path| {
-        user_dict_op_json(op_json(
+        user_dict_op_json_result(op_json(
             "export",
             &[("dict", dict.to_string()), ("path", path.to_string())],
         ))
         .map(|n| n as i32)
     });
     set_notify_dict_import(|dict, path| {
-        user_dict_op_json(op_json(
+        user_dict_op_json_result(op_json(
             "import",
             &[("dict", dict.to_string()), ("path", path.to_string())],
         ))
@@ -298,6 +307,10 @@ fn main() -> iced::Result {
     // 注入应用元数据（目录沿用 xime，librime 分发标识为 XimeChe）。
     let _ = xime_setup_lib::set_app_metadata(xime_setup_lib::AppMetadata {
         display_name: "曦码·澈输入法",
+        settings_name: "曦码·澈输入法设置",
+        subtitle: "输入法设置",
+        tagline: "基于 Rime 引擎的五笔输入法",
+        homepage: "https://github.com/ximeiorg/XimeChe",
         config_dir_name: "xime",
         config_file_base: "xime",
         distribution_name: "XimeChe",

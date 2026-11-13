@@ -11,8 +11,9 @@
 #   - .deb 仍由 cargo-deb 生成（见 crates/xime-pack/Cargo.toml 的 assets），
 #     其余格式都走这个脚本。两份文件清单必须保持一致，改安装布局时请同时修改。
 #   - 语音运行库（sherpa-onnx / onnxruntime）在构建时由 sherpa-onnx-sys 拷到
-#     target/release；daemon 的 rpath 是 $ORIGIN/../share/xime/lib，所以它们
-#     必须落在 $PREFIX/share/xime/lib。构建时没启用语音可设 XIME_SKIP_SPEECH=1。
+#     <target>/release（target 目录见下方 TARGET_DIR）；daemon 的 rpath 是
+#     $ORIGIN/../share/xime/lib，所以它们必须落在 $PREFIX/share/xime/lib。
+#     构建时没启用语音可设 XIME_SKIP_SPEECH=1。
 set -euo pipefail
 
 DESTDIR="${1:?用法: stage.sh <DESTDIR> [PREFIX]}"
@@ -23,6 +24,13 @@ DATADIR="$PREFIX/share"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# 产物目录：~/.cargo/config.toml 可能设了全局 build.target-dir，产物未必在
+# <repo>/target 下。问 cargo 要真实路径，问不到才退回默认。
+TARGET_DIR="$(cargo metadata --format-version 1 --no-deps \
+    --manifest-path "$ROOT/Cargo.toml" 2>/dev/null \
+    | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')"
+[ -n "$TARGET_DIR" ] || TARGET_DIR="$ROOT/target"
+
 die() {
     echo "error: $*" >&2
     exit 1
@@ -32,8 +40,8 @@ shopt -s nullglob
 
 # ── 可执行文件 ────────────────────────────────────────────────────────────
 for bin in xime-daemon xime-launcher xime-setup; do
-    [ -x "target/release/$bin" ] || die "缺少 target/release/$bin（先运行 cargo build --release）"
-    install -Dm755 "target/release/$bin" "$DESTDIR$BINDIR/$bin"
+    [ -x "$TARGET_DIR/release/$bin" ] || die "缺少 $TARGET_DIR/release/$bin（先运行 cargo build --release）"
+    install -Dm755 "$TARGET_DIR/release/$bin" "$DESTDIR$BINDIR/$bin"
 done
 
 # ── 默认配置 + Rime 方案数据 ──────────────────────────────────────────────
@@ -73,9 +81,9 @@ render applications/xime-setup.desktop share/applications
 if [ "${XIME_SKIP_SPEECH:-0}" = "1" ]; then
     echo "warning: XIME_SKIP_SPEECH=1，跳过语音运行库（语音输入将不可用）" >&2
 else
-    speech_libs=(target/release/libsherpa-onnx*.so* target/release/libonnxruntime*.so*)
+    speech_libs=("$TARGET_DIR"/release/libsherpa-onnx*.so* "$TARGET_DIR"/release/libonnxruntime*.so*)
     [ ${#speech_libs[@]} -gt 0 ] ||
-        die "找不到语音运行库（target/release/libsherpa-onnx*.so*）；不需要语音请设 XIME_SKIP_SPEECH=1"
+        die "找不到语音运行库（$TARGET_DIR/release/libsherpa-onnx*.so*）；不需要语音请设 XIME_SKIP_SPEECH=1"
     install -d "$DESTDIR$DATADIR/xime/lib"
     install -m755 "${speech_libs[@]}" "$DESTDIR$DATADIR/xime/lib/"
 fi

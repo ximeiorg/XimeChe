@@ -7,10 +7,16 @@ license.workspace = true
 
 [dependencies]
 tracing.workspace = true
-rusqlite = { version = "0.32", features = ["bundled"] }
+# 必须与 libximecore 的 xime-config 保持同一 rusqlite 大版本：
+# rusqlite 依赖的 libsqlite3-sys 声明了 links = "sqlite3"，
+# 依赖图里只允许存在一份，否则 cargo 解析阶段直接报冲突。
+rusqlite = { version = "0.41.1", features = ["bundled"] }
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+# 写回系统剪贴板：Linux 走 wl-clipboard-rs 的 data-control 后端，与
+# libximecore 设置程序、ximed 桌面端同一套实现。
+arboard = { version = "3.7.0", features = ["wayland-data-control"] }
 
 [dev-dependencies]
 tempfile = "3"
