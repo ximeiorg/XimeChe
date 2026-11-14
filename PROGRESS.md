@@ -3,16 +3,23 @@
 ## 当前状态
 **修复：按住方向键（左右）不能连续移动光标**（2026-11-14）。
 
-**根因**：`zwp_input_method_keyboard_grab_v1/v2` 在 grab 期间，合成器**不再
-替客户端重复按键**，只用 `repeat_info` 通告 `(rate, delay)`；XimeChe 之前
-只把这俩值打了条 debug 日志，没有驱动任何重复，所以按住方向键只移动一格。
-另外 v1/v2 都把 `wl_keyboard::KeyState::Repeated` 当成了释放（`pressed`
-只匹配 `Pressed`），若合成器真发重复事件，应用会收到孤儿释放。
+**根因（实机日志确认）**：KWin 在 grab 期间**会**发重复按键——日志里
+`key=105 state=Repeated` 每 ~40ms 一条；但 v1/v2 的 `pressed` 只匹配
+`KeyState::Pressed`，`Repeated` 被当成**释放**转发给应用，所以按住方向键
+只有首按移动一格，后续重复全被当成孤儿释放。KWin 的
+`repeat_info(rate=0, delay=600)` 也印证了「重复由合成器负责」：rate=0 表示
+客户端不需要自己重复。
+
+**修复**：
+- `Repeated` 一律按按下处理（两种 IM 后端）；
+- 同时保留一个**兜底定时器**：若某个合成器只发 `repeat_info(rate>0)` 而
+  不发 `Repeated`，daemon 按 rate/delay 自行重投；rate=0 时不动（KWin 属于
+  这一类，由它自己的 Repeated 驱动，不会双发）。
 
 **改动**：
 1. `xime-wayland`：v1/v2 的 `InputMethodV1Data` / `InputMethodData` 保存
    `repeat_info`，`ImBackend::repeat_info()` 暴露给 daemon；没收到时用
-   Wayland 常见默认 25 次/秒、600ms。`Repeated` 一律按按下处理。
+   Wayland 常见默认 25 次/秒、600ms。`Repeated` 按按下处理。
 2. `xime-daemon/wayland.rs` 新增 `KeyRepeat` + `update_key_repeat`：
    - 真实按下（非修饰键、未被 IM 消费）开始计时，`rate` 换算间隔
      （上限 200Hz）、`delay` 限幅 1..5000ms；
@@ -28,8 +35,9 @@
 
 **验证**：`cargo test --workspace` 243 项全过（新增 6 项：repeat_info
 默认/更新、间隔与延迟限幅、按下/释放/切换键/修饰键不打断/被消费不重复）；
-`clippy --all-targets --all-features -D warnings`、`cargo fmt --check` 干净。
-**未做**：KWin 实机长按验证（需要真实会话）。
+`clippy --all-targets --all-features -D warnings`、`cargo fmt --check` 干净；
+dev-install 已装。**待实机**：重启 daemon 后按住左右方向键确认连续移动
+（日志里应看到 `state=Repeated, pressed=true`，不再出现 `pressed=false`）。
 
 ## 此前：剪贴板同步接入（2026-11-11）
 

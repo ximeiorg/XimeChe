@@ -335,6 +335,18 @@ impl Dispatch<ZwpInputMethodV2, InputMethodData> for InputMethodData {
     }
 }
 
+/// `Pressed` / `Repeated` 都按按下处理（同 v1；KWin 实测会发 Repeated）。
+fn key_state_is_pressed(
+    state: &wayland_client::WEnum<wayland_client::protocol::wl_keyboard::KeyState>,
+) -> bool {
+    use wayland_client::protocol::wl_keyboard::KeyState;
+    matches!(
+        state,
+        wayland_client::WEnum::Value(KeyState::Pressed)
+            | wayland_client::WEnum::Value(KeyState::Repeated)
+    )
+}
+
 impl Dispatch<ZwpInputMethodKeyboardGrabV2, InputMethodData> for InputMethodData {
     fn event(
         state: &mut InputMethodData,
@@ -368,15 +380,7 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, InputMethodData> for InputMethodData
                 key,
                 state: key_state,
             } => {
-                // 同 v1：`Repeated` 按按下处理，不当成释放。
-                let pressed = matches!(
-                    key_state,
-                    wayland_client::WEnum::Value(
-                        wayland_client::protocol::wl_keyboard::KeyState::Pressed
-                    ) | wayland_client::WEnum::Value(
-                        wayland_client::protocol::wl_keyboard::KeyState::Repeated
-                    )
-                );
+                let pressed = key_state_is_pressed(&key_state);
                 debug!(
                     "Grab KEY event: serial={}, key={}, pressed={}",
                     serial, key, pressed
@@ -1193,6 +1197,15 @@ impl WaylandConnectionV2 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeated_state_counts_as_pressed() {
+        use wayland_client::protocol::wl_keyboard::KeyState;
+        use wayland_client::WEnum;
+        assert!(key_state_is_pressed(&WEnum::Value(KeyState::Pressed)));
+        assert!(key_state_is_pressed(&WEnum::Value(KeyState::Repeated)));
+        assert!(!key_state_is_pressed(&WEnum::Value(KeyState::Released)));
+    }
 
     #[test]
     fn repeat_info_defaults_and_updates() {

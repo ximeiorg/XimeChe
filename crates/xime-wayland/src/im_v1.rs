@@ -338,6 +338,19 @@ impl Dispatch<ZwpInputPanelV1, InputMethodV1Data> for InputMethodV1Data {
     }
 }
 
+/// `Pressed` / `Repeated` 都按按下处理。
+///
+/// grab 期间重复按键由合成器发 `KeyState::Repeated`（KWin 实测 ~40ms 一条）；
+/// 只认 `Pressed` 会把它们当成释放转发，应用收到一串孤儿释放——表现为
+/// 按住方向键只移动一格。
+fn key_state_is_pressed(state: &wayland_client::WEnum<wl_keyboard::KeyState>) -> bool {
+    matches!(
+        state,
+        wayland_client::WEnum::Value(wl_keyboard::KeyState::Pressed)
+            | wayland_client::WEnum::Value(wl_keyboard::KeyState::Repeated)
+    )
+}
+
 impl Dispatch<WlKeyboard, InputMethodV1Data> for InputMethodV1Data {
     fn event(
         state: &mut InputMethodV1Data,
@@ -370,13 +383,7 @@ impl Dispatch<WlKeyboard, InputMethodV1Data> for InputMethodV1Data {
                     wayland_client::WEnum::Value(wl_keyboard::KeyState::Repeated) => "Repeated",
                     _ => return,
                 };
-                // `Repeated` 也按按下处理：有的合成器会自己发重复事件
-                // （wl_keyboard v10+），把它当成释放会让应用收到孤儿释放。
-                let pressed = matches!(
-                    key_state,
-                    wayland_client::WEnum::Value(wl_keyboard::KeyState::Pressed)
-                        | wayland_client::WEnum::Value(wl_keyboard::KeyState::Repeated)
-                );
+                let pressed = key_state_is_pressed(&key_state);
                 debug!(
                     "Key event: serial={}, key={}, state={}, pressed={}",
                     serial, key, state_str, pressed
@@ -1334,6 +1341,18 @@ impl WaylandConnectionV1 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repeated_state_counts_as_pressed() {
+        use wayland_client::protocol::wl_keyboard::KeyState;
+        use wayland_client::WEnum;
+        assert!(key_state_is_pressed(&WEnum::Value(KeyState::Pressed)));
+        assert!(
+            key_state_is_pressed(&WEnum::Value(KeyState::Repeated)),
+            "Repeated 必须是按下，否则应用收到孤儿释放"
+        );
+        assert!(!key_state_is_pressed(&WEnum::Value(KeyState::Released)));
+    }
 
     #[test]
     fn repeat_info_defaults_and_updates() {
