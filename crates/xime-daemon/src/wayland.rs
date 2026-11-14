@@ -145,6 +145,8 @@ impl KeyRepeat {
                 .wrapping_add(self.started.elapsed().as_millis() as u32),
             key: self.key,
             pressed: true,
+            // 兜底定时器合成的是普通按下；Repeated 只在合成器自己发时出现。
+            repeated: false,
         }
     }
 }
@@ -1132,7 +1134,7 @@ impl WaylandLoop {
         // 停用态：按键直接转发，不做任何处理（被消费按下的释放仍抑制）。
         if !*im_enabled {
             if event.pressed || !consumed_presses.contains(&event.key) {
-                c.forward_key(event.serial, event.time, event.key, event.pressed);
+                c.forward_key(event.serial, event.time, event.key, event.forward_state());
             } else {
                 consumed_presses.remove(&event.key);
             }
@@ -1338,7 +1340,7 @@ impl WaylandLoop {
                 // 修饰态是**每 context 独立**的状态，在拿到按 context 隔离的
                 // 方案之前不要碰它。代价：终端里 Ctrl+C/Ctrl+X 收不到 SIGINT
                 // （已知问题，见 PROGRESS.md）。
-                c.forward_key(event.serial, event.time, event.key, event.pressed);
+                c.forward_key(event.serial, event.time, event.key, event.forward_state());
             }
             if result && event.pressed && !system_shortcut {
                 consumed_presses.insert(event.key);
@@ -2656,6 +2658,7 @@ mod tests {
             time: 1000,
             key,
             pressed,
+            repeated: false,
         }
     }
 

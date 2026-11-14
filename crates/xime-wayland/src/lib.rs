@@ -25,6 +25,25 @@ pub struct KeyEvent {
     pub time: u32,
     pub key: u32,
     pub pressed: bool,
+    /// 合成器发来的是自动重复（`wl_keyboard` 的 `Repeated`，state=2）。
+    ///
+    /// 必须原样转发：`zwp_input_method_context_v1.key` 的 state 参数要求
+    /// 「与 wl_keyboard::key 事件一致」。把 Repeated 压成 pressed(1)，部分
+    /// 客户端会当成「同一个键又按了一次」而忽略，表现为长按不连续。
+    pub repeated: bool,
+}
+
+impl KeyEvent {
+    /// 转发给应用时的 wl_keyboard state：0 released / 1 pressed / 2 repeated。
+    pub fn forward_state(&self) -> u32 {
+        if self.repeated {
+            2
+        } else if self.pressed {
+            1
+        } else {
+            0
+        }
+    }
 }
 
 /// 指针点击事件（候选栏 / 面板 surface 局部坐标）。
@@ -59,7 +78,7 @@ pub trait ImBackend {
     fn repeat_info(&self) -> (i32, i32) {
         (25, 600)
     }
-    fn forward_key(&self, serial: u32, time: u32, key: u32, pressed: bool);
+    fn forward_key(&self, serial: u32, time: u32, key: u32, state: u32);
     /// 把修饰键状态转发给应用。
     ///
     /// v1（grab_keyboard 模型）**必须**调用：`key` 只携带按键本身，修饰位
@@ -166,8 +185,8 @@ impl ImBackend for im_v1::WaylandConnectionV1 {
         self.take_reset_pending()
     }
 
-    fn forward_key(&self, serial: u32, time: u32, key: u32, pressed: bool) {
-        self.forward_key(serial, time, key, pressed)
+    fn forward_key(&self, serial: u32, time: u32, key: u32, state: u32) {
+        self.forward_key(serial, time, key, state)
     }
 
     fn forward_modifiers(
@@ -297,8 +316,8 @@ impl ImBackend for im_v2::WaylandConnectionV2 {
         self.repeat_info()
     }
 
-    fn forward_key(&self, serial: u32, time: u32, key: u32, pressed: bool) {
-        self.forward_key(serial, time, key, pressed)
+    fn forward_key(&self, serial: u32, time: u32, key: u32, state: u32) {
+        self.forward_key(serial, time, key, state)
     }
 
     fn commit_string(&self, text: &str) {
@@ -494,11 +513,43 @@ mod tests {
             time: 1000,
             key: 30,
             pressed: true,
+            repeated: false,
         };
         assert_eq!(event.serial, 42);
         assert_eq!(event.time, 1000);
         assert_eq!(event.key, 30);
         assert!(event.pressed);
+    }
+
+    #[test]
+    fn test_key_event_forward_state() {
+        let base = KeyEvent {
+            serial: 1,
+            time: 2,
+            key: 3,
+            pressed: true,
+            repeated: false,
+        };
+        assert_eq!(base.forward_state(), 1, "普通按下");
+        assert_eq!(
+            KeyEvent {
+                pressed: false,
+                ..base
+            }
+            .forward_state(),
+            0,
+            "释放"
+        );
+        assert_eq!(
+            KeyEvent {
+                pressed: true,
+                repeated: true,
+                ..base
+            }
+            .forward_state(),
+            2,
+            "自动重复必须保持 state=2，压成 1 会让长按被客户端忽略"
+        );
     }
 
     #[test]
@@ -508,6 +559,7 @@ mod tests {
             time: 1001,
             key: 30,
             pressed: false,
+            repeated: false,
         };
         assert!(!event.pressed);
     }

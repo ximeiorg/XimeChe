@@ -11,7 +11,9 @@
 客户端不需要自己重复。
 
 **修复**：
-- `Repeated` 一律按按下处理（两种 IM 后端）；
+- `Repeated` 按按下处理，并且**转发时保留 `state = 2`**：协议要求
+  `zwp_input_method_context_v1.key` 的参数与 wl_keyboard 原事件一致；
+  把 2 压成 1 会让客户端当成「同一个键又按了一次」而忽略，长按照样不动；
 - 同时保留一个**兜底定时器**：若某个合成器只发 `repeat_info(rate>0)` 而
   不发 `Repeated`，daemon 按 rate/delay 自行重投；rate=0 时不动（KWin 属于
   这一类，由它自己的 Repeated 驱动，不会双发）。
@@ -19,7 +21,9 @@
 **改动**：
 1. `xime-wayland`：v1/v2 的 `InputMethodV1Data` / `InputMethodData` 保存
    `repeat_info`，`ImBackend::repeat_info()` 暴露给 daemon；没收到时用
-   Wayland 常见默认 25 次/秒、600ms。`Repeated` 按按下处理。
+   Wayland 常见默认 25 次/秒、600ms。`KeyEvent` 增加 `repeated` 字段，
+   `forward_key` 改为传原始 state（v1 原样转发 2；v2 虚拟键盘只支持 0/1，
+   压成按下）。
 2. `xime-daemon/wayland.rs` 新增 `KeyRepeat` + `update_key_repeat`：
    - 真实按下（非修饰键、未被 IM 消费）开始计时，`rate` 换算间隔
      （上限 200Hz）、`delay` 限幅 1..5000ms；

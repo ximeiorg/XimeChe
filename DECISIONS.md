@@ -9,8 +9,12 @@
 
 **决策**：
 
-1. **`Repeated` 按按下处理**（首要修复）：v1/v2 的 `pressed` 同时匹配
-   `Pressed` / `Repeated`。这是 KWin 的实际行为，注释与日志都以此为准。
+1. **`Repeated` 按按下处理，并原样转发 `state = 2`**（首要修复）：
+   v1/v2 的 `pressed` 同时匹配 `Pressed` / `Repeated`；`KeyEvent` 多带一个
+   `repeated` 标志，`ImBackend::forward_key` 改为传 state——v1 原样把 2 转给
+   `zwp_input_method_context_v1.key`（协议要求参数与 wl_keyboard 原事件一致），
+   v2 的虚拟键盘只定义 0/1，压成按下。把 2 压成 1 时，客户端会把重复事件
+   当成「同一个键又按了一次」而忽略，长按仍然不连续。
 2. **保留 daemon 侧定时器作兜底**：`ImBackend::repeat_info()` 暴露
    `(rate, delay)`（未收到时默认 25Hz/600ms），`KeyRepeat` 记录按下键、
    serial、首按时间与下次触发时刻；主循环每 1ms 检查，到点用同一

@@ -385,12 +385,19 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, InputMethodData> for InputMethodData
                     "Grab KEY event: serial={}, key={}, pressed={}",
                     serial, key, pressed
                 );
+                let repeated = matches!(
+                    key_state,
+                    wayland_client::WEnum::Value(
+                        wayland_client::protocol::wl_keyboard::KeyState::Repeated
+                    )
+                );
                 if let Ok(mut events) = state.key_events.lock() {
                     events.push(KeyEvent {
                         serial,
                         time,
                         key,
                         pressed,
+                        repeated,
                     });
                 }
             }
@@ -857,8 +864,9 @@ impl WaylandConnectionV2 {
     /// Forward an unhandled key to the focused client via the virtual keyboard
     /// protocol. v2 has no `forward_key` request on the grab, this is how
     /// fcitx5 does it on GNOME and wlroots compositors.
-    pub fn forward_key(&self, _serial: u32, time: u32, key: u32, pressed: bool) {
-        let key_state: u32 = if pressed { 1 } else { 0 };
+    pub fn forward_key(&self, _serial: u32, time: u32, key: u32, state: u32) {
+        // 虚拟键盘协议只定义 0/1；Repeated(2) 在 v2 路径压成按下。
+        let key_state = u32::from(state != 0);
         if let Ok(vk_guard) = self.state.virtual_keyboard.lock() {
             if let Some(vk) = vk_guard.as_ref() {
                 vk.key(time, key, key_state);

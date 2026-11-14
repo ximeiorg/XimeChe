@@ -388,12 +388,17 @@ impl Dispatch<WlKeyboard, InputMethodV1Data> for InputMethodV1Data {
                     "Key event: serial={}, key={}, state={}, pressed={}",
                     serial, key, state_str, pressed
                 );
+                let repeated = matches!(
+                    key_state,
+                    wayland_client::WEnum::Value(wl_keyboard::KeyState::Repeated)
+                );
                 if let Ok(mut events) = state.key_events.lock() {
                     events.push(KeyEvent {
                         serial,
                         time,
                         key,
                         pressed,
+                        repeated,
                     });
                 }
             }
@@ -876,10 +881,11 @@ impl WaylandConnectionV1 {
         Ok(())
     }
 
-    pub fn forward_key(&self, serial: u32, time: u32, key: u32, pressed: bool) {
+    pub fn forward_key(&self, serial: u32, time: u32, key: u32, state: u32) {
         if let Some(ctx) = self.get_context() {
-            let key_state: u32 = if pressed { 1 } else { 0 };
-            ctx.key(serial, time, key, key_state);
+            // 原样转发 state（0/1/2）：协议要求与 wl_keyboard::key 一致，
+            // 把 Repeated(2) 压成 Pressed(1) 会让长按重复失效。
+            ctx.key(serial, time, key, state);
         }
     }
 
