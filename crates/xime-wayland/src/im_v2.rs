@@ -867,6 +867,7 @@ impl WaylandConnectionV2 {
     pub fn forward_key(&self, _serial: u32, time: u32, key: u32, state: u32) {
         // 虚拟键盘协议只定义 0/1；Repeated(2) 在 v2 路径压成按下。
         let key_state = u32::from(state != 0);
+        debug!("Forward key: key={key}, state={state} -> vk state={key_state}");
         if let Ok(vk_guard) = self.state.virtual_keyboard.lock() {
             if let Some(vk) = vk_guard.as_ref() {
                 vk.key(time, key, key_state);

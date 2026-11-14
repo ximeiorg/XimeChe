@@ -883,6 +883,7 @@ impl WaylandConnectionV1 {
 
     pub fn forward_key(&self, serial: u32, time: u32, key: u32, state: u32) {
         if let Some(ctx) = self.get_context() {
+            debug!("Forward key: key={key}, state={state}");
             // 原样转发 state（0/1/2）：协议要求与 wl_keyboard::key 一致，
             // 把 Repeated(2) 压成 Pressed(1) 会让长按重复失效。
             ctx.key(serial, time, key, state);
