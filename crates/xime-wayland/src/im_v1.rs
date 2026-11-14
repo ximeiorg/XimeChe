@@ -78,11 +78,27 @@ pub struct InputMethodV1Data {
     pub panel_grid: PanelGrid,
     pub modifiers: Arc<Mutex<(u32, u32, u32, u32)>>,
     pub keymap_pending: Arc<Mutex<Option<(OwnedFd, usize)>>>,
+    /// 合成器通告的按键重复参数 `(rate, delay_ms)`。
+    ///
+    /// grab 期间合成器**不再**自动重复按键，只把参数告诉我们；重复必须由
+    /// 输入法按该值自己重投「按下」事件（fcitx5 wayland 前端同构）。
+    pub repeat_info: Arc<Mutex<Option<(i32, i32)>>>,
     /// 应用侧请求清空组合（context.reset）。daemon 轮询取走并清理组合状态。
     pub reset_pending: Arc<Mutex<bool>>,
     /// 楔死探测：已发出未 ack 的 wl_display.sync 时刻（wl_callback Done 时
     /// 清空）。超时未 ack = 合成器侧连接楔死，dispatch 返回 Err 交给自愈。
     pub sync_outstanding: Arc<Mutex<Option<Instant>>>,
+}
+
+impl InputMethodV1Data {
+    /// 合成器通告的按键重复参数；还没收到时用 Wayland 常见默认 25 次/秒、600ms。
+    pub fn repeat_info(&self) -> (i32, i32) {
+        self.repeat_info
+            .lock()
+            .ok()
+            .and_then(|info| *info)
+            .unwrap_or((25, 600))
+    }
 }
 
 /// sync 探针发送间隔（每秒一次，代价可忽略）。
@@ -354,9 +370,12 @@ impl Dispatch<WlKeyboard, InputMethodV1Data> for InputMethodV1Data {
                     wayland_client::WEnum::Value(wl_keyboard::KeyState::Repeated) => "Repeated",
                     _ => return,
                 };
+                // `Repeated` 也按按下处理：有的合成器会自己发重复事件
+                // （wl_keyboard v10+），把它当成释放会让应用收到孤儿释放。
                 let pressed = matches!(
                     key_state,
                     wayland_client::WEnum::Value(wl_keyboard::KeyState::Pressed)
+                        | wayland_client::WEnum::Value(wl_keyboard::KeyState::Repeated)
                 );
                 debug!(
                     "Key event: serial={}, key={}, state={}, pressed={}",
@@ -410,6 +429,9 @@ impl Dispatch<WlKeyboard, InputMethodV1Data> for InputMethodV1Data {
             }
             wl_keyboard::Event::RepeatInfo { rate, delay } => {
                 debug!("Keyboard REPEAT_INFO: rate={}, delay={}", rate, delay);
+                if let Ok(mut info) = state.repeat_info.lock() {
+                    *info = Some((rate, delay));
+                }
             }
             wl_keyboard::Event::Enter {
                 serial: _,
@@ -792,6 +814,11 @@ impl WaylandConnectionV1 {
         } else {
             None
         }
+    }
+
+    /// 合成器通告的按键重复参数（见 [`{name}::repeat_info`]）。
+    pub fn repeat_info(&self) -> (i32, i32) {
+        self.state.repeat_info()
     }
 
     /// 应用侧请求清空组合（context.reset）。取走即清；v2 协议无此事件。
@@ -1301,5 +1328,22 @@ impl WaylandConnectionV1 {
         file.set_len(size as u64)?;
 
         Ok(file.into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repeat_info_defaults_and_updates() {
+        let data = InputMethodV1Data::default();
+        // 还没收到 repeat_info：用 Wayland 常见默认值
+        assert_eq!(data.repeat_info(), (25, 600));
+        *data.repeat_info.lock().unwrap() = Some((40, 250));
+        assert_eq!(data.repeat_info(), (40, 250));
+        // rate=0 表示禁用重复，不能被默认值吞掉
+        *data.repeat_info.lock().unwrap() = Some((0, 600));
+        assert_eq!(data.repeat_info(), (0, 600));
     }
 }

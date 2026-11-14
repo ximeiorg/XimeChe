@@ -119,6 +119,89 @@ fn is_system_shortcut(modifiers: &ModifierState) -> bool {
     modifiers.ctrl || modifiers.alt || modifiers.super_key
 }
 
+/// 按住重复状态。
+///
+/// `zwp_input_method_keyboard_grab_v1/v2` 在 grab 期间**不再由合成器重复按键**：
+/// 合成器只发 `repeat_info`（rate/delay），重复必须由输入法自己重投「按下」
+/// 事件。不实现的话，按住方向键只会移动一格——2026-11-14 用户报的 bug。
+struct KeyRepeat {
+    key: u32,
+    serial: u32,
+    /// 首次按下时的合成器时间戳；重复事件按经过的毫秒数递增。
+    time: u32,
+    started: Instant,
+    next: Instant,
+    interval: Duration,
+}
+
+impl KeyRepeat {
+    /// 合成一次重复按下的事件。`time` 用首按时间 + 经过毫秒，避免所有重复
+    /// 事件共用同一个时间戳（部分应用会按 time 做双击/长按判定）。
+    fn synth_event(&self) -> xime_wayland::KeyEvent {
+        xime_wayland::KeyEvent {
+            serial: self.serial,
+            time: self
+                .time
+                .wrapping_add(self.started.elapsed().as_millis() as u32),
+            key: self.key,
+            pressed: true,
+        }
+    }
+}
+
+/// `repeat_info.rate`（次/秒）换算成重复间隔；rate <= 0 表示禁用重复。
+fn repeat_interval(rate: i32) -> Option<Duration> {
+    if rate <= 0 {
+        return None;
+    }
+    // 上限 200Hz：异常大的值会变成忙循环，且 200Hz 已快过任何真实键盘。
+    let per_second = rate.min(200) as u64;
+    Some(Duration::from_millis((1000 / per_second).max(1)))
+}
+
+/// `repeat_info.delay`（毫秒）限幅，异常值不应让长按永远不开始重复。
+fn repeat_delay(delay: i32) -> Duration {
+    Duration::from_millis(delay.clamp(1, 5000) as u64)
+}
+
+/// 根据真实按键事件维护重复状态。
+///
+/// - 释放：只清同一键的重复（按住 Right 时松开 Shift 不应停止光标移动）；
+/// - 修饰键按下：不重复、也不打断正在重复的键（Shift+方向键选择要连续）；
+/// - 被输入法消费的按下：不重复（Ctrl+Space 启停、面板导航、语音热键等
+///   重复投递会变成连续触发）。方向键在无组合时不被消费，正常重复。
+fn update_key_repeat(
+    current: &mut Option<KeyRepeat>,
+    event: xime_wayland::KeyEvent,
+    sym: Keysym,
+    consumed: bool,
+    rate: i32,
+    delay: i32,
+    now: Instant,
+) {
+    if !event.pressed {
+        if current.as_ref().is_some_and(|r| r.key == event.key) {
+            *current = None;
+        }
+        return;
+    }
+    if xime_xkb::is_modifier_keysym(sym.raw()) {
+        return;
+    }
+    let Some(interval) = repeat_interval(rate).filter(|_| !consumed) else {
+        *current = None;
+        return;
+    };
+    *current = Some(KeyRepeat {
+        key: event.key,
+        serial: event.serial,
+        time: event.time,
+        started: now,
+        next: now + repeat_delay(delay),
+        interval,
+    });
+}
+
 /// 空格兜底判定（对齐 XimeYao）：组合态 + 无候选时，空格不上屏首选
 /// （没有首选可选）而应直接上屏编码本身。
 ///
@@ -364,6 +447,8 @@ impl WaylandLoop {
         let mut panel_state = PanelState::Closed;
         let mut last_panel_width: u32 = 0;
         let mut consumed_presses: std::collections::HashSet<u32> = std::collections::HashSet::new();
+        // 按住重复：grab 期间合成器不自己重复，由主循环按 repeat_info 重投。
+        let mut key_repeat: Option<KeyRepeat> = None;
         let mut last_input_keysym: Option<u32> = None;
         let mut ctrl_root_visible = false;
         let mut last_ascii_mode = false;
@@ -652,6 +737,7 @@ impl WaylandLoop {
                         self.tray.set_visible(false).await;
                     });
                     last_active = false;
+                    key_repeat = None;
                     heal.on_disconnect(Instant::now());
                     continue;
                 }
@@ -682,6 +768,7 @@ impl WaylandLoop {
                         debug!("Residual panel on re-activate, dismissing");
                         panel_state = PanelState::Closed;
                         panel = PanelData::default();
+                        key_repeat = None;
                         // 兜底清滞留语音事件：失活路径的 clear_events 可能早于
                         // worker finalize 发出 Committed（收尾是异步的），不清
                         // 的话上一窗口的尾巴文本会在新窗口首次 drain 时上屏。
@@ -707,6 +794,7 @@ impl WaylandLoop {
                         ctrl_root_visible = false;
                         last_input_keysym = None;
                         consumed_presses.clear();
+                        key_repeat = None;
                         // 候选缓存同样要清：语音会话结束的 redraw 会用缓存
                         // 复活候选栏——不清的话 A 窗的候选栏会叠在新窗口上
                         //（Idle 事件可能在新窗口激活后才到达）。
@@ -744,6 +832,7 @@ impl WaylandLoop {
                         &mut last_ascii_mode,
                         &mut im_enabled,
                         &mut voice,
+                        &mut key_repeat,
                     );
                 }
 
@@ -786,6 +875,7 @@ impl WaylandLoop {
         last_ascii_mode: &mut bool,
         im_enabled: &mut bool,
         voice: &mut VoiceUiState,
+        key_repeat: &mut Option<KeyRepeat>,
     ) {
         if let Some(ref mut x) = xkb {
             if let Some((fd, size)) = c.get_keymap_pending() {
@@ -861,6 +951,8 @@ impl WaylandLoop {
             }
         }
 
+        let (repeat_rate, repeat_delay_ms) = c.repeat_info();
+        let now = Instant::now();
         let events = c.pop_key_events();
         for event in events {
             debug!(
@@ -869,29 +961,76 @@ impl WaylandLoop {
             );
 
             if let Some(ref mut x) = xkb {
-                let keysym = x.key_from_keycode(event.key + 8);
-                if let Some(sym) = keysym {
-                    self.handle_key_event(
-                        c,
-                        x,
-                        rime,
-                        plugin_host,
-                        panel,
-                        quick_send,
-                        panel_state,
-                        last_panel_width,
-                        xime_config,
-                        theme,
-                        event,
-                        sym,
-                        candidate_window_visible,
-                        consumed_presses,
-                        last_input_keysym,
-                        ctrl_root_visible,
-                        last_ascii_mode,
-                        im_enabled,
-                        voice,
-                    );
+                let Some(sym) = x.key_from_keycode(event.key + 8) else {
+                    continue;
+                };
+                self.handle_key_event(
+                    c,
+                    x,
+                    rime,
+                    plugin_host,
+                    panel,
+                    quick_send,
+                    panel_state,
+                    last_panel_width,
+                    xime_config,
+                    theme,
+                    event,
+                    sym,
+                    candidate_window_visible,
+                    consumed_presses,
+                    last_input_keysym,
+                    ctrl_root_visible,
+                    last_ascii_mode,
+                    im_enabled,
+                    voice,
+                );
+                // 只在真实事件之后更新重复状态：合成事件不能把 delay 重新
+                // 计时，否则长按永远等不到下一次重复。
+                let consumed = consumed_presses.contains(&event.key);
+                update_key_repeat(
+                    key_repeat,
+                    event,
+                    sym,
+                    consumed,
+                    repeat_rate,
+                    repeat_delay_ms,
+                    now,
+                );
+            }
+        }
+
+        // 到点重投一次「按下」。grab 期间合成器只发 repeat_info，不自己重复；
+        // 不补这一步，按住方向键只会移动一格。
+        let repeat = key_repeat.as_ref().filter(|r| now >= r.next).and_then(|r| {
+            let sym = xkb.as_ref()?.key_from_keycode(r.key + 8)?;
+            Some((r.synth_event(), sym, r.interval))
+        });
+        if let Some((event, sym, interval)) = repeat {
+            if let Some(x) = xkb.as_ref() {
+                self.handle_key_event(
+                    c,
+                    x,
+                    rime,
+                    plugin_host,
+                    panel,
+                    quick_send,
+                    panel_state,
+                    last_panel_width,
+                    xime_config,
+                    theme,
+                    event,
+                    sym,
+                    candidate_window_visible,
+                    consumed_presses,
+                    last_input_keysym,
+                    ctrl_root_visible,
+                    last_ascii_mode,
+                    im_enabled,
+                    voice,
+                );
+                if let Some(r) = key_repeat.as_mut() {
+                    r.next = Instant::now() + interval;
                 }
             }
         }
@@ -2498,5 +2637,116 @@ mod tests {
         assert_eq!(data.grid.item_at(1), None);
         // 重复切同一标签不动作
         assert!(!data.grid.select_tab(0));
+    }
+    #[test]
+    fn test_repeat_interval_and_delay() {
+        assert_eq!(repeat_interval(25), Some(Duration::from_millis(40)));
+        assert_eq!(repeat_interval(0), None, "rate=0 表示禁用");
+        assert_eq!(repeat_interval(-1), None);
+        // 异常大的 rate 限幅到 200Hz，避免忙循环
+        assert_eq!(repeat_interval(1000), Some(Duration::from_millis(5)));
+        assert_eq!(repeat_delay(600), Duration::from_millis(600));
+        assert_eq!(repeat_delay(0), Duration::from_millis(1));
+        assert_eq!(repeat_delay(99_999), Duration::from_millis(5000));
+    }
+
+    fn key_event(key: u32, pressed: bool) -> xime_wayland::KeyEvent {
+        xime_wayland::KeyEvent {
+            serial: 7,
+            time: 1000,
+            key,
+            pressed,
+        }
+    }
+
+    #[test]
+    fn test_update_key_repeat_tracks_press_and_release() {
+        let t0 = Instant::now();
+        let mut repeat = None;
+        // 0xff53 = Right
+        let right = Keysym::new(0xff53);
+
+        update_key_repeat(&mut repeat, key_event(114, true), right, false, 25, 600, t0);
+        let r = repeat.as_ref().expect("方向键按下应开始重复");
+        assert_eq!(r.key, 114);
+        assert_eq!(r.serial, 7);
+        assert_eq!(r.next, t0 + Duration::from_millis(600));
+        assert_eq!(r.interval, Duration::from_millis(40));
+        let synth = r.synth_event();
+        assert!(synth.pressed);
+        assert_eq!(synth.key, 114);
+        assert!(synth.time >= 1000, "重复事件时间戳不能倒退");
+
+        // 修饰键（Shift_L）按下：不重复、也不打断正在重复的方向键
+        update_key_repeat(
+            &mut repeat,
+            key_event(50, true),
+            Keysym::new(0xffe1),
+            false,
+            25,
+            600,
+            t0,
+        );
+        assert_eq!(
+            repeat.as_ref().map(|r| r.key),
+            Some(114),
+            "Shift 不应打断方向键重复"
+        );
+
+        // 同键释放：停止
+        update_key_repeat(
+            &mut repeat,
+            key_event(114, false),
+            right,
+            false,
+            25,
+            600,
+            t0,
+        );
+        assert!(repeat.is_none());
+
+        // 被消费的按下（Ctrl+Space 等）：不重复
+        update_key_repeat(
+            &mut repeat,
+            key_event(65, true),
+            Keysym::new(0x20),
+            true,
+            25,
+            600,
+            t0,
+        );
+        assert!(repeat.is_none());
+
+        // rate=0：关闭重复
+        update_key_repeat(&mut repeat, key_event(114, true), right, false, 0, 600, t0);
+        assert!(repeat.is_none());
+    }
+
+    #[test]
+    fn test_update_key_repeat_switches_keys() {
+        let t0 = Instant::now();
+        let mut repeat = None;
+        let right = Keysym::new(0xff53);
+        let left = Keysym::new(0xff51);
+
+        update_key_repeat(&mut repeat, key_event(114, true), right, false, 25, 600, t0);
+        update_key_repeat(&mut repeat, key_event(113, true), left, false, 25, 600, t0);
+        assert_eq!(
+            repeat.as_ref().map(|r| r.key),
+            Some(113),
+            "新按下的键接管重复"
+        );
+
+        // 旧键的释放不能把新键的重复清掉（滚动按两个方向键时会发生）
+        update_key_repeat(
+            &mut repeat,
+            key_event(114, false),
+            right,
+            false,
+            25,
+            600,
+            t0,
+        );
+        assert_eq!(repeat.as_ref().map(|r| r.key), Some(113));
     }
 }

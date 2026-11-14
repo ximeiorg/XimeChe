@@ -53,6 +53,12 @@ pub trait ImBackend {
     fn pop_pointer_events(&self) -> Vec<PointerEvent>;
     fn get_modifiers(&self) -> (u32, u32, u32, u32);
     fn get_keymap_pending(&self) -> Option<(OwnedFd, usize)>;
+    /// 合成器通告的按键重复参数 `(rate 次/秒, delay 毫秒)`。
+    ///
+    /// grab 期间合成器不再自动重复，由 daemon 按这两个值重投按下事件。
+    fn repeat_info(&self) -> (i32, i32) {
+        (25, 600)
+    }
     fn forward_key(&self, serial: u32, time: u32, key: u32, pressed: bool);
     /// 把修饰键状态转发给应用。
     ///
@@ -150,6 +156,10 @@ impl ImBackend for im_v1::WaylandConnectionV1 {
 
     fn get_keymap_pending(&self) -> Option<(OwnedFd, usize)> {
         self.get_keymap_pending()
+    }
+
+    fn repeat_info(&self) -> (i32, i32) {
+        self.repeat_info()
     }
 
     fn take_reset_pending(&self) -> bool {
@@ -281,6 +291,10 @@ impl ImBackend for im_v2::WaylandConnectionV2 {
 
     fn get_keymap_pending(&self) -> Option<(OwnedFd, usize)> {
         self.get_keymap_pending()
+    }
+
+    fn repeat_info(&self) -> (i32, i32) {
+        self.repeat_info()
     }
 
     fn forward_key(&self, serial: u32, time: u32, key: u32, pressed: bool) {
