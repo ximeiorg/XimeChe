@@ -1,6 +1,38 @@
 # XimeChe（曦码·澈输入法）开发进度
 
 ## 当前状态
+**修复：按住方向键（左右）不能连续移动光标**（2026-11-14）。
+
+**根因**：`zwp_input_method_keyboard_grab_v1/v2` 在 grab 期间，合成器**不再
+替客户端重复按键**，只用 `repeat_info` 通告 `(rate, delay)`；XimeChe 之前
+只把这俩值打了条 debug 日志，没有驱动任何重复，所以按住方向键只移动一格。
+另外 v1/v2 都把 `wl_keyboard::KeyState::Repeated` 当成了释放（`pressed`
+只匹配 `Pressed`），若合成器真发重复事件，应用会收到孤儿释放。
+
+**改动**：
+1. `xime-wayland`：v1/v2 的 `InputMethodV1Data` / `InputMethodData` 保存
+   `repeat_info`，`ImBackend::repeat_info()` 暴露给 daemon；没收到时用
+   Wayland 常见默认 25 次/秒、600ms。`Repeated` 一律按按下处理。
+2. `xime-daemon/wayland.rs` 新增 `KeyRepeat` + `update_key_repeat`：
+   - 真实按下（非修饰键、未被 IM 消费）开始计时，`rate` 换算间隔
+     （上限 200Hz）、`delay` 限幅 1..5000ms；
+   - 主循环每 1ms 检查，到点用**首按 serial + 递增 time** 重投一次
+     `KeyEvent { pressed: true }`，走同一条 `handle_key_event` 管线，
+     方向键、Backspace（非组合态）等会连续生效；
+   - 修饰键不参与重复、也不打断已按住的键（Shift+方向键继续选择）；
+   - 被 IM 消费的按下不重复（Ctrl+Space / 语音热键 / 面板导航重复投递
+     会变成连续触发）；`rate = 0` 视为系统关闭重复；
+   - 失焦、断连、重新激活时清空重复状态。
+3. `xime-xkb::is_modifier_keysym`：过滤 Shift/Ctrl/Alt/Super/CapsLock/
+   ISO_Level*，供重复逻辑判断。
+
+**验证**：`cargo test --workspace` 243 项全过（新增 6 项：repeat_info
+默认/更新、间隔与延迟限幅、按下/释放/切换键/修饰键不打断/被消费不重复）；
+`clippy --all-targets --all-features -D warnings`、`cargo fmt --check` 干净。
+**未做**：KWin 实机长按验证（需要真实会话）。
+
+## 此前：剪贴板同步接入（2026-11-11）
+
 **接入：剪贴板同步的通道模型 / 系统剪贴板 / 自动模式**（2026-11-11）。
 
 **背景**：libximecore 的剪贴板页已把「关闭 / 自动 / 同步插件 / 设备互传」改成
@@ -1093,7 +1125,7 @@ alt-tab 切走再切回。
 1. **阴影效果优化** - 当前使用简单偏移阴影，可考虑添加模糊效果
 2. **v2 实机验证** - 代码按 fcitx5 语义实现，需在 GNOME 45+ / KWin 6 / Sway 实机测试
 3. **GNOME 自动启动** - daemon 直接连接模式已实现，但缺少 GNOME 下的自启动机制（autostart/systemd user unit）
-4. **v2 按键重复** - grab 的 repeat_info 事件未驱动重复按键（与 v1 现状一致）
+4. ~~**v2 按键重复**~~ - 已修复（2026-11-14：daemon 按 repeat_info 自行合成重复）
 
 ## 待完成功能
 1. 验证候选窗口使用正确的主题颜色
