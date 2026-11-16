@@ -1,5 +1,29 @@
 # XimeChe（曦码·澈输入法）重要决策
 
+## 2026-11-16: 语音输入暂时屏蔽，推理统一走 candle
+
+**问题**：libximecore 把 `xime-speech` 的 sherpa-onnx 升到 2.0.1 后，
+`sherpa-onnx-sys` 构建脚本要从 GitHub Releases 下载预编译包；本机网络不可达，
+整个 workspace 的 `cargo check` 直接失败。项目已决定本地推理统一使用 candle
+（`xime-infer`），sherpa-onnx 不再保留。
+
+**决策**：
+
+1. **彻底删除 sherpa-onnx，不做可选 feature**：它已经在默认构建路径上造成
+   硬失败，留一个默认关闭的 feature 只会让问题在下次开启时重演。libximecore
+   的 `xime-speech` 整块删除；XimeChe 不再声明 `xime-speech` 依赖。
+2. **保留 daemon 的 speech API 占位，不删 wayland 接线**：
+   `crates/xime-daemon/src/speech.rs` 保留 `SpeechEvent` / `SpeechState` /
+   `toggle` / `drain_events` / `levels_snapshot` / `status_json` 的签名，
+   内部只记日志、永不产生事件。这样 candle ASR 接入时只换实现，候选栏
+   悬浮层、失焦清理、DBus/设置页的接线都不用重写。
+3. **所有用户入口先移除**：设置页 `voice-page`、托盘「语音输入」、候选栏
+   🎙️ 卡片、Ctrl+Alt+V 热键、听写模态分支、6 个 DBus 语音方法全部删掉。
+   保留入口但点了没反应比入口消失更糟；恢复时随 candle 实现一起加回。
+4. **打包不再携带 sherpa 运行库**：dev-install / stage.sh / deb assets /
+   CI 的 `libsherpa-onnx*.so`、`libonnxruntime.so` 要求全部移除；daemon 的
+   rpath 只保留 librime 子模块 dist。
+
 ## 2026-11-14: 按键重复必须由输入法自己合成
 
 **问题**：用户报「按住方向键左右不能连续移动光标，只移动一格」。实机日志

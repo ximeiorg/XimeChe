@@ -1,6 +1,35 @@
 # XimeChe（曦码·澈输入法）开发进度
 
 ## 当前状态
+**屏蔽语音输入，移除 sherpa-onnx**（2026-11-16）。
+
+**背景**：libximecore 最新提交 `698547f` 把 `xime-speech` 的 sherpa-onnx 从
+1.13.8 升到 2.0.1；本机访问 GitHub Releases 失败，`sherpa-onnx-sys` 的构建
+脚本下载预编译包时直接 panic，`cargo check` 整条构建链中断。项目已决定本地
+推理统一改用 candle（`xime-infer`），不再保留 sherpa。
+
+**改动**：
+1. libximecore 删除 `xime-speech`（唯一的 sherpa-onnx 消费者），从
+   workspace members / default-members / README 同步移除；`xime-infer`
+   （candle）保留。
+2. XimeChe 移除 `xime-speech` 依赖；[speech.rs](crates/xime-daemon/src/speech.rs)
+   换成占位实现——保留原来的 `SpeechEvent` / `SpeechState` / `toggle` /
+   `drain_events` / `levels_snapshot` / `status_json` 契约，candle ASR 接入时
+   只替换实现，wayland/daemon/setup 的接线不用重做。
+3. **用户入口全部屏蔽**：设置页 `voice-page` 关闭；托盘「语音输入」菜单项、
+   候选栏菜单 🎙️ 卡片、Ctrl+Alt+V 热键、听写模态分支、DBus
+   `GetSpeechStatus` / `DownloadSpeechModel` / `DeleteSpeechModel` /
+   `SelectSpeechModel` / `SpeechTestStart` / `SpeechTestStop` 全部移除。
+4. 打包/CI/dev-install 不再要求 sherpa 运行库；daemon 的 rpath 去掉
+   `$ORIGIN/../share/xime/lib`（该目录现已无内容）。
+
+**验证**：`cargo check --workspace`、`clippy --all-targets --all-features
+-- -D warnings`、`cargo test --workspace` 237 项全过；`cargo tree -p
+xime-daemon` 无 sherpa-onnx。**待办**：candle ASR 接入后替换 `speech.rs`
+占位实现，并随实现恢复设置页/托盘/候选栏入口。
+
+## 此前：按键重复修复（2026-11-14）
+
 **修复：按住方向键（左右）不能连续移动光标**（2026-11-14）。
 
 **根因（实机日志确认）**：KWin 在 grab 期间**会**发重复按键——日志里

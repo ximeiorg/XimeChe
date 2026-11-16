@@ -13,7 +13,6 @@ xime-xkb.workspace = true
 xime-ui.workspace = true
 xime-clipboard.workspace = true
 xime-tray.workspace = true
-xime-speech.workspace = true
 # 剪贴板同步的「设备互传」后端（局域网 P2P，不经服务器）。
 xime-p2p.workspace = true
 librime.workspace = true
@@ -34,7 +33,6 @@ chrono = "0.4"
 futures-lite = "2"
 sha2 = "0.10"
 serde_json = "1"
-# 语音听写（P10）：音频采集走 PulseAudio 简单 API（speech.rs 内嵌 dlopen
 # 绑定，PipeWire 经 pipewire-pulse 兼容），构建零系统依赖。
 libloading = "0.8"
 # 模型下载与解压（ModelScope tar.bz2）。
