@@ -151,17 +151,5 @@ echo "To test:"
 echo "1. Restart KDE Plasma (logout/login) OR restart KWin"
 echo "2. Open Kate and type to trigger VirtualKeyboard"
 echo ""
-# 语音运行库（sherpa-onnx / onnxruntime）：xime-daemon 的 rpath 指向
-# $ORIGIN/../share/xime/lib，这里从构建缓存拷入。
-SPEECH_LIB_DIR="${DATADIR}/xime/lib"
-SPEECH_SRC=$(dirname "$(find "${TARGET_DIR}/sherpa-onnx-prebuilt" -name "libsherpa-onnx-c-api.so" 2>/dev/null | head -1)" 2>/dev/null)
-if [ -n "${SPEECH_SRC}" ] && [ -d "${SPEECH_SRC}" ]; then
-    install -d "${SPEECH_LIB_DIR}"
-    for so in "${SPEECH_SRC}"/*.so; do
-        [ -f "$so" ] && install -m755 "$so" "${SPEECH_LIB_DIR}/"
-    done
-    echo "Installed speech runtime libs to ${SPEECH_LIB_DIR}"
-fi
-
 echo "librime is built from the submodule (${LIBXIMECORE}/librime/dist/lib);"
 echo "binaries embed an rpath to it, no LD_LIBRARY_PATH needed."

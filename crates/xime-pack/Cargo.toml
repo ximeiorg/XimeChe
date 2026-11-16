@@ -37,11 +37,5 @@ assets = [
     ["../../resources/icons/512x512/apps/xime.png", "usr/share/icons/hicolor/512x512/apps/", "644"],
     ["../../rime-wubi/*.yaml", "usr/share/xime/rime-data/", "644"],
     ["../../rime-wubi/lua/*.lua", "usr/share/xime/rime-data/lua/", "644"],
-    # 语音运行库（sherpa-onnx/onnxruntime）：daemon 的 rpath 指向
-    # $ORIGIN/../share/xime/lib。CI 构建前由 workflow 从 sherpa-onnx-sys
-    # 的构建缓存（target/sherpa-onnx-prebuilt）拷到 target/release，
-    # deb 打包时随包分发；缺失时打包报错（不静默出坏包）。
-    ["target/release/libsherpa-onnx-c-api.so", "usr/share/xime/lib/", "755"],
-    ["target/release/libonnxruntime.so", "usr/share/xime/lib/", "755"],
 ]
 recommends = "rime-data-wubi"

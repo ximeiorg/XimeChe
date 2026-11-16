@@ -1,9 +1,9 @@
 //! 候选栏菜单面板的纯逻辑：页面路由、几何、命中测试、列表/网格数据结构。
 //!
 //! 完全对齐 XimeYao（Windows 版）候选栏面板的版式与交互（其 `ui/panel.rs`）：
-//! - **菜单页**：2 列 × 3 行 6 张卡片（📋 剪切板 / 🚀 快捷发送 / 😀 表情 /
-//!   🔣 符号 / 🎙️ 语音输入 / ⚙️ 设置）+ 底部品牌条；设置与语音不是页面——
-//!   点了就执行/提示，不开子页；
+//! - **菜单页**：2 列 × 3 行卡片（📋 剪切板 / 🚀 快捷发送 / 😀 表情 /
+//!   🔣 符号 / ⚙️ 设置，末格留空）+ 底部品牌条；设置不是页面——
+//!   点了就执行，不开子页；
 //! - **列表子页**（剪切板 / 快捷发送）：标题栏（← 菜单 + 标题）+ 6 行条目 +
 //!   底部翻页条，空态有主文案（快捷发送附设置程序入口提示）；
 //! - **网格子页**（表情 / 符号）：标题栏 + 8 列 × 4 行网格 +（符号页）翻页条 +
@@ -252,8 +252,6 @@ pub enum MenuCard {
     QuickSend,
     Emoji,
     Symbol,
-    /// 语音输入：卡片占位（引擎未接，点击提示暂未开放）。
-    VoiceInput,
     /// 打开设置程序（动作，不是页面）。
     Settings,
 }
@@ -265,7 +263,6 @@ impl MenuCard {
             Self::QuickSend => "🚀",
             Self::Emoji => "😀",
             Self::Symbol => "🔣",
-            Self::VoiceInput => "🎙️",
             Self::Settings => "⚙️",
         }
     }
@@ -276,7 +273,6 @@ impl MenuCard {
             Self::QuickSend => "快捷发送",
             Self::Emoji => "表情",
             Self::Symbol => "符号",
-            Self::VoiceInput => "语音输入",
             Self::Settings => "设置",
         }
     }
@@ -288,18 +284,16 @@ impl MenuCard {
             1 => Self::QuickSend,
             2 => Self::Emoji,
             3 => Self::Symbol,
-            4 => Self::VoiceInput,
-            5 => Self::Settings,
+            4 => Self::Settings,
             _ => return None,
         })
     }
 
-    pub const ALL: [MenuCard; 6] = [
+    pub const ALL: [MenuCard; 5] = [
         Self::Clipboard,
         Self::QuickSend,
         Self::Emoji,
         Self::Symbol,
-        Self::VoiceInput,
         Self::Settings,
     ];
 }
@@ -779,8 +773,8 @@ mod tests {
         assert!(x0 > 150, "第 2 列在右侧");
         let (_, y0, _, _) = menu_card_rect(2, 320);
         assert_eq!(y0, 10 + 36, "第 2 行从首行下开始");
-        assert_eq!(MenuCard::at(4), Some(MenuCard::VoiceInput));
-        assert_eq!(MenuCard::at(6), None);
+        assert_eq!(MenuCard::at(4), Some(MenuCard::Settings));
+        assert_eq!(MenuCard::at(5), None);
     }
 
     #[test]
