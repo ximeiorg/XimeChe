@@ -1,6 +1,5 @@
 use std::fs::File;
 use std::path::PathBuf;
-use xime_setup_lib::speech_models::SpeechServerStatus;
 use xime_setup_lib::state::{
     CustomPhraseRow, DictEntriesResult, DictListResult, PhraseListResult, PhraseSaveResult,
     SchemaEntriesResult,
@@ -10,40 +9,8 @@ use xime_setup_lib::{
     set_notify_dict_entry_write, set_notify_dict_export, set_notify_dict_import,
     set_notify_dict_list, set_notify_dict_restore, set_notify_phrase_list, set_notify_phrase_save,
     set_notify_reload_plugins, set_notify_reload_style, set_notify_schema_entries,
-    set_notify_select_schema, set_notify_speech_delete, set_notify_speech_download,
-    set_notify_speech_select, set_notify_speech_status, set_notify_speech_test_start,
-    set_notify_speech_test_stop, set_notify_sync_user_data,
+    set_notify_select_schema, set_notify_sync_user_data,
 };
-
-/// 调 daemon 的单字符串参数 DBus 方法并返回 JSON 应答文本。
-fn daemon_call_json1(method: &str, a: &str) -> Option<String> {
-    let conn = zbus::blocking::Connection::session().ok()?;
-    let reply = conn
-        .call_method(
-            Some("org.xime.Xime"),
-            "/org/xime/Xime",
-            Some("org.xime.Xime.Controller"),
-            method,
-            &(a,),
-        )
-        .ok()?;
-    reply.body().deserialize::<String>().ok()
-}
-
-fn speech_status_from_json(json: &str) -> Option<SpeechServerStatus> {
-    serde_json::from_str(json).ok()
-}
-
-/// 语音状态回调（250ms 轮询；daemon 不可达 = offline）。
-fn speech_status_cb() -> Option<SpeechServerStatus> {
-    daemon_call_json0("GetSpeechStatus").and_then(|json| speech_status_from_json(&json))
-}
-
-/// 模型操作回调（下载/删除/选择）：调 daemon 后回读最新状态。
-fn speech_model_action_cb(method: &str, id: &str) -> Option<SpeechServerStatus> {
-    daemon_call_json1(method, id)?;
-    speech_status_cb()
-}
 
 /// 调 daemon 的无参 DBus 方法并返回 JSON 应答文本。
 fn daemon_call_json0(method: &str) -> Option<String> {
@@ -290,19 +257,6 @@ fn main() -> iced::Result {
     });
     // rime 用户资料同步（同步与备份页「立即同步」，wayland 线程关会话执行）。
     set_notify_sync_user_data(|| user_dict_op_json(op_json("sync", &[])).is_some());
-
-    // 语音转文本（voice-page）：状态轮询 + 模型管理 + 试听，全部走 daemon
-    // DBus（daemon 是语音数据源与操作执行者，设置页只是镜像 UI）。
-    set_notify_speech_status(speech_status_cb);
-    set_notify_speech_download(|id| speech_model_action_cb("DownloadSpeechModel", id));
-    set_notify_speech_delete(|id| speech_model_action_cb("DeleteSpeechModel", id));
-    set_notify_speech_select(|id| speech_model_action_cb("SelectSpeechModel", id));
-    set_notify_speech_test_start(|| {
-        daemon_call_json0("SpeechTestStart").and_then(|json| speech_status_from_json(&json))
-    });
-    set_notify_speech_test_stop(|| {
-        daemon_call_json0("SpeechTestStop").and_then(|json| speech_status_from_json(&json))
-    });
 
     // 注入应用元数据（目录沿用 xime，librime 分发标识为 XimeChe）。
     let _ = xime_setup_lib::set_app_metadata(xime_setup_lib::AppMetadata {

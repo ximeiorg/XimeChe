@@ -10,10 +10,6 @@
 # 说明:
 #   - .deb 仍由 cargo-deb 生成（见 crates/xime-pack/Cargo.toml 的 assets），
 #     其余格式都走这个脚本。两份文件清单必须保持一致，改安装布局时请同时修改。
-#   - 语音运行库（sherpa-onnx / onnxruntime）在构建时由 sherpa-onnx-sys 拷到
-#     <target>/release（target 目录见下方 TARGET_DIR）；daemon 的 rpath 是
-#     $ORIGIN/../share/xime/lib，所以它们必须落在 $PREFIX/share/xime/lib。
-#     构建时没启用语音可设 XIME_SKIP_SPEECH=1。
 set -euo pipefail
 
 DESTDIR="${1:?用法: stage.sh <DESTDIR> [PREFIX]}"
@@ -76,16 +72,5 @@ render() { # <resources 下的相对路径，不含 .in> <相对于 PREFIX 的�
 render dbus/org.xime.Xime.service share/dbus-1/services
 render applications/xime-launcher.desktop share/applications
 render applications/xime-setup.desktop share/applications
-
-# ── 语音运行库 ────────────────────────────────────────────────────────────
-if [ "${XIME_SKIP_SPEECH:-0}" = "1" ]; then
-    echo "warning: XIME_SKIP_SPEECH=1，跳过语音运行库（语音输入将不可用）" >&2
-else
-    speech_libs=("$TARGET_DIR"/release/libsherpa-onnx*.so* "$TARGET_DIR"/release/libonnxruntime*.so*)
-    [ ${#speech_libs[@]} -gt 0 ] ||
-        die "找不到语音运行库（$TARGET_DIR/release/libsherpa-onnx*.so*）；不需要语音请设 XIME_SKIP_SPEECH=1"
-    install -d "$DESTDIR$DATADIR/xime/lib"
-    install -m755 "${speech_libs[@]}" "$DESTDIR$DATADIR/xime/lib/"
-fi
 
 echo "staged $(find "$DESTDIR" -type f | wc -l) files into $DESTDIR ($PREFIX)"

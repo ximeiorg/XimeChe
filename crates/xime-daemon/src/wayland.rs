@@ -150,16 +150,6 @@ fn tray_mode_for(is_ascii: bool) -> InputMode {
     }
 }
 
-/// 语音输入开关快捷键：Ctrl+Alt+V（大小写不敏感；Super 修饰不触发）。
-/// 硬编码绑定——悬浮层状态行文案 `VOICE_HOTKEY_LABEL` 与此同源；配置化
-/// 等 libximecore hotkeys 缺键继承语义修复后一并做（见 PROGRESS 遗留）。
-fn is_voice_toggle_hotkey(sym_raw: u32, modifiers: &ModifierState) -> bool {
-    modifiers.ctrl
-        && modifiers.alt
-        && !modifiers.super_key
-        && keysym_to_letter(sym_raw).is_some_and(|l| l == 'v')
-}
-
 /// 最近一次候选窗内容（菜单开/关后重绘用，主题以当前值为准）。
 type CandidateCache = (Vec<xime_ui::CandidateItem>, usize);
 
@@ -494,21 +484,6 @@ impl WaylandLoop {
                             debug!("IM inactive on toggle, requesting KWin forceActivate");
                             self.rt_handle.block_on(self.tray.force_activate_im());
                         }
-                    }
-                }
-                Ok(DaemonCommand::ToggleSpeech) => {
-                    // 托盘「语音输入」入口。键盘快捷键只在 IM 激活（键盘
-                    // grab）时可达；未激活时启动会话，识别文本无处上屏
-                    // （commit 需要 text-input 上下文），如实拒绝并提示。
-                    if !last_active {
-                        info!("Voice toggle requested while IM inactive, rejected");
-                        let handle = self.rt_handle.clone();
-                        handle.spawn(async move {
-                            notify_desktop("语音输入", "请先点击要输入的输入框，再开始语音输入")
-                                .await;
-                        });
-                    } else {
-                        crate::speech::toggle();
                     }
                 }
                 Ok(DaemonCommand::Deploy) => {
@@ -994,31 +969,6 @@ impl WaylandLoop {
         if !*im_enabled {
             if event.pressed || !consumed_presses.contains(&event.key) {
                 c.forward_key(event.serial, event.time, event.key, event.pressed);
-            } else {
-                consumed_presses.remove(&event.key);
-            }
-            return;
-        }
-
-        // 语音输入开关（Ctrl+Alt+V）：听写的键盘入口（托盘/🎙️ 之外）。
-        // 仅在 IM 激活（键盘 grab）时可达——Wayland 无全局快捷键，未激活
-        // 时键事件不经过 IM，那条路径由托盘菜单覆盖（含未激活拒绝提示）。
-        if event.pressed && is_voice_toggle_hotkey(sym.raw(), &modifiers) {
-            debug!("Voice toggle hotkey (Ctrl+Alt+V)");
-            crate::speech::toggle();
-            consumed_presses.insert(event.key);
-            return;
-        }
-
-        // 听写中键盘为模态：吞掉所有按键（组合/面板不与语音上屏交织），
-        // Esc = 停止并收尾上屏（与快捷键/托盘/点悬浮层同一 toggle 路径）。
-        if crate::speech::state() == crate::speech::SpeechState::Listening {
-            if event.pressed {
-                consumed_presses.insert(event.key);
-                if sym.raw() == 0xFF1B {
-                    debug!("Escape during dictation, stopping speech");
-                    crate::speech::toggle();
-                }
             } else {
                 consumed_presses.remove(&event.key);
             }
@@ -1738,13 +1688,6 @@ impl WaylandLoop {
                     xime_ui::menu::MenuCard::QuickSend => Some(PanelPage::QuickSend),
                     xime_ui::menu::MenuCard::Emoji => Some(PanelPage::Emoji),
                     xime_ui::menu::MenuCard::Symbol => Some(PanelPage::Symbol),
-                    // 语音输入：切换听写会话（开始/停止），面板收起让位给
-                    // 候选栏上的实时反馈（下载/装载/听写中的 partial 文本）。
-                    xime_ui::menu::MenuCard::VoiceInput => {
-                        crate::speech::toggle();
-                        self.close_panel(c, panel, panel_state, theme, candidate_window_visible);
-                        None
-                    }
                     // 设置：启动设置程序（动作，不开子页）。
                     xime_ui::menu::MenuCard::Settings => {
                         let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
@@ -2294,38 +2237,6 @@ mod tests {
         // Ctrl+Space 停/启与切方案后的托盘恢复都依赖这个映射。
         assert_eq!(tray_mode_for(true), InputMode::English);
         assert_eq!(tray_mode_for(false), InputMode::Chinese);
-    }
-
-    #[test]
-    fn test_voice_toggle_hotkey() {
-        // Ctrl+Alt+V（大小写不敏感）：触发
-        let combo = ModifierState {
-            ctrl: true,
-            alt: true,
-            ..ModifierState::default()
-        };
-        assert!(is_voice_toggle_hotkey(0x76, &combo)); // v
-        assert!(is_voice_toggle_hotkey(0x56, &combo)); // V（CapsLock 态）
-                                                       // 缺修饰 / 带 Super：不触发
-        assert!(!is_voice_toggle_hotkey(0x76, &ModifierState::default()));
-        let ctrl_only = ModifierState {
-            ctrl: true,
-            ..ModifierState::default()
-        };
-        assert!(!is_voice_toggle_hotkey(0x76, &ctrl_only), "缺 Alt 不触发");
-        let with_super = ModifierState {
-            ctrl: true,
-            alt: true,
-            super_key: true,
-            ..ModifierState::default()
-        };
-        assert!(
-            !is_voice_toggle_hotkey(0x76, &with_super),
-            "带 Super 不触发"
-        );
-        // 非字母 V 键：不触发
-        assert!(!is_voice_toggle_hotkey(0x63, &combo)); // c
-        assert!(!is_voice_toggle_hotkey(0x20, &combo)); // space
     }
 
     #[test]

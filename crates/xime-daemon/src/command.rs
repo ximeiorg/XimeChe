@@ -26,7 +26,6 @@ pub enum DaemonCommand {
     DarkMode(bool),
     /// 托盘「语音输入」入口：开始/停止听写会话（键盘快捷键 Ctrl+Alt+V
     /// 在 wayland 线程直接处理，不经此命令）。
-    ToggleSpeech,
     Shutdown,
 }
 
@@ -86,15 +85,6 @@ mod tests {
         match cmd {
             DaemonCommand::Shutdown => {} // expected
             _ => panic!("Expected Shutdown"),
-        }
-    }
-
-    #[test]
-    fn test_daemon_command_toggle_speech() {
-        let cmd = DaemonCommand::ToggleSpeech;
-        match cmd {
-            DaemonCommand::ToggleSpeech => {} // expected
-            _ => panic!("Expected ToggleSpeech"),
         }
     }
 
