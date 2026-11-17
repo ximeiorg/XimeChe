@@ -1,7 +1,26 @@
 # XimeChe（曦码·澈输入法）开发进度
 
 ## 当前状态
-**修复 P2P 的两个隐患：对端连接状态、身份并发创建**（2026-11-17 晚）。
+**修复「复制了却不在剪贴板历史里」：设置页快照不刷新**（2026-11-17 晚，上游
+libximecore `6aaef86`）。
+
+现象是用户复制后设置页「剪贴板」看不到新条目。实测**写入是好的**：日志有
+`xime_clipboard::watcher: Clipboard captured: N chars`，`xime.db` 里也能查到
+那一行。坏在读侧——设置程序是**单实例长驻**的，`clip_history` / `quick_send`
+只在 `SettingsState::new()` 里 `load()` 一次；复制后再切到本页看到的是启动
+那一刻的快照，重启设置程序也没用（第二个实例抢不到单实例锁，直接退出）。
+
+改在上游 `xime-setup-lib`：新增 `pages::clipboard_page_index()`（按标题反查，
+同 pair/voice），`Message::PageSelected` 进页时 `reload()` 历史与快捷发送；
+`Message::WindowEvent(Focused)` 且正停在剪贴板页时也重读——「在别的应用里
+复制 → 切回设置」这条最常见路径不必手点刷新。
+
+**下一步**：
+- 重开设置程序 →「剪贴板」：复制后进页应立刻看到新条目；停在页面上切出去再
+  切回来也应刷新（焦点路径）。若 Wayland 下 iced 不派发 `Focused`，就只剩进页
+  一条路径，主要场景仍覆盖，届时再考虑页面可见时定时轮询。
+
+**上一项：修复 P2P 的两个隐患：对端连接状态、身份并发创建**（2026-11-17 晚）。
 
 **隐患一：`peer_connected` 单个 bool**。原以为只在「多台设备同时在线」时出
 问题，实测发现 `xime-p2p` 的 `Node` 本来就是**单连接模型**（`connect_peer_at`
