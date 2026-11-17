@@ -1,7 +1,39 @@
 # XimeChe（曦码·澈输入法）开发进度
 
 ## 当前状态
-**修复「复制了却不在剪贴板历史里」：设置页快照不刷新**（2026-11-17 晚，上游
+**接入 COSMIC 桌面（P0：自启动 + 输入法槽位冲突）**（2026-11-17 晚）。
+
+COSMIC 是 Wayland-only，只讲 `zwp_input_method_v2` + `zwp_text_input_v3`。本仓
+的 v2 后端（`im_v2.rs`）与 `ext/wlr data-control` 早就具备，因此这次**不动
+协议层**，只补「进程怎么起来」和「抢不到槽位时怎么办」。
+
+- **自启动**：新增 `resources/applications/xime-daemon.desktop.in`，带
+  `NotShowIn=KDE`——Plasma 仍由 KWin 虚拟键盘拉起，叠一份 autostart 只会让
+  daemon 先 standalone 直连、再被 launcher 送来的 fd 顶掉，多一次重连。
+  `dev-install.sh` 装到 `~/.config/autostart`，`install.sh` 与
+  `packaging/stage.sh` 装到 `/etc/xdg/autostart`；脚本按 `XDG_CURRENT_DESKTOP`
+  决定写 kwinrc 还是提示「登录后自动启动」，检测到 `cosmic-osk` 时给出关闭办法。
+- **槽位冲突**：协议规定一个 seat 只能挂一个输入法。COSMIC 1.9+ 的屏幕键盘
+  `cosmic-osk` 先绑定 `zwp_input_method_manager_v2`，后到的输入法只会收到
+  `unavailable`。原实现一收到就 destroy + 重建 + 一次阻塞 `sync_roundtrip`，
+  槽位长期被占时等于主循环每轮空转一次。改为 `SlotConflictGuard` 指数退避
+  （1s → 2s → 5s → 10s 封顶），首次冲突 `warn!` 点明原因；daemon 侧在冲突
+  持续 10s 后补一条带处置指引的 error（5 分钟重报），解除后自动清零。
+- **防重复启动**：`request_name("org.xime.Xime")` 失败不再当成致命错误
+  ——autostart 与 DBus 激活撞车时，第二份继续跑会去抢同一个 IM 槽位。改为
+  记一条 info 后 `_exit(0)`（`exit()` 会撞 librime 静态析构段错误）。
+
+**下一步**：在 Pop!_OS 24.04 虚机实测。本机只有 Plasma 6.7.4，COSMIC 相关
+结论来自 wayland.app 合成器矩阵与上游 issue，**未在真机验证**。先确认 globals：
+`wayland-info | grep -E "input_method|text_input|data_control"`。
+尚未做：候选窗缩放（全仓无 `set_buffer_scale` / `wp_fractional_scale_v1`，
+COSMIC 常见 125%/200%）；COSMIC 面板需手动加 Status Area applet 才看得到托盘；
+`force_activate_im()` 在 COSMIC 下必然失败（只有 debug 日志，无害）。
+平台限制（只能进文档）：XWayland 应用走 XIM 用不了；Qt < 6.7 未实现
+text-input-v3（Pop!_OS 24.04 自带 6.4）；原生 libcosmic 应用 IME 不完整
+（cosmic-epoch#2174）。
+
+**上一项：修复「复制了却不在剪贴板历史里」：设置页快照不刷新**（2026-11-17 晚，上游
 libximecore `6aaef86`）。
 
 现象是用户复制后设置页「剪贴板」看不到新条目。实测**写入是好的**：日志有

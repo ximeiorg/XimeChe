@@ -99,6 +99,15 @@ pub trait ImBackend {
     fn set_preedit(&self, text: &str, cursor: i32);
     fn clear_preedit(&self);
     fn flush(&self) -> Result<(), String>;
+    /// 是否因「一个 seat 只能挂一个输入法」而抢不到槽位。
+    ///
+    /// 只有 v2 会出现：`cosmic-osk`（COSMIC 1.9+）之类先绑定的客户端占着
+    /// `zwp_input_method_manager_v2` 时，后来者每次 `get_input_method` 都
+    /// 立刻收到 `unavailable`。daemon 用它给用户一条能照着做的提示，
+    /// v1（KWin）恒为 false。
+    fn slot_unavailable(&self) -> bool {
+        false
+    }
     fn show_candidate_window(
         &mut self,
         candidates: &[CandidateItem],
@@ -290,6 +299,10 @@ impl ImBackend for im_v1::WaylandConnectionV1 {
 impl ImBackend for im_v2::WaylandConnectionV2 {
     fn dispatch_events(&mut self) -> Result<(), String> {
         self.dispatch_events().map_err(|e| e.to_string())
+    }
+
+    fn slot_unavailable(&self) -> bool {
+        self.slot_unavailable()
     }
 
     fn is_active(&self) -> bool {
