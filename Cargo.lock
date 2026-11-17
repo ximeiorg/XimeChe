@@ -7224,7 +7224,7 @@ dependencies = [
 [[package]]
 name = "xime-p2p"
 version = "0.1.0"
-source = "git+https://github.com/ximeiorg/libximep2p.git?rev=ca07a02c73edcb56fefb4aaf7eda45d6c720a24f#ca07a02c73edcb56fefb4aaf7eda45d6c720a24f"
+source = "git+https://github.com/ximeiorg/libximep2p.git?rev=1eddeb6eab3d1c31836b1cc4362cbc1f787ecdc8#1eddeb6eab3d1c31836b1cc4362cbc1f787ecdc8"
 dependencies = [
  "base64 0.23.1",
  "chacha20poly1305 0.11.0",
@@ -7320,7 +7320,7 @@ dependencies = [
 [[package]]
 name = "xime-sync-domain"
 version = "0.1.0"
-source = "git+https://github.com/ximeiorg/libximep2p.git?rev=ca07a02c73edcb56fefb4aaf7eda45d6c720a24f#ca07a02c73edcb56fefb4aaf7eda45d6c720a24f"
+source = "git+https://github.com/ximeiorg/libximep2p.git?rev=1eddeb6eab3d1c31836b1cc4362cbc1f787ecdc8#1eddeb6eab3d1c31836b1cc4362cbc1f787ecdc8"
 dependencies = [
  "async-trait",
  "base64 0.23.1",
