@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Name=Xime Input Method
+Name[zh_CN]=曦码·澈输入法
+Comment=Start the Xime input method daemon
+Comment[zh_CN]=启动曦码·澈输入法守护进程
+Exec=@BINDIR@/xime-daemon
+Icon=xime
+Terminal=false
+NoDisplay=true
+StartupNotify=false
+# KDE 由 KWin 的虚拟键盘机制拉起（kwinrc 的 [Wayland] VirtualKeyboard），
+# 再叠一份 autostart 只会让 daemon 先直连、再被 launcher 送来的 fd 顶掉，
+# 白多一次重连。其他桌面（COSMIC / GNOME / sway）没有这套机制，只能靠
+# XDG autostart，这正是本条目的用途。
+NotShowIn=KDE;
+X-GNOME-Autostart-enabled=true

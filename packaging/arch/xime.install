@@ -15,6 +15,12 @@ post_install() {
       qdbus6 org.kde.KWin /KWin reconfigure
 
     若未生效请注销后重新登录（KWin 只在启动时装配虚拟键盘）。
+
+    在 COSMIC / GNOME / sway 等非 KDE 桌面：无需配置，
+    /etc/xdg/autostart/xime-daemon.desktop 会在登录时拉起守护进程
+    （该条目带 NotShowIn=KDE，Plasma 下不会重复启动）。
+    COSMIC 1.9+ 需先关掉屏幕键盘：cosmic-osk 会抢占唯一的输入法槽位。
+
     输入法设置界面：xime-setup
 EOF
 }

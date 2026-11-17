@@ -6,6 +6,7 @@ set -e
 PREFIX="${PREFIX:-/usr}"
 BINDIR="${PREFIX}/bin"
 DATADIR="${PREFIX}/share"
+SYSCONFDIR="${SYSCONFDIR:-/etc}"
 
 # Get project root
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -36,6 +37,13 @@ sed -i "s|@BINDIR@|${BINDIR}|g" "${DATADIR}/applications/xime-launcher.desktop"
 install -Dm644 "${PROJECT_ROOT}/resources/applications/xime-setup.desktop.in" \
     "${DATADIR}/applications/xime-setup.desktop"
 sed -i "s|@BINDIR@|${BINDIR}|g" "${DATADIR}/applications/xime-setup.desktop"
+
+# XDG autostart（系统级）：COSMIC / GNOME / sway 没有 KWin 的虚拟键盘拉起机制，
+# 只能靠会话读 autostart 目录启动 daemon。条目带 NotShowIn=KDE，Plasma 下不生效，
+# 因此无需按当前桌面条件安装（也避免 sudo 下 XDG_CURRENT_DESKTOP 被清掉时判错）。
+install -Dm644 "${PROJECT_ROOT}/resources/applications/xime-daemon.desktop.in" \
+    "${SYSCONFDIR}/xdg/autostart/xime-daemon.desktop"
+sed -i "s|@BINDIR@|${BINDIR}|g" "${SYSCONFDIR}/xdg/autostart/xime-daemon.desktop"
 
 # Update desktop database
 update-desktop-database "${DATADIR}/applications" 2>/dev/null || true
@@ -80,4 +88,9 @@ echo "1. Configure in System Settings > Virtual Keyboard"
 echo "   OR run: kwriteconfig6 --file kwinrc --group Wayland --key VirtualKeyboard xime-launcher.desktop"
 echo "   （Plasma 5 用 kwriteconfig5，参数相同）"
 echo "2. Restart KDE Plasma (logout/login)"
+echo ""
+echo "To use with other Wayland desktops (COSMIC / GNOME / sway):"
+echo "   Nothing to configure — xime-daemon autostarts via ${SYSCONFDIR}/xdg/autostart."
+echo "   Log out and back in. On COSMIC 1.9+, disable the on-screen keyboard first:"
+echo "   cosmic-osk holds the only zwp_input_method_v2 slot, which starves any IME."
 echo ""

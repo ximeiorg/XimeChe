@@ -208,7 +208,18 @@ fn main() -> anyhow::Result<()> {
             .at("/org/xime/Xime", daemon)
             .await?;
 
-        connection.request_name("org.xime.Xime").await?;
+        // 名字抢不到 = 已经有一份在跑。两个来源会撞车：KWin 的 launcher 刚
+        // 通过 DBus 激活了一份，而 XDG autostart 同时也拉了一份（非 KDE 桌面
+        // 靠 autostart，但有 autostart 的用户切回 Plasma 后可能短暂叠加）。
+        // 第二份必须安静退出：让它继续跑会去抢同一个 IM 槽位，两份互相顶掉，
+        // 用户侧表现为输入法反复失效。
+        if let Err(e) = connection.request_name("org.xime.Xime").await {
+            info!("Another xime-daemon owns org.xime.Xime ({e}), exiting");
+            // 不能走 exit()：librime 的静态析构会段错误（见 clean_exit），
+            // 但要让上面这条 info 先落到文件日志，所以留一点排空时间。
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            unsafe { libc::_exit(0) };
+        }
 
         info!("DBus service registered at org.xime.Xime");
         info!("Tray registered (background retry if watcher was not up yet)");
