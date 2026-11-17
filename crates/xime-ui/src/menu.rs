@@ -341,7 +341,7 @@ pub struct PanelListItem {
     pub code: String,
 }
 
-/// 列表子页数据：进入该页时读一次（clipboard.db），绘制只读内存。
+/// 列表子页数据：进入该页时读一次（统一库 xime.db），绘制只读内存。
 #[derive(Debug, Clone, Default)]
 pub struct PanelList {
     /// 数据来源页面。

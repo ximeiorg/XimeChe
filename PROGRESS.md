@@ -1,6 +1,96 @@
 # XimeChe（曦码·澈输入法）开发进度
 
 ## 当前状态
+**修复「复制了却不在剪贴板历史里」：设置页快照不刷新**（2026-11-17 晚，上游
+libximecore `6aaef86`）。
+
+现象是用户复制后设置页「剪贴板」看不到新条目。实测**写入是好的**：日志有
+`xime_clipboard::watcher: Clipboard captured: N chars`，`xime.db` 里也能查到
+那一行。坏在读侧——设置程序是**单实例长驻**的，`clip_history` / `quick_send`
+只在 `SettingsState::new()` 里 `load()` 一次；复制后再切到本页看到的是启动
+那一刻的快照，重启设置程序也没用（第二个实例抢不到单实例锁，直接退出）。
+
+改在上游 `xime-setup-lib`：新增 `pages::clipboard_page_index()`（按标题反查，
+同 pair/voice），`Message::PageSelected` 进页时 `reload()` 历史与快捷发送；
+`Message::WindowEvent(Focused)` 且正停在剪贴板页时也重读——「在别的应用里
+复制 → 切回设置」这条最常见路径不必手点刷新。
+
+**下一步**：
+- 重开设置程序 →「剪贴板」：复制后进页应立刻看到新条目；停在页面上切出去再
+  切回来也应刷新（焦点路径）。若 Wayland 下 iced 不派发 `Focused`，就只剩进页
+  一条路径，主要场景仍覆盖，届时再考虑页面可见时定时轮询。
+
+**上一项：修复 P2P 的两个隐患：对端连接状态、身份并发创建**（2026-11-17 晚）。
+
+**隐患一：`peer_connected` 单个 bool**。原以为只在「多台设备同时在线」时出
+问题，实测发现 `xime-p2p` 的 `Node` 本来就是**单连接模型**（`connect_peer_at`
+发现已有连接直接 return，`serve` 里新连接用 `Outbound::Close` 顶掉旧连接）。
+真实失效场景是**换对端**：新对端 `connected=true` 与旧连接被顶掉的
+`connected=false` 会先后到达，单 bool 被后到的 false 抹掉 → 自动模式误判
+「直连不可用」，立刻改推插件并在 `last_plugin_pull` 上每 2 秒拉一次。
+改为 `peers_online: HashSet<did>`，只有一台都不剩才算离线；事件处理抽成
+`on_peer_event`。三节点并行在那个模型下测不出来，改成直接注入「新对端
+true + 旧对端 false」两条事件验证。
+
+**隐患二：`identity.bin` 首启并发写**。libximep2p 的
+`load_or_create_identity` 原来是「读不到 → 生成 → 整文件写」：daemon 与设置
+程序同时首启会各生成一份私钥、后写覆盖先写，已配对的设备全部静默失效。
+上游改为 `O_EXCL` 抢创建权（`1eddeb6`）：赢家生成并 `sync_all`，输家
+25ms × 40 次重试读同一份；文件存在但不足 64 字节时先让位等待（可能是对方
+正在写），等不到才按损坏原子替换。
+
+**存储（「连接信息是 sqlite 还是 json」）**：`p2p/identity.bin`（64 字节
+二进制私钥，0600）+ `p2p/peers.json`（已配对表，tmp+rename 原子写，解析失败
+报错而不回落默认值）+ `clipboard_sync.toml`（通道选择）。**只有剪贴板历史**
+在 `xime.db`（sqlite）。
+
+**改动**：
+1. libximep2p `1eddeb6`（已推送）：`pair_session.rs` 重写身份加载 + 两个测试
+   （8 线程并发首启收敛到同一 did、截断文件仍能恢复）。
+2. XimeChe `1c38c41` / libximecore `401dafd`：`xime-p2p` pin 同步升到
+   `1eddeb6`。
+3. daemon `clipboard_sync.rs`（`1d9ba0c`）：`peer_connected: bool` →
+   `peers_online: HashSet<String>`，直连可用判断统一走 `p2p_online()`。
+
+**验证**：workspace 测试全过（`clipboard_sync` 32 项，含新增换对端用例；
+libximep2p 10 项）；两仓 `clippy --all-targets --all-features -D warnings`
+干净；`cargo check --manifest-path crates/xime-setup/Cargo.toml --features
+pair-page`（libximecore）通过。
+
+**下一步**：
+- 重新登录 Plasma 后确认双机同步仍正常（本机 loopback 已覆盖协议路径）。
+- 待评估：`peers.json` 同样是 daemon（回写 `last_addr`）与设置程序（配对
+  写入）两个进程 load→改→save，daemon 的整表覆盖会丢掉刚配好的设备。
+  修法需要「save 前 reload 再合并本进程改动」，属上游 store 语义改动。
+
+## 此前：剪贴板存储并轨到 xime.db（2026-11-17）
+**剪贴板存储并轨到 xime.db（跟进 libximecore `cda319b`）**（2026-11-17）。
+
+**背景**：libximecore 把剪贴板从 `clipboard.db` 迁进统一库 `xime.db`
+（`xime-config::clipboard_store`，schema v7）。本仓 daemon 仍在写
+`clipboard.db`，设置程序读 `xime.db`：设置页历史停在迁移快照，新复制的条目
+永远不出现。迁移还会把旧库改名为 `clipboard.db.migrated`，而 daemon 已持有
+该 inode，后续写入全落进改名后的文件 —— 全程无报错。
+
+**改动**：
+1. `xime-clipboard/src/store.rs` 改成转出 `xime_config::clipboard_store`
+   （含 `init()` 单例，路径走 `default_db_path()`），删掉自建 schema/迁移/
+   裁剪实现（约 -460 行）；`watcher`、`system_clipboard` 不动。
+2. `xime-clipboard` 依赖从 `rusqlite` 换成 `xime-config`，`lib.rs` 去掉
+   `default_db_dir()`；daemon `main.rs` 改 `store::init()` 无参。
+3. 单测改为验证「两个独立连接共享同一库」（daemon 写 / 设置读的核心契约）
+   与父目录自动创建；`clipboard_sync` 测试的临时库改名 `xime.db`。
+4. 本机数据：备份 `~/.config/xime/xime.db.bak-20261117-202527` 后，把
+   `clipboard.db.migrated` 里缺的条目补进 `xime.db`（1000 → 1002）。
+
+**验证**：`cargo test --workspace` 135 项通过（含真实 P2P 环回），
+`clippy --all-targets --all-features -D warnings` 干净，release 已安装。
+
+**下一步**：
+- 重新登录 Plasma 后确认：复制内容 → 设置页「剪贴板」能立刻看到；
+  双机（设备互传）复制 → 对端面板与 Ctrl+V 都生效。
+
+## 历史状态
 **屏蔽语音输入，移除 sherpa-onnx**（2026-11-16）。
 
 **背景**：libximecore 最新提交 `698547f` 把 `xime-speech` 的 sherpa-onnx 从

@@ -7,10 +7,9 @@ license.workspace = true
 
 [dependencies]
 tracing.workspace = true
-# 必须与 libximecore 的 xime-config 保持同一 rusqlite 大版本：
-# rusqlite 依赖的 libsqlite3-sys 声明了 links = "sqlite3"，
-# 依赖图里只允许存在一份，否则 cargo 解析阶段直接报冲突。
-rusqlite = { version = "0.41.1", features = ["bundled"] }
+# 剪贴板存储复用 libximecore 的统一实现（xime.db），本 crate 不再直接依赖
+# rusqlite——那也顺带消掉了 libsqlite3-sys 的 links = "sqlite3" 冲突风险。
+xime-config.workspace = true
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 wayland-protocols-wlr = { version = "0.3", features = ["client"] }
