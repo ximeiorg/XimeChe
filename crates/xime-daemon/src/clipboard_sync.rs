@@ -18,7 +18,7 @@
 //! - **回声抑制**：自己刚推出去的 hash 不再写回本地；
 //! - **独立线程**：插件网络请求、P2P 握手都不阻塞按键处理。
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::Arc;
@@ -398,11 +398,13 @@ struct SyncState {
     /// 设置程序改完「关闭/同步插件/设备互传」并不会通知 daemon（它只写文件），
     /// 不盯着这个文件就得重启输入法才生效——用户看到的正是「选了没反应」。
     config_mtime: Option<std::time::SystemTime>,
-    /// 是否有已建立的 P2P 连接（`Event::Peer { connected }` 维护）。
+    /// 当前在线的对端（按 did 记录，`Event::Peer` 维护）。
     ///
-    /// 只用于日志/测试与「连上后补推」的时机判断：`Node` 不暴露连接状态，
-    /// 而补推必须在连接建立之后，否则指令又被丢掉。
-    peer_connected: bool,
+    /// `Node` 一次只维持一条连接（新连接会顶掉旧连接），所以这里几乎总是
+    /// 只有 0 或 1 个 did。用集合而不是单个 bool，是为了对齐事件语义：
+    /// 换对端时节点会发「新对端 connected=true」和「旧对端被顶掉 connected=false」
+    /// 两条事件，只有一个 bool 时后到的 false 会把仍在线的对端抹掉。
+    peers_online: HashSet<String>,
     /// 最近一次本地剪贴板文本。
     ///
     /// `Node::set_clipboard` 在无连接时会把指令丢掉（剪贴板只关心最新值），
@@ -418,6 +420,11 @@ struct SyncState {
 }
 
 impl SyncState {
+    /// 当前是否有直连对端在线（多台设备里任意一台即可）。
+    fn p2p_online(&self) -> bool {
+        self.node.is_some() && !self.peers_online.is_empty()
+    }
+
     /// 当前是否该用 P2P 推送。
     ///
     /// - 只有直连通道：节点在就推（无连接时节点会缓存，连上后补发）；
@@ -428,12 +435,12 @@ impl SyncState {
     /// 内容压给插件比「等它恢复」更重要——等的那几秒里用户复制的内容没有
     /// 任何通道可走，只在本地历史里。恢复直连后由 `last_local_text` 补推。
     fn use_p2p_for_push(&self) -> bool {
-        self.node.is_some() && (self.runtimes.is_empty() || self.peer_connected)
+        self.node.is_some() && (self.runtimes.is_empty() || self.p2p_online())
     }
 
     /// 当前是否该从插件通道拉取（自动模式下直连已连上时不拉，避免双写）。
     fn use_plugin_for_pull(&self) -> bool {
-        !self.runtimes.is_empty() && !(self.node.is_some() && self.peer_connected)
+        !self.runtimes.is_empty() && !self.p2p_online()
     }
 
     fn handle_captured(&mut self, text: &str) {
@@ -611,7 +618,7 @@ impl SyncState {
             info!("Sync p2p: node stopped");
         }
         self.last_pushed_hash = None;
-        self.peer_connected = false;
+        self.peers_online.clear();
         self.last_plugin_pull = None;
 
         match backend {
@@ -696,22 +703,7 @@ impl SyncState {
                     did,
                     name,
                     connected,
-                } => {
-                    info!("Sync p2p: peer {name} ({did}) connected={connected}");
-                    self.peer_connected = connected;
-                    if connected {
-                        // 补发「daemon 启动前就已存在」的那条本地内容：新版节点
-                        // 只会补发曾经经过 `set_clipboard` 的内容，而这条是从
-                        // 统一库 xime.db 读出来的，节点缓存里没有。最近一次本地复制
-                        // 则可能已经被节点补发过，重复一条由对端按文本去重。
-                        if let Some(text) = self.last_local_text.clone() {
-                            self.push_p2p(&text);
-                        }
-                    } else {
-                        // 自动模式掉线：下一轮立刻拉一次插件，别等满一个间隔。
-                        self.last_plugin_pull = None;
-                    }
-                }
+                } => self.on_peer_event(did, &name, connected),
                 xime_p2p::Event::Warning(msg) => warn!("Sync p2p: {msg}"),
                 // 新版协议的 topic 消息（剪贴板不走它）：当前版本不订阅。
                 // 用通配而不是显式 `Event::Message`：workspace 的 git pin
@@ -719,6 +711,32 @@ impl SyncState {
                 // patch 到 HEAD 时这里也能接住。
                 #[allow(unreachable_patterns)]
                 _ => debug!("Sync p2p: ignore unhandled event"),
+            }
+        }
+    }
+
+    /// 处理一条对端连接状态变化（`Event::Peer`）。
+    ///
+    /// 单独抽出来是为了可测：`Node` 一次只有一条连接，换对端时会连续到达
+    /// 「新连接 true」「旧连接被顶掉 false」两条事件，这个顺序正是单个 bool
+    /// 会误判的地方，而真实触发它需要两台设备。
+    fn on_peer_event(&mut self, did: String, name: &str, connected: bool) {
+        info!("Sync p2p: peer {name} ({did}) connected={connected}");
+        if connected {
+            self.peers_online.insert(did);
+            // 补发「daemon 启动前就已存在」的那条本地内容：新版节点只会补发
+            // 曾经经过 `set_clipboard` 的内容，而这条是从统一库 xime.db 读出来的，
+            // 节点缓存里没有。最近一次本地复制则可能已经被节点补发过，重复一条
+            // 由对端按文本去重。
+            if let Some(text) = self.last_local_text.clone() {
+                self.push_p2p(&text);
+            }
+        } else {
+            self.peers_online.remove(&did);
+            // 自动模式掉线：只在「一台都不剩」时立刻拉一次插件。换对端时旧连接
+            // 的断开事件不该触发通道切换。
+            if self.peers_online.is_empty() {
+                self.last_plugin_pull = None;
             }
         }
     }
@@ -754,7 +772,7 @@ pub fn spawn_bridge(store: Arc<ClipboardStore>, rx: Receiver<SyncMessage>) -> Jo
                 runtimes: HashMap::new(),
                 node: None,
                 config_mtime: config_mtime_of(&sync_config_path()),
-                peer_connected: false,
+                peers_online: HashSet::new(),
                 last_pushed_hash: None,
                 last_local_text: None,
                 last_plugin_pull: None,
@@ -830,7 +848,7 @@ mod tests {
             runtimes: HashMap::new(),
             node: None,
             config_mtime: None,
-            peer_connected: false,
+            peers_online: HashSet::new(),
             last_pushed_hash: None,
             last_local_text: None,
             last_plugin_pull: None,
@@ -1470,7 +1488,7 @@ mod tests {
             runtimes: HashMap::new(),
             node: Some(node),
             config_mtime: None,
-            peer_connected: false,
+            peers_online: HashSet::new(),
             last_pushed_hash: None,
             last_local_text: None,
             last_plugin_pull: None,
@@ -1505,7 +1523,7 @@ mod tests {
 
         // 先等连接建立：Node 在无连接时会丢掉 set_clipboard 的指令。
         assert!(
-            wait_until(&mut a, Duration::from_secs(10), |s| s.peer_connected),
+            wait_until(&mut a, Duration::from_secs(10), |s| s.p2p_online()),
             "A 端未在超时内连上 B"
         );
 
@@ -1533,7 +1551,7 @@ mod tests {
         b.clipboard = Some(Box::new(sink));
 
         assert!(
-            wait_until(&mut a, Duration::from_secs(10), |s| s.peer_connected),
+            wait_until(&mut a, Duration::from_secs(10), |s| s.p2p_online()),
             "A 端未在超时内连上 B"
         );
         a.handle_captured("clip me");
@@ -1554,7 +1572,7 @@ mod tests {
     fn test_p2p_ignores_echo_of_own_push() {
         let (_tmp, mut a, mut b) = p2p_pair();
         assert!(
-            wait_until(&mut a, Duration::from_secs(10), |s| s.peer_connected),
+            wait_until(&mut a, Duration::from_secs(10), |s| s.p2p_online()),
             "A 端未在超时内连上 B"
         );
         a.handle_captured("echo me");
@@ -1574,7 +1592,7 @@ mod tests {
         // 自动模式：连上直连时内容只走 P2P；掉线后同一条路径改走插件。
         let (_tmp, mut a, mut b) = p2p_pair();
         assert!(
-            wait_until(&mut a, Duration::from_secs(10), |s| s.peer_connected),
+            wait_until(&mut a, Duration::from_secs(10), |s| s.p2p_online()),
             "A 端未在超时内连上 B"
         );
         let plugin_dir = tempfile::tempdir().unwrap();
@@ -1590,7 +1608,7 @@ mod tests {
         );
 
         // 模拟掉线：自动模式退回插件。
-        a.peer_connected = false;
+        a.peers_online.clear();
         a.handle_captured("via plugin");
         assert_eq!(remote_count(&a), 1, "掉线后应改推插件");
 
@@ -1619,7 +1637,7 @@ mod tests {
         let plugin_dir = tempfile::tempdir().unwrap();
         load_fake_plugin(&mut a, plugin_dir.path());
         assert!(
-            wait_until(&mut a, Duration::from_secs(10), |s| s.peer_connected),
+            wait_until(&mut a, Duration::from_secs(10), |s| s.p2p_online()),
             "A 端未在超时内连上 B"
         );
 
@@ -1629,8 +1647,38 @@ mod tests {
             "直连已连上时不应再拉插件（避免双写）"
         );
 
-        a.peer_connected = false;
+        a.peers_online.clear();
         a.maybe_pull_plugins();
         assert!(a.last_plugin_pull.is_some(), "掉线后应立刻拉一次插件");
+    }
+
+    /// 换对端时（新连接顶掉旧连接），旧连接的断开事件不能把「仍有对端在线」抹掉。
+    ///
+    /// `Node` 一次只维持一条连接：新对端连上会连发 `Peer{new, true}` 与
+    /// `Peer{old, false}`。旧实现用一个 bool 存连接状态，后到的 false 会让自动
+    /// 模式误判直连不可用——立刻改推插件并开始每 2 秒拉一次，而新对端其实在线。
+    #[test]
+    fn test_old_peer_disconnect_keeps_new_peer_online() {
+        let (_tmp, mut a, b) = p2p_pair();
+        let plugin_dir = tempfile::tempdir().unwrap();
+        load_fake_plugin(&mut a, plugin_dir.path());
+        assert!(
+            wait_until(&mut a, Duration::from_secs(10), |s| s.p2p_online()),
+            "A 端未在超时内连上 B"
+        );
+        let b_did = b.node.as_ref().unwrap().did().to_string();
+
+        // 换到第二台设备：先到新连接的 true，再到旧连接被顶掉的 false。
+        a.on_peer_event("c0ffee".into(), "C", true);
+        a.on_peer_event(b_did, "B", false);
+        assert_eq!(a.peers_online.len(), 1, "只剩新对端在线");
+        assert!(a.p2p_online());
+        assert!(a.use_p2p_for_push(), "旧对端断开不该让自动模式转推插件");
+        assert!(!a.use_plugin_for_pull(), "也不该开始拉插件");
+
+        // 新对端也断开：这时才真的离线，退回插件通道。
+        a.on_peer_event("c0ffee".into(), "C", false);
+        assert!(!a.p2p_online());
+        assert!(a.use_plugin_for_pull());
     }
 }
