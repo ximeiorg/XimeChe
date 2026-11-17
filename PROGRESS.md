@@ -1,6 +1,50 @@
 # XimeChe（曦码·澈输入法）开发进度
 
 ## 当前状态
+**修复 P2P 的两个隐患：对端连接状态、身份并发创建**（2026-11-17 晚）。
+
+**隐患一：`peer_connected` 单个 bool**。原以为只在「多台设备同时在线」时出
+问题，实测发现 `xime-p2p` 的 `Node` 本来就是**单连接模型**（`connect_peer_at`
+发现已有连接直接 return，`serve` 里新连接用 `Outbound::Close` 顶掉旧连接）。
+真实失效场景是**换对端**：新对端 `connected=true` 与旧连接被顶掉的
+`connected=false` 会先后到达，单 bool 被后到的 false 抹掉 → 自动模式误判
+「直连不可用」，立刻改推插件并在 `last_plugin_pull` 上每 2 秒拉一次。
+改为 `peers_online: HashSet<did>`，只有一台都不剩才算离线；事件处理抽成
+`on_peer_event`。三节点并行在那个模型下测不出来，改成直接注入「新对端
+true + 旧对端 false」两条事件验证。
+
+**隐患二：`identity.bin` 首启并发写**。libximep2p 的
+`load_or_create_identity` 原来是「读不到 → 生成 → 整文件写」：daemon 与设置
+程序同时首启会各生成一份私钥、后写覆盖先写，已配对的设备全部静默失效。
+上游改为 `O_EXCL` 抢创建权（`1eddeb6`）：赢家生成并 `sync_all`，输家
+25ms × 40 次重试读同一份；文件存在但不足 64 字节时先让位等待（可能是对方
+正在写），等不到才按损坏原子替换。
+
+**存储（「连接信息是 sqlite 还是 json」）**：`p2p/identity.bin`（64 字节
+二进制私钥，0600）+ `p2p/peers.json`（已配对表，tmp+rename 原子写，解析失败
+报错而不回落默认值）+ `clipboard_sync.toml`（通道选择）。**只有剪贴板历史**
+在 `xime.db`（sqlite）。
+
+**改动**：
+1. libximep2p `1eddeb6`（已推送）：`pair_session.rs` 重写身份加载 + 两个测试
+   （8 线程并发首启收敛到同一 did、截断文件仍能恢复）。
+2. XimeChe `1c38c41` / libximecore `401dafd`：`xime-p2p` pin 同步升到
+   `1eddeb6`。
+3. daemon `clipboard_sync.rs`（`1d9ba0c`）：`peer_connected: bool` →
+   `peers_online: HashSet<String>`，直连可用判断统一走 `p2p_online()`。
+
+**验证**：workspace 测试全过（`clipboard_sync` 32 项，含新增换对端用例；
+libximep2p 10 项）；两仓 `clippy --all-targets --all-features -D warnings`
+干净；`cargo check --manifest-path crates/xime-setup/Cargo.toml --features
+pair-page`（libximecore）通过。
+
+**下一步**：
+- 重新登录 Plasma 后确认双机同步仍正常（本机 loopback 已覆盖协议路径）。
+- 待评估：`peers.json` 同样是 daemon（回写 `last_addr`）与设置程序（配对
+  写入）两个进程 load→改→save，daemon 的整表覆盖会丢掉刚配好的设备。
+  修法需要「save 前 reload 再合并本进程改动」，属上游 store 语义改动。
+
+## 此前：剪贴板存储并轨到 xime.db（2026-11-17）
 **剪贴板存储并轨到 xime.db（跟进 libximecore `cda319b`）**（2026-11-17）。
 
 **背景**：libximecore 把剪贴板从 `clipboard.db` 迁进统一库 `xime.db`
@@ -26,10 +70,6 @@
 **下一步**：
 - 重新登录 Plasma 后确认：复制内容 → 设置页「剪贴板」能立刻看到；
   双机（设备互传）复制 → 对端面板与 Ctrl+V 都生效。
-- 待评估：多台已配对设备时 `peer_connected` 是单个 bool，其中一台断开会让
-  自动模式误判「直连不可用」而短暂走插件；需要按 did 计数。
-- 待评估：`identity.bin` 首启时 daemon 与设置程序可能各生成一份（无锁写），
-  低概率但会让配对失效。
 
 ## 历史状态
 **屏蔽语音输入，移除 sherpa-onnx**（2026-11-16）。
