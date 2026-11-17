@@ -702,7 +702,7 @@ impl SyncState {
                     if connected {
                         // 补发「daemon 启动前就已存在」的那条本地内容：新版节点
                         // 只会补发曾经经过 `set_clipboard` 的内容，而这条是从
-                        // clipboard.db 读出来的，节点缓存里没有。最近一次本地复制
+                        // 统一库 xime.db 读出来的，节点缓存里没有。最近一次本地复制
                         // 则可能已经被节点补发过，重复一条由对端按文本去重。
                         if let Some(text) = self.last_local_text.clone() {
                             self.push_p2p(&text);
@@ -824,7 +824,7 @@ mod tests {
 
     fn setup() -> (tempfile::TempDir, Arc<ClipboardStore>, SyncState) {
         let dir = tempfile::tempdir().unwrap();
-        let store = Arc::new(ClipboardStore::open(dir.path().join("clipboard.db")).unwrap());
+        let store = Arc::new(ClipboardStore::open(dir.path().join("xime.db")).unwrap());
         let state = SyncState {
             store: store.clone(),
             runtimes: HashMap::new(),
@@ -1463,8 +1463,8 @@ mod tests {
         })
         .unwrap();
 
-        let store_a = Arc::new(ClipboardStore::open(a_dir.join("clipboard.db")).unwrap());
-        let store_b = Arc::new(ClipboardStore::open(b_dir.join("clipboard.db")).unwrap());
+        let store_a = Arc::new(ClipboardStore::open(a_dir.join("xime.db")).unwrap());
+        let store_b = Arc::new(ClipboardStore::open(b_dir.join("xime.db")).unwrap());
         let state = |store: Arc<ClipboardStore>, node| SyncState {
             store,
             runtimes: HashMap::new(),

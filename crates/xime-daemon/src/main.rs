@@ -166,9 +166,9 @@ fn main() -> anyhow::Result<()> {
 
         let (command_tx, command_rx) = mpsc::channel();
 
-        // 剪贴板/快捷发送存储（SQLite，表结构对齐 Android）+ 系统剪贴板监听
-        // + 剪贴板同步桥（clipboard_sync 插件，独立线程避免网络阻塞按键）。
-        let clipboard_store = xime_clipboard::store::init(xime_clipboard::default_db_dir());
+        // 剪贴板/快捷发送存储（libximecore 统一库 xime.db，与设置程序同一张表）
+        // + 系统剪贴板监听 + 剪贴板同步桥（独立线程避免网络阻塞按键）。
+        let clipboard_store = xime_clipboard::store::init();
         let (sync_tx, sync_rx) = mpsc::channel();
         xime_daemon::spawn_bridge(clipboard_store.clone(), sync_rx);
         let watcher_sync_tx = sync_tx.clone();

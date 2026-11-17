@@ -1,6 +1,37 @@
 # XimeChe（曦码·澈输入法）开发进度
 
 ## 当前状态
+**剪贴板存储并轨到 xime.db（跟进 libximecore `cda319b`）**（2026-11-17）。
+
+**背景**：libximecore 把剪贴板从 `clipboard.db` 迁进统一库 `xime.db`
+（`xime-config::clipboard_store`，schema v7）。本仓 daemon 仍在写
+`clipboard.db`，设置程序读 `xime.db`：设置页历史停在迁移快照，新复制的条目
+永远不出现。迁移还会把旧库改名为 `clipboard.db.migrated`，而 daemon 已持有
+该 inode，后续写入全落进改名后的文件 —— 全程无报错。
+
+**改动**：
+1. `xime-clipboard/src/store.rs` 改成转出 `xime_config::clipboard_store`
+   （含 `init()` 单例，路径走 `default_db_path()`），删掉自建 schema/迁移/
+   裁剪实现（约 -460 行）；`watcher`、`system_clipboard` 不动。
+2. `xime-clipboard` 依赖从 `rusqlite` 换成 `xime-config`，`lib.rs` 去掉
+   `default_db_dir()`；daemon `main.rs` 改 `store::init()` 无参。
+3. 单测改为验证「两个独立连接共享同一库」（daemon 写 / 设置读的核心契约）
+   与父目录自动创建；`clipboard_sync` 测试的临时库改名 `xime.db`。
+4. 本机数据：备份 `~/.config/xime/xime.db.bak-20261117-202527` 后，把
+   `clipboard.db.migrated` 里缺的条目补进 `xime.db`（1000 → 1002）。
+
+**验证**：`cargo test --workspace` 135 项通过（含真实 P2P 环回），
+`clippy --all-targets --all-features -D warnings` 干净，release 已安装。
+
+**下一步**：
+- 重新登录 Plasma 后确认：复制内容 → 设置页「剪贴板」能立刻看到；
+  双机（设备互传）复制 → 对端面板与 Ctrl+V 都生效。
+- 待评估：多台已配对设备时 `peer_connected` 是单个 bool，其中一台断开会让
+  自动模式误判「直连不可用」而短暂走插件；需要按 did 计数。
+- 待评估：`identity.bin` 首启时 daemon 与设置程序可能各生成一份（无锁写），
+  低概率但会让配对失效。
+
+## 历史状态
 **屏蔽语音输入，移除 sherpa-onnx**（2026-11-16）。
 
 **背景**：libximecore 最新提交 `698547f` 把 `xime-speech` 的 sherpa-onnx 从

@@ -1,5 +1,38 @@
 # XimeChe（曦码·澈输入法）重要决策
 
+## 2026-11-17: 剪贴板存储只留一份（xime.db），本仓删掉自建实现
+
+**问题**：libximecore `cda319b` 把剪贴板从独立的 `clipboard.db` 迁进统一库
+`xime.db`（`xime-config::clipboard_store`，整库 schema v7）。XimeChe 还留着
+自己的 v3 实现写 `~/.config/xime/clipboard.db`，于是：
+
+- 设置程序（读 `xime.db`）的剪贴板历史停在迁移那一刻的快照；
+- daemon（写 `clipboard.db`）的新条目在设置页永远看不到；
+- 更隐蔽的是迁移会把旧文件改名成 `clipboard.db.migrated`，而 daemon 已经
+  打开了那个 inode，之后的写入全部落进改名后的文件——`xime.db` 里一行都不会
+  多出来，界面上只表现为「历史不更新」，不报任何错。
+
+这与 macOS 版 D21（两套 schema 操作同一个库 → 历史一片空白）是同一类问题。
+
+**决策**：
+
+1. **存储归 libximecore，本仓只留平台层**。`xime-clipboard` 的 `store`
+   模块改成转出 `xime_config::clipboard_store`（含 `init()` 单例），删掉
+   自建的建表/迁移/裁剪实现；`watcher`（data-control 监听）与
+   `system_clipboard`（写回）留在本仓。拆法与 XimeYi 一致。
+2. **路径不再由本仓拼**。`init()` 调 `clipboard_store::default_db_path()`，
+   与设置程序同一个函数——两边各算各的就会再次分叉。
+3. **不再直接依赖 rusqlite**。存储来自 xime-config，顺带消掉了
+   `libsqlite3-sys` 的 `links = "sqlite3"` 冲突隐患（见 2026-11-09 那次）。
+4. **已滞留的数据手动补一次**。`clipboard.db.migrated` 里的条目不会被
+   libximecore 的 `import_legacy_rows` 认领（它只看 `clipboard.db`），
+   本机做了一次「补缺失 + 备份」的合并；对其它用户，等 libximecore 把
+   `*.migrated` 也纳入导入，或在发布说明里提示。
+
+**未做**：`ClipboardStore` 没有跨进程通知机制，daemon 在面板打开时才重读，
+设置页删除条目后要重新进页才刷新——当前可接受，真要实时得走 inotify 或
+DBus 广播。
+
 ## 2026-11-16: 语音输入暂时屏蔽，推理统一走 candle
 
 **问题**：libximecore 把 `xime-speech` 的 sherpa-onnx 升到 2.0.1 后，
