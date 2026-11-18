@@ -63,3 +63,66 @@ jobs:
 
       - name: Run tests
         run: cargo test --release --verbose
+  # 语音引擎的 CUDA 后端只在 release 里用到，但它的代码在 libximecore：
+  # feature 名改了、candle 升了、kernel 编译方式变了，都要等到打 tag 才发现，
+  # 那时已经来不及。这个 job 每次 push/PR 就按 release 的同款工具链
+  # （CUDA 12.4 + gcc-12）编一遍 speechd，并用 cuobjdump 确认 kernel 真进了
+  # 二进制——只靠链接成功是不够的，工具链静默跳过编译时链接照样过。
+  cuda-speech:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev pkg-config gcc-12 g++-12
+
+      - name: Install CUDA toolkit
+        uses: Jimver/cuda-toolkit@v0.2.19
+        with:
+          cuda: '12.4.1'
+          method: 'network'
+
+      - name: Checkout libximecore
+        run: git clone --depth 1 https://github.com/ximeiorg/libximecore.git ../libximecore
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # 缓存 key 不含 libximecore 的锁文件（在 workspace 外，hashFiles 取不到）。
+      # 固定 key 的代价只是「命中旧缓存、增量重编变动的 crate」，比每次从零
+      # 编 candle kernel 便宜得多。
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ../libximecore/target
+          key: cuda-speech-${{ runner.os }}-v1
+          restore-keys: |
+            cuda-speech-${{ runner.os }}-
+
+      - name: Build speech daemon with CUDA
+        env:
+          CUDA_COMPUTE_CAP: '80'
+          NVCC_CCBIN: /usr/bin/g++-12
+        run: |
+          cargo build --release \
+            --manifest-path ../libximecore/Cargo.toml \
+            -p xime-speechd --features cuda
+          BIN=../libximecore/target/release/xime-speechd
+
+          # 1) 确实链到了 CUDA 运行时（动态链接，编译期不需要 GPU）
+          ldd "$BIN" | grep -q libcudart \
+            || { echo "::error::speechd 没有链接 libcudart"; exit 1; }
+
+          # 2) kernel 真的编进去了，且架构是 CUDA_COMPUTE_CAP 钉的那个
+          CUOBJDUMP=$(command -v cuobjdump || echo /usr/local/cuda/bin/cuobjdump)
+          "$CUOBJDUMP" -lelf "$BIN" > /tmp/cubins.txt
+          CUBINS=$(grep -c '\.sm_80\.cubin' /tmp/cubins.txt || true)
+          echo "内嵌 sm_80 cubin：${CUBINS} 个"
+          test "$CUBINS" -gt 0 \
+            || { echo "::error::没有 sm_80 cubin，candle kernel 没编进二进制"; exit 1; }

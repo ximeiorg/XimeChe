@@ -200,7 +200,10 @@ impl VoiceView {
     pub fn status_text(&self) -> String {
         // 异常优先：识别出错时最该看见的是原因，而不是「正在听写」。
         if let Some(warning) = self.warning.as_deref().filter(|w| !w.trim().is_empty()) {
-            return format!("识别异常：{}", truncate_chars(warning, STATUS_WARNING_CHARS));
+            return format!(
+                "识别异常：{}",
+                truncate_chars(warning, STATUS_WARNING_CHARS)
+            );
         }
         match self.phase {
             VoicePhase::Loading => "正在装载语音引擎…".to_string(),

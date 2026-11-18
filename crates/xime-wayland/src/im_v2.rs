@@ -274,11 +274,7 @@ impl Dispatch<WlPointer, InputMethodData> for InputMethodData {
                     wayland_client::WEnum::Value(wl_pointer::ButtonState::Pressed)
                 );
                 let pos = state.pointer_pos.lock().map(|p| *p).unwrap_or((0.0, 0.0));
-                let on_voice = state
-                    .pointer_on_voice
-                    .lock()
-                    .map(|f| *f)
-                    .unwrap_or(false);
+                let on_voice = state.pointer_on_voice.lock().map(|f| *f).unwrap_or(false);
                 debug!(
                     "Pointer button: serial={}, button={}, pressed={}, pos=({:.0},{:.0})",
                     serial, button, pressed, pos.0, pos.1
