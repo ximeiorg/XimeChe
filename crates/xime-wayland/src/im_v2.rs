@@ -3,7 +3,7 @@ use std::os::unix::net::UnixStream;
 use std::slice;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 use wayland_backend::client::Backend;
 use wayland_client;
 use wayland_client::globals::{GlobalList, GlobalListContents};
@@ -566,6 +566,63 @@ pub struct WaylandConnectionV2 {
     renderer: Option<IcedSurface>,
     /// 上次 sync 探针发送时刻（楔死探测节流）。
     last_sync_probe: Instant,
+    /// `unavailable` 之后重建 IM 对象的节流（见 [`SlotConflictGuard`]）。
+    slot_guard: SlotConflictGuard,
+}
+
+/// `unavailable` 之后重建 IM 对象的退避门控。
+///
+/// 协议规定一个 seat 只能挂一个 `zwp_input_method_v2`，后到者的
+/// `get_input_method` 会立刻收到 `unavailable`。COSMIC 1.9+ 上抢槽的是
+/// `cosmic-osk`（屏幕键盘），它比任何第三方输入法都先启动。
+///
+/// 原来「收到 unavailable 就重建」的写法在槽位长期被占时，会让主循环每轮
+/// 都 destroy + create + 一次阻塞 roundtrip：CPU 空转、日志刷屏，按键处理
+/// 还被挤到这些往返之后。这里改成指数退避，1s → 2s → 5s → 10s 封顶。
+#[derive(Debug, Default)]
+struct SlotConflictGuard {
+    /// 连续失败次数（重建过几次仍然 unavailable）。
+    attempts: u32,
+    /// 下次允许重建的时刻；`None` = 没有待重试的冲突。
+    retry_at: Option<Instant>,
+}
+
+impl SlotConflictGuard {
+    /// 重建之间的退避时长。
+    fn backoff(attempts: u32) -> Duration {
+        match attempts {
+            0 => Duration::from_secs(1),
+            1 => Duration::from_secs(2),
+            2 => Duration::from_secs(5),
+            _ => Duration::from_secs(10),
+        }
+    }
+
+    /// 现在是否该重建。
+    ///
+    /// `unavailable == false` 时顺带清零：说明上一次重建之后已经稳过一个退避
+    /// 窗口，槽位确实拿到了，下次冲突（例如锁屏回来）重新从 1s 开始算。
+    fn due(&mut self, unavailable: bool, now: Instant) -> bool {
+        if !unavailable {
+            if self.attempts > 0 && self.retry_at.is_some_and(|at| now >= at) {
+                self.attempts = 0;
+                self.retry_at = None;
+            }
+            return false;
+        }
+        self.retry_at.is_none_or(|at| now >= at)
+    }
+
+    /// 记录一次重建尝试。
+    fn on_attempt(&mut self, now: Instant) {
+        self.attempts = self.attempts.saturating_add(1);
+        self.retry_at = Some(now + Self::backoff(self.attempts));
+    }
+
+    /// 是否处于「抢槽失败」状态（用于日志与排障）。
+    fn conflicted(&self) -> bool {
+        self.attempts > 0
+    }
 }
 
 impl WaylandConnectionV2 {
@@ -631,6 +688,7 @@ impl WaylandConnectionV2 {
             current_pool: None,
             renderer: None,
             last_sync_probe: Instant::now(),
+            slot_guard: SlotConflictGuard::default(),
         })
     }
 
@@ -703,12 +761,34 @@ impl WaylandConnectionV2 {
     }
 
     /// Recreate the input method object after an `unavailable` event (e.g.
-    /// GNOME lock screen). The old object becomes inert and must be destroyed.
+    /// GNOME lock screen, or another input method holding the seat).
+    ///
+    /// 重建按 [`SlotConflictGuard`] 退避：槽位被别的输入法占着时，每次重建
+    /// 都会再收到 `unavailable`，立即重试只会把主循环拖进「每轮一次阻塞
+    /// 往返」的空转。
     pub fn handle_unavailable(&mut self) -> Result<()> {
-        if !self.state.unavailable {
+        let now = Instant::now();
+        if !self.slot_guard.due(self.state.unavailable, now) {
             return Ok(());
         }
-        debug!("Recreating input method after unavailable");
+
+        if self.slot_guard.conflicted() {
+            debug!(
+                "Input method slot still unavailable (attempt {}), retrying in {:?}",
+                self.slot_guard.attempts,
+                SlotConflictGuard::backoff(self.slot_guard.attempts)
+            );
+        } else {
+            // 只在第一次冲突时 warn：这条日志是用户报障时唯一能指向真因的
+            // 线索——没有它，现象只是「托盘有图标、打字毫无反应」。
+            warn!(
+                "Input method slot unavailable: another input method already holds \
+                 zwp_input_method_v2 on this seat. On COSMIC this is usually cosmic-osk \
+                 (disable the on-screen keyboard, or stop cosmic-osk, to release it). \
+                 Retrying with backoff."
+            );
+        }
+
         self.state.unavailable = false;
         self.state.state = InputMethodState::Inactive;
 
@@ -727,8 +807,17 @@ impl WaylandConnectionV2 {
         let input_method = manager.get_input_method(&seat, &qh, self.state.clone());
         self.input_method = Some(input_method);
 
+        self.slot_guard.on_attempt(now);
+
         self.sync_roundtrip()?;
         Ok(())
+    }
+
+    /// 是否因槽位被别的输入法占用而抢不到 `zwp_input_method_v2`。
+    ///
+    /// 只用于上报，不影响重试：真正的重试节流在 [`SlotConflictGuard`] 里。
+    pub fn slot_unavailable(&self) -> bool {
+        self.slot_guard.conflicted()
     }
 
     pub fn dispatch_events(&mut self) -> Result<()> {
@@ -1226,5 +1315,54 @@ mod tests {
         // rate=0 表示禁用重复，不能被默认值吞掉
         *data.repeat_info.lock().unwrap() = Some((0, 600));
         assert_eq!(data.repeat_info(), (0, 600));
+    }
+
+    /// 槽位被占时不能每轮主循环都重建：退避窗口内必须拒绝。
+    #[test]
+    fn slot_conflict_backoff_throttles_rebuilds() {
+        let t0 = Instant::now();
+        let mut guard = SlotConflictGuard::default();
+
+        // 第一次冲突（可能是锁屏回来）：立即允许重建。
+        assert!(guard.due(true, t0));
+        guard.on_attempt(t0);
+        assert!(guard.conflicted());
+
+        // 窗口内拒绝重建，否则就是「每轮一次阻塞往返」的空转。
+        assert!(!guard.due(true, t0 + Duration::from_millis(500)));
+
+        // 2s 后允许第二次；次数上去后退避变长到 5s。
+        assert!(guard.due(true, t0 + Duration::from_secs(2)));
+        guard.on_attempt(t0 + Duration::from_secs(2));
+        assert!(!guard.due(true, t0 + Duration::from_secs(4)));
+        assert!(guard.due(true, t0 + Duration::from_secs(7)));
+    }
+
+    /// 重建成功后要清零，否则下次冲突（锁屏）会从 10s 起步，白等最多十秒。
+    #[test]
+    fn slot_conflict_resets_after_success() {
+        let t0 = Instant::now();
+        let mut guard = SlotConflictGuard::default();
+        guard.on_attempt(t0);
+        assert!(guard.conflicted());
+
+        // 退避窗口内先到的「无冲突」还不能算成功（重建结果未可知）。
+        assert!(!guard.due(false, t0 + Duration::from_secs(1)));
+        assert!(guard.conflicted());
+
+        // 稳过一个完整窗口：清零，下次从 1s 重新开始。
+        assert!(!guard.due(false, t0 + Duration::from_secs(3)));
+        assert!(!guard.conflicted());
+        assert!(guard.due(true, t0 + Duration::from_secs(3)));
+    }
+
+    /// 退避序列本身：1s / 2s / 5s，之后 10s 封顶。
+    #[test]
+    fn slot_conflict_backoff_caps_at_ten_seconds() {
+        assert_eq!(SlotConflictGuard::backoff(0), Duration::from_secs(1));
+        assert_eq!(SlotConflictGuard::backoff(1), Duration::from_secs(2));
+        assert_eq!(SlotConflictGuard::backoff(2), Duration::from_secs(5));
+        assert_eq!(SlotConflictGuard::backoff(3), Duration::from_secs(10));
+        assert_eq!(SlotConflictGuard::backoff(99), Duration::from_secs(10));
     }
 }

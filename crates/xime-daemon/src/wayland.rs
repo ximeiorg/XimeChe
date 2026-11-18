@@ -264,6 +264,17 @@ struct VoiceUiState {
 const HEAL_QUICK_RETRY: Duration = Duration::from_secs(1);
 const HEAL_KILL_SPACING: Duration = Duration::from_secs(25);
 
+/// 抢不到输入法槽位多久后开始以 error 级提示。
+///
+/// 背景：一个 seat 只能挂一个输入法。COSMIC 1.9+ 的屏幕键盘 `cosmic-osk`
+/// 会先绑定 `zwp_input_method_manager_v2`，后到的输入法只会拿到
+/// `unavailable`。im 层已经在首次冲突时 warn 过一条，这里等它确认「一直
+/// 解不开」再补一条 error——用户报障提交日志时，带排查指引的 error 比一条
+/// 淹没在 debug 里的英文提示有用得多。
+const SLOT_CONFLICT_GRACE: Duration = Duration::from_secs(10);
+/// 同一冲突的重报间隔：既不让日志刷屏，也不至于只报一次就被淹没。
+const SLOT_CONFLICT_REPORT_INTERVAL: Duration = Duration::from_secs(300);
+
 struct HealScheduler {
     fire_at: Option<Instant>,
     last_kill: Option<Instant>,
@@ -456,6 +467,9 @@ impl WaylandLoop {
         let mut pending_theme_redraw = false;
         // 断连自愈调度：见 HealScheduler。
         let mut heal = HealScheduler::new();
+        // 输入法槽位冲突的提示节流（见主循环的 slot_unavailable 分支）。
+        let mut slot_conflict_since: Option<Instant> = None;
+        let mut slot_conflict_reported: Option<Instant> = None;
         // 语音悬浮层状态（v1 后端支持时替代候选栏反馈）。
         let mut voice = VoiceUiState::default();
 
@@ -721,6 +735,28 @@ impl WaylandLoop {
 
                 if let Err(e) = c.handle_unavailable() {
                     warn!("handle_unavailable error: {}", e);
+                }
+
+                // 槽位被别的输入法占着（COSMIC 上是 cosmic-osk）：im 层按退避
+                // 重试并只在首次冲突时 warn 一条，这里在确认「一直解不开」后
+                // 补一条带处置指引的 error。
+                if c.slot_unavailable() {
+                    let now = Instant::now();
+                    let since = *slot_conflict_since.get_or_insert(now);
+                    let report_due = slot_conflict_reported
+                        .is_none_or(|at| now.duration_since(at) >= SLOT_CONFLICT_REPORT_INTERVAL);
+                    if now.duration_since(since) >= SLOT_CONFLICT_GRACE && report_due {
+                        error!(
+                            "Input method slot still held by another client for {:?} \
+                             (on COSMIC this is cosmic-osk). Disable the on-screen keyboard \
+                             or stop cosmic-osk; recovery is automatic once the slot frees.",
+                            now.duration_since(since)
+                        );
+                        slot_conflict_reported = Some(now);
+                    }
+                } else {
+                    slot_conflict_since = None;
+                    slot_conflict_reported = None;
                 }
 
                 let is_active = c.is_active();

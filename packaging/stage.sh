@@ -73,4 +73,11 @@ render dbus/org.xime.Xime.service share/dbus-1/services
 render applications/xime-launcher.desktop share/applications
 render applications/xime-setup.desktop share/applications
 
+# XDG autostart（非 KDE 桌面的唯一启动入口）。带 NotShowIn=KDE，Plasma 下不生效。
+AUTOSTART_DIR="$DESTDIR/etc/xdg/autostart"
+install -d "$AUTOSTART_DIR"
+sed "s|@BINDIR@|$BINDIR|g" resources/applications/xime-daemon.desktop.in \
+    >"$AUTOSTART_DIR/xime-daemon.desktop"
+chmod 644 "$AUTOSTART_DIR/xime-daemon.desktop"
+
 echo "staged $(find "$DESTDIR" -type f | wc -l) files into $DESTDIR ($PREFIX)"

@@ -94,6 +94,7 @@ gtk-update-icon-cache -q -t -f %{_datadir}/icons/hicolor || :
 %{_datadir}/dbus-1/services/org.xime.Xime.service
 %{_datadir}/applications/xime-launcher.desktop
 %{_datadir}/applications/xime-setup.desktop
+%config(noreplace) %{_sysconfdir}/xdg/autostart/xime-daemon.desktop
 %{_datadir}/icons/hicolor/*/apps/xime.png
 
 %changelog

@@ -127,29 +127,63 @@ if [ -d "${PROJECT_ROOT}/rime-wubi" ]; then
     echo "Installed rime-wubi schemas to ${RIMEDATADIR}"
 fi
 
+# 桌面集成：KDE 走 KWin 的虚拟键盘机制（写 kwinrc），其他 Wayland 桌面
+# （COSMIC / GNOME / sway）没有这套机制，只能靠 XDG autostart 把 daemon 拉起来。
+#
+# autostart 条目带 NotShowIn=KDE，Plasma 下不会生效；这里无条件装上，是为了
+# 让同一份用户目录在切换桌面后依然可用（装的时候不一定是将来要用的桌面）。
+AUTOSTARTDIR="${HOME}/.config/autostart"
+install -Dm644 "${PROJECT_ROOT}/resources/applications/xime-daemon.desktop.in" \
+    "${AUTOSTARTDIR}/xime-daemon.desktop"
+sed -i "s|@BINDIR@|${BINDIR}|g" "${AUTOSTARTDIR}/xime-daemon.desktop"
+echo "Installed XDG autostart entry to ${AUTOSTARTDIR}/xime-daemon.desktop"
+
 # Configure KWin（Plasma 6 只提供 kwriteconfig6，5.x 才是 kwriteconfig5；
 # 都没有时不要让 set -e 把整个安装判成失败，只提示手动设置）
-KWRITECONFIG=""
-for cmd in kwriteconfig6 kwriteconfig5; do
-    if command -v "$cmd" >/dev/null 2>&1; then
-        KWRITECONFIG="$cmd"
-        break
+case "${XDG_CURRENT_DESKTOP:-}" in
+*KDE* | *Plasma* | "")
+    KWRITECONFIG=""
+    for cmd in kwriteconfig6 kwriteconfig5; do
+        if command -v "$cmd" >/dev/null 2>&1; then
+            KWRITECONFIG="$cmd"
+            break
+        fi
+    done
+    if [ -n "${KWRITECONFIG}" ]; then
+        "${KWRITECONFIG}" --file kwinrc --group Wayland --key VirtualKeyboard xime-launcher.desktop
+        "${KWRITECONFIG}" --file kwinrc --group Wayland --key VirtualKeyboardEnabled true
+        echo "KWin configured to use xime-launcher.desktop"
+    else
+        echo "warning: 未找到 kwriteconfig6/kwriteconfig5，请手动把虚拟键盘设为 xime-launcher.desktop" >&2
     fi
-done
-if [ -n "${KWRITECONFIG}" ]; then
-    "${KWRITECONFIG}" --file kwinrc --group Wayland --key VirtualKeyboard xime-launcher.desktop
-    "${KWRITECONFIG}" --file kwinrc --group Wayland --key VirtualKeyboardEnabled true
-    echo "KWin configured to use xime-launcher.desktop"
-else
-    echo "warning: 未找到 kwriteconfig6/kwriteconfig5，请手动把虚拟键盘设为 xime-launcher.desktop" >&2
-fi
+    ;;
+*)
+    echo "Non-KDE desktop (${XDG_CURRENT_DESKTOP}): daemon will autostart via XDG,"
+    echo "log out and back in to let the session start it."
+    # COSMIC 1.9+ 的屏幕键盘会先绑定唯一的 zwp_input_method_manager_v2 槽位，
+    # 后到的输入法只会拿到 unavailable（daemon 日志里是一条 warn，按退避重试）。
+    if command -v cosmic-osk >/dev/null 2>&1; then
+        echo "warning: cosmic-osk 会抢占唯一的输入法槽位（COSMIC 1.9+）：" >&2
+        echo "         先在 COSMIC 面板里关掉屏幕键盘；若无效，放一个" >&2
+        echo "         ~/.local/bin/cosmic-osk stub（exec sleep infinity）顶掉它。" >&2
+    fi
+    ;;
+esac
 
 echo ""
 echo "Development installation complete!"
 echo ""
 echo "To test:"
-echo "1. Restart KDE Plasma (logout/login) OR restart KWin"
-echo "2. Open Kate and type to trigger VirtualKeyboard"
+case "${XDG_CURRENT_DESKTOP:-}" in
+*KDE* | *Plasma* | "")
+    echo "1. Restart KDE Plasma (logout/login) OR restart KWin"
+    echo "2. Open Kate and type to trigger VirtualKeyboard"
+    ;;
+*)
+    echo "1. Log out and back in — the session starts xime-daemon via XDG autostart"
+    echo "2. Focus any text field and press Ctrl+Space to switch Chinese/English"
+    ;;
+esac
 echo ""
 echo "librime is built from the submodule (${LIBXIMECORE}/librime/dist/lib);"
 echo "binaries embed an rpath to it, no LD_LIBRARY_PATH needed."

@@ -26,6 +26,8 @@ rm -f ~/.local/share/dbus-1/services/org.xime.IM.service 2>/dev/null || true
 # 4. 移除 Desktop 文件
 echo "移除 Desktop 文件..."
 rm -f ~/.local/share/applications/xime-launcher.desktop
+# XDG autostart（非 KDE 桌面靠它拉起 daemon；系统级那份由包管理器管）
+rm -f ~/.config/autostart/xime-daemon.desktop
 
 # 5. 清理日志文件
 echo "清理日志文件..."
