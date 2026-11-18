@@ -466,16 +466,18 @@ fn paint_voice_pulse(pixels: &mut [u8], view: &VoiceView, theme: &PanelTheme) {
 
 /// 预乘实心圆 over 合成（抗锯齿边缘用距离覆盖率）。
 #[allow(clippy::too_many_arguments)]
-fn blend_circle(
-    dst: &mut [u8],
-    stride: u32,
-    height: u32,
-    cx: f32,
-    cy: f32,
-    r: f32,
-    color: Color,
-) {
-    blend_rounded_rect(dst, stride, height, cx - r, cy - r, r * 2.0, r * 2.0, r, color);
+fn blend_circle(dst: &mut [u8], stride: u32, height: u32, cx: f32, cy: f32, r: f32, color: Color) {
+    blend_rounded_rect(
+        dst,
+        stride,
+        height,
+        cx - r,
+        cy - r,
+        r * 2.0,
+        r * 2.0,
+        r,
+        color,
+    );
 }
 
 /// 预乘圆角矩形 over 合成（覆盖率抗锯齿）。颜色通道按预乘写入。
@@ -533,9 +535,7 @@ fn voice_view<'a>(view: &'a VoiceView, theme: &'a PanelTheme) -> Element<'a, (),
     let status = text(view.status_text())
         .size(small)
         .color(theme.text_comment);
-    let hint = text(view.hint_text())
-        .size(small)
-        .color(theme.text_comment);
+    let hint = text(view.hint_text()).size(small).color(theme.text_comment);
     // 左侧留出呼吸点的位置（像素层画的圆点，iced 只占位不重叠）。
     let pulse_slot = voice::PULSE_RADIUS * 2.0 + 8.0;
     let head = row![
@@ -1538,8 +1538,8 @@ mod tests {
         // 文本区（partial 行）有像素
         let text_x = crate::voice::VOICE_PAD as u32;
         let text_top = crate::voice::VOICE_PAD as u32;
-        let has_text = (text_top..crate::voice::BAR_ZONE_TOP as u32)
-            .any(|y| px(text_x + 4, y).3 > 60);
+        let has_text =
+            (text_top..crate::voice::BAR_ZONE_TOP as u32).any(|y| px(text_x + 4, y).3 > 60);
         assert!(has_text, "文本区应渲染出文字");
     }
 }

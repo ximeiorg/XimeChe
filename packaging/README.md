@@ -57,6 +57,34 @@ qdbus6 org.kde.KWin /KWin reconfigure   # 没生效就注销重登
 设置界面：`xime-setup`。首次运行时 daemon 会把 `/usr/share/xime/rime-data`
 部署到 `~/.config/xime/rime/`。
 
+## 从哪拿包
+
+三种来源，按场景选：
+
+1. **Release 页面**：打 tag 时自动构建并挂上去，正式发布用这个。
+2. **手动跑一次 Actions**（不用打 tag）：`Actions → Release → Run workflow`，
+   跑完在那次运行的 Artifacts 里下 `xime-deb-cpu` / `xime-deb-cuda`
+   （还有 rpm / arch / 源码包）。版本号取 `Cargo.toml`，不会创建 Release。
+3. **本机一条命令**，见下节。
+
+## 本机打包
+
+```bash
+./packaging/build-deb.sh          # CPU + CUDA 两个 deb
+./packaging/build-deb.sh cpu      # 只要 CPU 版
+./packaging/build-deb.sh cuda     # 只要 CUDA 版
+```
+
+脚本走的步骤和 CI 一致：编三个主程序 → 按变体编 `xime-speechd` → `cargo deb`
+→ 解包自检。产物在 cargo 的 `target/deb-out/`（全局 `~/.cargo/config.toml`
+可能把 target 目录挪到仓库外，脚本会向 `cargo metadata` 问真实路径）。
+
+CUDA 版会自己挑一个 cudarc 白名单内（12.0–13.4）的 toolkit——机器上同时装了
+13.5 也不会误用；架构从 `nvidia-smi` 取，没有显卡时用 `CUDA_COMPUTE_CAP`
+指定（例如 `CUDA_COMPUTE_CAP=80`）。自检两件事，任一不满足就报错：`ldd`
+必须看到 `libcudart`，`cuobjdump -lelf` 必须列出目标架构的 cubin
+（`sm_80` / `sm_89` …）——后者能挡住「链接成功但 kernel 没编进去」。
+
 ## 从源码构建
 
 三种格式共用同一个安装布局脚本 `packaging/stage.sh`：
@@ -84,7 +112,7 @@ CUDA_COMPUTE_CAP=89 cargo build --release \
 cp ../libximecore/target/release/xime-speechd target/release/
 ```
 
-各格式的配方：
+各格式的配方（deb 直接用上面的 `build-deb.sh`，这里是它内部做的事）：
 
 ```bash
 # deb（先按上面把 xime-speechd 放好）

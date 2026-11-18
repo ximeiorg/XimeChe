@@ -45,7 +45,11 @@ pub struct VoicePanel {
 }
 
 /// 后端是否提供 `zwlr_layer_shell_v1`（没有就没有语音面板）。
-pub fn bind_layer_shell<D>(globals: &wayland_client::globals::GlobalList, qh: &QueueHandle<D>, data: D) -> Option<ZwlrLayerShellV1>
+pub fn bind_layer_shell<D>(
+    globals: &wayland_client::globals::GlobalList,
+    qh: &QueueHandle<D>,
+    data: D,
+) -> Option<ZwlrLayerShellV1>
 where
     D: Dispatch<ZwlrLayerShellV1, D> + Send + Sync + 'static,
 {
@@ -98,7 +102,10 @@ impl VoicePanel {
         let height = voice::VOICE_HEIGHT;
 
         let is_configured = configured.lock().map(|c| *c).unwrap_or(false);
-        debug!("Voice panel show: layer={} configured={is_configured}", self.layer.is_some());
+        debug!(
+            "Voice panel show: layer={} configured={is_configured}",
+            self.layer.is_some()
+        );
         if self.layer.is_none() || !is_configured {
             // closed 过（合成器要求移除）或还没建：重建一次。
             if self.layer.is_some() {
@@ -256,11 +263,9 @@ impl VoicePanel {
 /// memfd 匿名文件（与候选窗同款：tmpfs 写满时 set_len 仍成功、写页才 SIGBUS，
 /// 所以用 memfd 而非 /tmp 的 O_TMPFILE）。
 fn create_anonymous_file(size: u32) -> Result<OwnedFd, String> {
-    let fd = nix::sys::memfd::memfd_create(
-        c"xime-voice",
-        nix::sys::memfd::MemFdCreateFlag::MFD_CLOEXEC,
-    )
-    .map_err(|e| format!("memfd_create: {e}"))?;
+    let fd =
+        nix::sys::memfd::memfd_create(c"xime-voice", nix::sys::memfd::MemFdCreateFlag::MFD_CLOEXEC)
+            .map_err(|e| format!("memfd_create: {e}"))?;
     let file = std::fs::File::from(fd);
     file.set_len(size as u64)
         .map_err(|e| format!("set_len: {e}"))?;

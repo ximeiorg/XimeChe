@@ -134,8 +134,7 @@ fn op_json(op: &str, kvs: &[(&str, String)]) -> String {
 // ---------------------------------------------------------------------------
 
 /// 设置端已尝试拉起过 speechd（失败不再重试，否则 250ms 轮询会反复 fork）。
-static SPEECH_SPAWNED: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+static SPEECH_SPAWNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn speech_dir() -> PathBuf {
     // 与 daemon 同一套约定：xime.db 所在目录就是配置根。

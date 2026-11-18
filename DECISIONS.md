@@ -572,3 +572,28 @@ UI，数据与动作靠宿主注入 7 个 `fn` 回调。XimeChe 的 `crates/xime
 
 **代价**：rpm / Arch 包暂时仍不含语音守护进程（README 已注明），要补得在各自
 容器里装 CUDA/alsa 开发依赖并同样构建 speechd。
+
+## 2026-11-18: CI 常态验证 CUDA + 一条命令本地出包
+
+**问题**：CUDA 后端只在 release 里用，代码在 libximecore——libximecore 的
+feature 改名、candle 升级、kernel 编译方式变化，都要等到打 tag 才发现。而且
+用户自己想把包装出来时，只有「打 tag」和「照着 README 手动敲一堆命令」两条路。
+
+**做法**：
+
+1. `.github/workflows/ci.yml` 新增 `cuda-speech` job，每次 push/PR 用和 release
+   **相同**的工具链（CUDA 12.4 + gcc-12）编一遍 `xime-speechd --features cuda`。
+   校验两条：`ldd` 里有 `libcudart`；`cuobjdump -lelf` 里能数出 `sm_80` cubin。
+   之所以要第二条——链接成功不等于 kernel 编进去了，只有 cubin 是实据。
+   （canary 必须和 release 走同一条路，否则它验的是另一个东西。）
+2. `packaging/build-deb.sh`：本地一条命令出 CPU/CUDA 两个 deb，步骤与 CI 对齐，
+   含解包自检（后端 + cubin 架构）。产物统一落到 `<target>/deb-out/`，因为两个
+   变体共用 `target/debian` 下的文件名，不先挪走会被下一次 `rm -rf` 删掉。
+
+**实现坑**：
+- target 目录不能写死 `$REPO/target`：全局 `~/.cargo/config.toml` 设了
+  `build.target-dir`，本仓库和 libximecore 会共用一个 target，连
+  `install` 都会因为「源和目标为同一文件」失败，脚本里要比较 realpath 再拷。
+- `/usr/local/cuda` 在本机指向 13.5，而 cudarc 0.19 白名单只到 13.4 → 脚本改为
+  枚举所有 `/usr/local/cuda-*`、只保留白名单内的版本、取最高（这里选到 13.4）。
+- 拿包的三条路已写进 README：打 tag / Actions 手动跑（Artifacts）/ 本地脚本。

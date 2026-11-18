@@ -148,11 +148,21 @@ cargo build --release
 ### 构建 Debian 包
 
 ```bash
+./packaging/build-deb.sh          # CPU + CUDA 两个包，自动处理 CUDA toolkit 与架构
+./packaging/build-deb.sh cpu      # 只要 CPU 版
+```
+
+等价的展开步骤（自己控制每一步时用）：
+
+```bash
 # 先把语音守护进程编好放进 target/release（见 packaging/README.md）
 cargo install cargo-deb
 cargo deb -p xime                 # → target/debian/xime_<ver>_amd64.deb
 cargo deb -p xime --variant cuda  # → target/debian/xime-cuda_<ver>_amd64.deb
 ```
+
+不想本地编的话，在 Actions 里手动跑一次 Release workflow（不用打 tag），
+跑完从那次运行的 Artifacts 里下 `xime-deb-cpu` / `xime-deb-cuda`。
 
 ## 运行
 
