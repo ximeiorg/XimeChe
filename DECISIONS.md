@@ -406,3 +406,169 @@ custom_phrase.txt 无损；方案词表 91397 条 40ms；libximecore 4 组部署
 
 **理由**：包管理器用户不该被迫自己装 Rust 工具链；而输入法要接入的是 KWin 的
 输入法通道，深到任何沙箱格式都覆盖不了。
+
+## 2026-11-18: 语音输入：独立 speechd 进程 + 按住说话（PTT）
+
+**背景**：`136418a` 因 sherpa-onnx 构建依赖联网下载而屏蔽了语音。libximecore
+现在用 candle 重做（Qwen3-ASR），并把引擎放进独立进程 `xime-speechd`。
+
+**决策**：
+1. 输入法进程只链 `xime-speech-service` 的**客户端半**（`default-features = false`），
+   不把 candle/cpal 链进来。原因是三条硬约束：1.9GB 权重常驻等于永不还内存；
+   推理崩溃不能连累打字；麦克风授权必须落在真正录音的进程上。
+2. 热键做成 **PTT**：按住 Ctrl+Alt+V 说话、松开立即上屏。只在 IM 激活（键盘
+   grab）时可达——Wayland 没有全局快捷键协议。未激活时的入口是托盘菜单与
+   DBus `ToggleSpeech`（toggle 语义），桌面快捷键绑 DBus 方法即可。
+3. 松开 V、左 Ctrl、右 Ctrl、左 Alt、右 Alt 中任一都收尾：用户松修饰键的顺序
+   不固定，只认 V 会漏掉「先松 Ctrl」那条路径。
+4. 听写期间键盘为模态（吞所有键），Esc = 取消（停止但不上屏）。失焦/停用 IM
+   走 `cancel()` 而不是 `release()`：没有 text-input 上下文时 commit 无处落，
+   迟到的识别结果会串到下一个焦点窗口。
+5. 服务由 daemon **按需拉起**（同目录 → PATH 找 `xime-speechd`），不装 systemd
+   unit：模型在服务侧空闲 300 秒自动卸载，进程本身只占几 MB，常驻不心疼；
+   按需拉起还避免了「用户没配模型却常驻一个大进程」。
+
+**代价（必须知道）**：
+- ~~服务是**非流式**的：单次录音上限 30 秒，没有中间文本，停止后整段识别。~~
+  已由下一条「语音输入改为流式」取代。
+- 设置页语音页（`voice-page`）尚未打开，模型只能手工放到
+  `~/.config/xime/models/<id>/`（`config.json` + 权重 + `vocab.json`/`merges.txt`）。
+
+## 2026-11-18: 语音输入改为流式（逐秒编码 + 滚动重解码 + 稳定前缀定稿）
+
+**背景**：上一条的 PTT 是「说完才出字」。用户要求流式——边说边出字。
+
+**决策**：
+1. **不换模型**。Qwen3-ASR 没有 chunk 级增量解码，但它的音频塔是 1 秒一个
+   chunk、chunk 之间独立做卷积与位置编码（官方语义，不是实现取巧），所以
+   「逐秒编码再拼接」与「整段一次编码」等价。流式只重跑解码器，编码按秒增量付。
+2. **定稿用 LocalAgreement-2**：连续两轮结果一致的公共前缀才落盘。落定的字
+   永不回改——这是「能直接 commit_string 而不是只敢画在悬浮层里」的前提。
+3. **已定稿文本注入 prompt 的 system 段**（Qwen3-ASR 官方的上下文偏置位）。
+   模型在窗口接缝处本来会把上一句尾巴重吐一遍，靠它压下去。
+4. **窗口到顶后等句读再切**（最多 +2 秒）。硬切会切断词：实测出现过
+   「打开轿车自动气」少了「阀」。
+5. **参数按后端分档**（`StreamTuning::gpu/cpu`）。实测 8 秒窗口重解码：GPU
+   336ms、CPU 4050ms；CPU 追不上说话速度，所以它只能用 2 秒窗口退化成句级。
+   宁可退化也不要积压——积压的流式比非流式更糟。
+6. **松手不整段重跑**。流式已出字时只补最后不到一秒的尾巴；整段重识别会把
+   已经落在输入框里的字改掉，用户会看到文本突然改写。
+7. **取消（Esc）语义**：已定稿并上屏的部分保留，未定稿的预览丢弃。
+
+**代价**：
+- CPU 后端只能句级（每两秒一段），要逐字必须有 GPU 或换流式模型。
+- 每轮重解码都有一次完整的 prefill，模型越大越吃算力；窗口不能超过音频塔的
+  13 秒注意力范围。
+
+## 2026-11-18: 设置页语音页 = 宿主注入回调，直连 speechd 的 socket
+
+**决策**：`xime-setup-lib` 的语音页不引任何 IPC 依赖（它要跨平台），页面只画
+UI，数据与动作靠宿主注入 7 个 `fn` 回调。XimeChe 的 `crates/xime-setup/src/main.rs`
+注入的实现全部走 `~/.config/xime/speech.sock`——与候选栏 🎙️、daemon 是同一条
+协议、同一个引擎实例。
+
+1. **页面是编译期门控**：`xime-setup/Cargo.toml` 里不开 `voice-page`，侧栏连
+   条目都没有（不是运行期隐藏）。这次才把它打开——之前「没有语音页」就是
+   没编进去。
+2. **连不上就拉起一次**：设置进程打开语音页时若 speechd 没在跑，按「同目录 →
+   PATH」拉起来（异步，本次轮询返回 None，下一轮接上）。用户不必先去输入框
+   激活 daemon 才能管理模型。
+3. **「下载」如实降级**：协议没有 download op（speechd 只扫本地模型目录）。
+   回调返回带原因的 status，页面显示「请用导入模型…」，而不是假冒"服务未运行"。
+4. **不把推理编进设置程序**：`xime-speech-service` 以 `default-features = false`
+   引入，cpal/candle 不进二进制（设置程序里没有一行推理代码）。
+
+**代价**：
+- 每次回调都是新建连接（250ms 轮询 = 每秒 4 次 connect）。服务端每连接一个
+  线程，成本可忽略；换来的是设置端不必维护长连接与重连状态机。
+- `speech.toml` 的 `language` / `commit` 页面能写但**当前没人读**：speechd 没有
+  语种 op，daemon 也没读这份配置。接这两个得先在协议上加参数。
+
+## 2026-11-18: 语音 PTT 键从 Ctrl+Alt+V 换成单键右 Ctrl
+
+**决策**：主路径改成**按住右 Ctrl** 说话（`Ctrl+Alt+V` 保留为备选）。三键组合
+在真实键盘上很难按稳——漏一个键就完全没反应，用户第一反应是"快捷键坏了"。
+
+1. **只认右 Ctrl**（`Control_R`, 0xFFE4）：左 Ctrl 的 Ctrl+C/V/A/Z 密度太高，
+   拿它当听写键会把日常编辑变成误触发。
+2. **250ms 阈值 + 组合撤销**：按下只挂 `ptt_arm`，期间出现任何别的键或鼠标
+   点击就撤销（那是 Ctrl+点击/组合键）；撑过 `PTT_HOLD_DELAY` 才 `press()`。
+   判定放在主循环节拍里——修饰键不会 repeat，等不到第二个事件。
+3. **修饰键不消费**：右 Ctrl 的按下/抬起照常转发给应用（否则会留下"粘住的
+   Ctrl"，之后每个键都变成组合）。为此右 Ctrl 的释放分支单独提前 return，
+   不能落到"听写中按键全吞"的模态分支（`release()` 后状态是 Transcribing，
+   仍然 != Idle，会被吞）。
+4. **听写中按别的键 = 取消并转发**：单键 PTT 期间用户很可能想 Ctrl+C，吞掉
+   比打断听写更糟。
+5. 起播时顺手 `hide_root_window()`：按住 Ctrl 会弹字根窗（既有特性），听写
+   期间它只是挡画面。
+
+**代价**：按住右 Ctrl 超过 250ms 的"Ctrl+长按"操作（几乎不存在）会误起播；
+某些把右 Ctrl 映射成 Compose 的布局用不了，只能退回 `Ctrl+Alt+V` 或托盘。
+
+## 2026-11-18: 长听写断流（说着说着不再上屏）
+
+**症状**：按住右 Ctrl 说一段时间后，面板还在、波形还在动，但一个字都不再
+上屏；松手也只补上最后一句话。用户无法判断「没在录」还是「没在识别」。
+
+**根因（两处叠加，都在 libximecore 的 speech-service）**：
+
+1. **录音缓冲满后静默丢弃新音频**（主因）。`capture.rs` 的音频回调里
+   `if buffer.len() >= cap { return; }` —— 缓冲一旦攒满就直接返回，不但不
+   收新样本，连 `raw_len` 也不再更新。流式 worker 靠 `read_since(cursor)`
+   取增量，于是永远读到空、停在最后一句话上；而电平在 `return` 之前已经
+   更新，所以波形照常跳动。`cap` 还算错了：用 `16000 × 30 × (rate/16000)`
+   反推设备采样率，44.1 kHz 实际只有 21.7 秒、48 kHz 只有 30 秒。
+2. **解码 prompt 里的上文无限增长**。已定稿全文整段塞进 Qwen3-ASR 的
+   system 段，听写越久 prompt 越长：每轮解码从几百毫秒涨到几秒（越说越
+   卡），最终超出上下文预算直接解码失败——而错误只写进 session.error，
+   `publish` 不带出来，客户端完全看不见。
+
+**修法**：
+- `capture` 改成滚动缓冲 + 绝对索引（`base` + `raw_len`）：缓冲满了滚掉
+  **最旧**的一半，绝不丢新样本；新增 `CaptureTap::trim_before`，流式 worker
+  每轮把已取走的样本裁掉，缓冲恒定在 `KEEP_SECS = 45` 秒。游标是绝对下标，
+  裁剪不会让它错位。
+- 流式 prompt 的上文只取尾部 `CONTEXT_CHARS = 160` 字（`context_tail`）。
+- `publish` 把 `session.error()` 写进 `Status.error`；daemon 存到
+  `speech::Progress`，面板状态行有值就显示「识别异常：…」，正常时显示
+  「正在听写 · 已上屏 N 字」——波形动 = 麦克风有输入，字数涨 = 识别在推进，
+  两者分开看，才答得上「到底卡在哪一步」。
+
+**注意**：`dev-install.sh` 检测到 `xime-speechd` 已安装就跳过构建，改语音
+引擎相关代码必须 `XIME_SPEECH_REBUILD=1`，否则二进制还是旧的。
+
+## 2026-11-18: deb 分成 CPU / CUDA 两个变体
+
+**决策**：Release 里出两个 deb —— `xime_<ver>_amd64.deb`（CPU 语音）与
+`xime-cuda_<ver>_amd64.deb`（CUDA 语音）。两者文件清单相同，只差
+`xime-speechd` 的后端，因此声明 `Conflicts/Replaces: xime`，apt 会提示替换。
+
+用 cargo-deb 的 **variants** 实现，而不是两个 Cargo 包：
+`[package.metadata.deb.variants.cuda]` 只覆盖 depends/description/conflicts，
+`assets` 从主机段继承（包名自动变成 `xime-cuda`）。CI 在打哪个变体之前就把
+对应后端的 `xime-speechd` 放到 `target/release/`，同一个文件清单即可复用。
+
+**为什么不用「主包 + 语音附加包」**：那需要 update-alternatives 或让 daemon
+去 `/usr/lib/xime/` 找二进制，卸载附加包还得恢复 CPU 版；两个完整包最简单，
+用户二选一，语义和商业软件的做法一致。
+
+**CI 要点（`.github/workflows/release.yml` 的 deb job）**：
+1. speechd 不在本仓库：CI 显式 `git clone --depth 1 libximecore` 并 patch 到
+   本地路径（只 patch 语音/配置相关 crate，**librime 不 patch**，否则要连带
+   构建 librime 子模块），然后 `--manifest-path ../libximecore/Cargo.toml`
+   单独构建 speechd。
+2. CUDA 用 12.4.1：cudarc 0.19 的版本白名单是 12.x–13.4，且 soname 是
+   `libcudart.so.12`，覆盖所有 CUDA 12.x 运行时。toolkit 用 Jimver action 装。
+3. `CUDA_COMPUTE_CAP=80` 必须钉住：编 CUDA 本身不需要 GPU（nvcc 只是交叉
+   编译，cudarc 的 build.rs 仅执行 `nvcc --version`），但 runner 上没有
+   nvidia-smi，cudaforge 的 `detect_compute_cap()` 会返回 Err 让构建失败——
+   它不会回落到某个默认架构，所以这里必须显式给值。
+   cubin 在同一 major 内向上兼容，所以 30/40 系（sm_86/89）能跑，Hopper 及以上
+   需要自行重编。Ubuntu 24.04 的 gcc 13.3 超出 CUDA 12.4 的支持范围，装
+   gcc-12 并设 `NVCC_CCBIN`。
+4. 打包后**用 ldd 断言变体**（CUDA 版必须链到 libcudart，CPU 版必须没有），
+   防止两个包复制同一份二进制。
+
+**代价**：rpm / Arch 包暂时仍不含语音守护进程（README 已注明），要补得在各自
+容器里装 CUDA/alsa 开发依赖并同样构建 speechd。

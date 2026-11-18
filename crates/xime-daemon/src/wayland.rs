@@ -166,6 +166,50 @@ fn repeat_delay(delay: i32) -> Duration {
     Duration::from_millis(delay.clamp(1, 5000) as u64)
 }
 
+/// 单键语音键：**右 Ctrl**（`Control_R`）。
+///
+/// 三键组合（Ctrl+Alt+V）在真实键盘上很难按稳——中间漏掉一个键就完全没反应，
+/// 而且和浏览器/终端里的组合键抢注意力。商业输入法普遍用「按住单个修饰键」
+/// 做 PTT，手感更接近对讲机。
+///
+/// 只认右 Ctrl：左 Ctrl 的组合键密度高得多（Ctrl+C/V/A/Z…），误触发代价大。
+const KEYSYM_CONTROL_R: u32 = 0xFFE4;
+
+/// 右 Ctrl 要「独自按住」多久才算听写请求。
+///
+/// 按下立刻开录会让每次 Ctrl+C 都闪一下面板并录进半个音节，所以先挂起
+/// [`VoiceUiState::ptt_arm`]，期间出现别的按键就撤销（那是组合键）；撑过
+/// 这个阈值才真正开录。250ms 低于人的「按住」直觉，又高于普通按键的
+/// 组合时间窗。
+const PTT_HOLD_DELAY: Duration = Duration::from_millis(250);
+
+fn is_ptt_key(sym_raw: u32) -> bool {
+    sym_raw == KEYSYM_CONTROL_R
+}
+
+/// 语音输入热键（备选）：**按住** Ctrl+Alt+V 说话、松开上屏。
+///
+/// 硬编码绑定——悬浮层状态行文案 `VOICE_HOTKEY_LABEL` 与此同源。只在 IM
+/// 激活（键盘 grab）期间可达：Wayland 没有全局快捷键协议，未激活时由托盘
+/// 菜单与 DBus `ToggleSpeech`（桌面自定义快捷键）覆盖。
+///
+/// 单键 PTT（右 Ctrl）是主路径，这条组合键保留给习惯老键位的人。
+fn is_voice_toggle_hotkey(sym_raw: u32, modifiers: &ModifierState) -> bool {
+    modifiers.ctrl
+        && modifiers.alt
+        && !modifiers.super_key
+        && keysym_to_letter(sym_raw).is_some_and(|l| l == 'v')
+}
+
+/// 松开这些键中的任意一个都结束听写：V 本身、以及左右 Ctrl/Alt。
+///
+/// 只认 V 的释放是不够的——用户常先松修饰键再松字母键，而修饰键先抬起时
+/// 字符键的释放仍会到达，但更常见的是反过来：先松 V。两个方向都要收尾。
+fn is_voice_release_key(sym_raw: u32) -> bool {
+    matches!(sym_raw, 0xFFE3 | 0xFFE4 | 0xFFE9 | 0xFFEA)
+        || keysym_to_letter(sym_raw).is_some_and(|l| l == 'v')
+}
+
 /// 根据真实按键事件维护重复状态。
 ///
 /// - 释放：只清同一键的重复（按住 Right 时松开 Shift 不应停止光标移动）；
@@ -245,12 +289,18 @@ const VOICE_FRAME_INTERVAL: Duration = Duration::from_millis(33);
 /// levels_snapshot() 取，这里只存绘制所需的文本/相位与重绘节拍）。
 #[derive(Default)]
 struct VoiceUiState {
-    /// 悬浮层是否在屏（v1 后端才可能为 true；v2 回落候选栏反馈）。
+    /// 悬浮面板是否在屏（v1 输入面板 / v2 layer shell 都可以）。
     visible: bool,
-    /// 模型装载中（状态行提示装载，频谱静止）。
-    loading: bool,
-    /// 当前 partial 文本（Partial 事件写入，重绘时读取）。
+    /// 面板阶段（装载 / 听写 / 识别 / 提示），决定状态行文案与频谱是否动。
+    phase: xime_ui::voice::VoicePhase,
+    /// 当前 partial 文本，或 Notice 阶段的一行提示。
     text: String,
+    /// 本次听写是否由「按住右 Ctrl / Ctrl+Alt+V」触发（松手时要收尾）。
+    ptt_held: bool,
+    /// 右 Ctrl 已按下、还在等 [`PTT_HOLD_DELAY`] 的挂起态（组合键会撤销它）。
+    ptt_arm: Option<Instant>,
+    /// 本次听写开始时刻（面板上显示已说时长；`None` = 不计时）。
+    started_at: Option<Instant>,
     /// 上次悬浮层重绘时刻（节流用）。
     last_frame: Option<Instant>,
 }
@@ -470,7 +520,7 @@ impl WaylandLoop {
         // 输入法槽位冲突的提示节流（见主循环的 slot_unavailable 分支）。
         let mut slot_conflict_since: Option<Instant> = None;
         let mut slot_conflict_reported: Option<Instant> = None;
-        // 语音悬浮层状态（v1 后端支持时替代候选栏反馈）。
+        // 语音悬浮层状态（v1 输入面板 / v2 layer shell 都支持）。
         let mut voice = VoiceUiState::default();
 
         // 剪贴板同步桥初始化：按 clipboard_sync.toml 选择后端（插件/P2P）并拉取一次
@@ -637,6 +687,22 @@ impl WaylandLoop {
                     // 候选栏可见时标记重绘（渲染需在 conn 作用域内进行）
                     pending_theme_redraw = true;
                 }
+                Ok(DaemonCommand::ToggleSpeech) => {
+                    // 托盘 / 桌面全局快捷键入口（toggle：按一下开始、再按一下
+                    // 结束）。未激活时没有 text-input 上下文，识别文本无处上屏，
+                    // 如实拒绝并提示——键盘路径在未激活时根本到不了我们，
+                    // 所以这条拒绝只会在「没有输入框却点了托盘」时出现。
+                    if !last_active {
+                        info!("Voice toggle requested while IM inactive, rejected");
+                        let handle = self.rt_handle.clone();
+                        handle.spawn(async move {
+                            notify_desktop("语音输入", "请先点击要输入的输入框，再开始语音输入")
+                                .await;
+                        });
+                    } else {
+                        crate::speech::toggle();
+                    }
+                }
                 Ok(DaemonCommand::ReloadPlugins) => {
                     debug!("ReloadPlugins command received, reloading plugins...");
                     plugin_host.reload();
@@ -800,6 +866,11 @@ impl WaylandLoop {
                         c.hide_voice_overlay();
                         voice.visible = false;
                         voice.text.clear();
+                        // 失焦时键盘 grab 一并没了：右 Ctrl 的抬起再也收不到，
+                        // 挂起/按住状态必须就地清掉，否则回到可输入窗口时
+                        // 会残留一个「正在听」的假象。
+                        voice.ptt_arm = None;
+                        voice.ptt_held = false;
                         let _ = c.flush();
                         candidate_window_visible = false;
                         quick_send.clear();
@@ -819,7 +890,7 @@ impl WaylandLoop {
                         // 不允许迟到投递到下一个焦点窗口（A 窗说的话上屏到
                         // B 窗是错乱行为）；重新激活时再兜底清一次。
                         if crate::speech::state() != crate::speech::SpeechState::Idle {
-                            crate::speech::toggle();
+                            crate::speech::cancel();
                         }
                         crate::speech::clear_events();
                         continue;
@@ -911,6 +982,9 @@ impl WaylandLoop {
                 "Pointer press: x={}, y={}, on_menu={}",
                 pe.x, pe.y, pe.on_menu
             );
+            // 按住右 Ctrl 再点鼠标 = Ctrl+点击（多选、新标签打开…），不是听写：
+            // 撤销挂起的 PTT。已开录的会话不动（用 Esc 或点面板取消）。
+            voice.ptt_arm = None;
             self.handle_pointer_press(
                 c,
                 plugin_host,
@@ -1010,6 +1084,24 @@ impl WaylandLoop {
                     repeat_delay_ms,
                     now,
                 );
+            }
+        }
+
+        // 单键 PTT 的「按够久了」判定。放在这里而不是按键分支里：按住修饰
+        // 键不会再产生事件（xkb 不对修饰键做 repeat），只能靠主循环节拍
+        // （约 1ms 一轮）到点触发。
+        if let Some(armed) = voice.ptt_arm {
+            if now.duration_since(armed) >= PTT_HOLD_DELAY {
+                voice.ptt_arm = None;
+                if crate::speech::state() == crate::speech::SpeechState::Idle {
+                    debug!("Voice PTT start (right Ctrl held)");
+                    // 按住 Ctrl 会顺带弹出字根窗（有候选时的既有特性），听写
+                    // 期间它只是挡画面，一并收掉。
+                    c.hide_root_window();
+                    *ctrl_root_visible = false;
+                    crate::speech::press();
+                    voice.ptt_held = true;
+                }
             }
         }
 
@@ -1116,6 +1208,8 @@ impl WaylandLoop {
                 c.hide_voice_overlay();
                 voice.visible = false;
                 voice.text.clear();
+                voice.ptt_arm = None;
+                voice.ptt_held = false;
                 let _ = c.flush();
                 *candidate_window_visible = false;
                 quick_send.clear();
@@ -1126,7 +1220,7 @@ impl WaylandLoop {
                 // 听写中停用 IM：会话一并停止（直通模式下 commit 无处落），
                 // 滞留事件清空（同 deactivate 路径的理由）。
                 if crate::speech::state() != crate::speech::SpeechState::Idle {
-                    crate::speech::toggle();
+                    crate::speech::cancel();
                 }
                 crate::speech::clear_events();
                 // 停用即视同失焦：候选缓存一并清（同 deactivate 路径的理由）。
@@ -1146,6 +1240,84 @@ impl WaylandLoop {
         if !*im_enabled {
             if event.pressed || !consumed_presses.contains(&event.key) {
                 c.forward_key(event.serial, event.time, event.key, event.forward_state());
+            } else {
+                consumed_presses.remove(&event.key);
+            }
+            return;
+        }
+
+        // 语音输入（主路径）：**按住右 Ctrl** 说话、松开上屏。
+        //
+        // 按下不当场开录，先挂 `ptt_arm`：期间来了别的键就是 Ctrl+C 之类的
+        // 组合，撤销挂起、按键照常走；撑过 PTT_HOLD_DELAY 才真正开录（判定
+        // 在 handle_active_state 的节拍里，见那里的注释）。修饰键本身**不
+        // 消费**——应用必须收到 Ctrl 的按下/抬起，否则会留下"粘住的 Ctrl"。
+        if event.pressed && is_ptt_key(sym.raw()) {
+            if !modifiers.alt && !modifiers.shift && !modifiers.super_key {
+                voice.ptt_arm = Some(Instant::now());
+                debug!("Voice PTT armed (right Ctrl down)");
+            }
+        } else if event.pressed {
+            // 任何别的按键都表示「这是组合，不是听写」。
+            voice.ptt_arm = None;
+        }
+
+        // 语音输入（备选）：Ctrl+Alt+V。
+        //
+        // 只在 IM 激活（键盘 grab）时可达：Wayland 没有全局快捷键，未激活
+        // 时由托盘菜单与 DBus `ToggleSpeech`（桌面自定义快捷键）覆盖。
+        // 按下只发 Start、不做 toggle：按住期间 auto-repeat 会连发按下，
+        // worker 侧对「已在听」是幂等的；否则第二次重复就会把它停掉。
+        if event.pressed && is_voice_toggle_hotkey(sym.raw(), &modifiers) {
+            debug!("Voice PTT start (Ctrl+Alt+V)");
+            voice.ptt_arm = None;
+            crate::speech::press();
+            voice.ptt_held = true;
+            consumed_presses.insert(event.key);
+            return;
+        }
+        if !event.pressed && is_ptt_key(sym.raw()) {
+            // 右 Ctrl 抬起：结束听写（如果在听），然后**无论如何**把这次释放
+            // 交给应用——它的按下是转发过的，吞掉会留下「粘住的 Ctrl」。
+            // 提前 return 也避免落到下面的模态分支被当成听写中的按键吞掉
+            // （release() 之后状态是 Transcribing，仍然 != Idle）。
+            voice.ptt_arm = None;
+            if voice.ptt_held {
+                debug!("Voice PTT stop (right Ctrl up)");
+                crate::speech::release();
+                voice.ptt_held = false;
+            }
+            consumed_presses.remove(&event.key);
+            c.forward_key(event.serial, event.time, event.key, event.forward_state());
+            return;
+        }
+        if !event.pressed && voice.ptt_held && is_voice_release_key(sym.raw()) {
+            debug!("Voice PTT stop (release)");
+            crate::speech::release();
+            voice.ptt_held = false;
+            consumed_presses.remove(&event.key);
+            return;
+        }
+
+        // 听写中键盘为模态：所有按键吞掉（含 auto-repeat），避免组合/面板与
+        // 语音上屏交织；Esc = 取消（停止录音但不上屏，区别于松手上屏）。
+        // 松手路径在上一段，必须放在它之后——否则 release 会被这里吞掉。
+        if crate::speech::state() != crate::speech::SpeechState::Idle {
+            if event.pressed {
+                if sym.raw() == 0xFF1B {
+                    debug!("Escape during dictation, cancelling speech");
+                    crate::speech::cancel();
+                    voice.ptt_held = false;
+                } else if voice.ptt_held {
+                    // 单键 PTT 期间按了别的键：几乎一定是 Ctrl+C 这类组合，
+                    // 立刻放弃听写（不上屏），并把这一键交给应用。
+                    debug!("Voice PTT cancelled by keysym={}", sym.raw());
+                    crate::speech::cancel();
+                    voice.ptt_held = false;
+                    c.forward_key(event.serial, event.time, event.key, event.forward_state());
+                    return;
+                }
+                consumed_presses.insert(event.key);
             } else {
                 consumed_presses.remove(&event.key);
             }
@@ -1712,8 +1884,9 @@ impl WaylandLoop {
                         }
                         *candidate_window_visible = false;
                         voice.visible = true;
-                        voice.loading = true;
+                        voice.phase = xime_ui::voice::VoicePhase::Loading;
                         voice.text.clear();
+                        voice.started_at = None;
                         self.redraw_voice_overlay(c, voice, theme);
                         return;
                     }
@@ -1728,11 +1901,35 @@ impl WaylandLoop {
                 }
                 SpeechState::Listening => {
                     if overlay {
-                        voice.loading = false;
+                        // 模型已装载时会话直接从 Idle → Listening（没有 Loading
+                        // 那一帧），visible 必须在这里也置起来，否则 30fps
+                        // 节拍不跑，面板只会画一帧就冻住。
+                        voice.visible = true;
+                        voice.phase = xime_ui::voice::VoicePhase::Listening;
+                        // 计时从真正开始听写算起（装载阶段不计）。
+                        voice.started_at.get_or_insert_with(Instant::now);
                         self.redraw_voice_overlay(c, voice, theme);
                         return;
                     }
                     // partial 事件随后就到，这里只标记可见。
+                    *candidate_window_visible = true;
+                }
+                SpeechState::Transcribing => {
+                    // 录音已停，等整段识别结果（首次会现场装载模型，可能十几秒）。
+                    // 新服务非流式，这段时间没有中间文本，只给一句状态。
+                    if overlay {
+                        // 保留最后一段 partial 当"刚说完的内容"，状态行给「正在识别…」。
+                        voice.phase = xime_ui::voice::VoicePhase::Transcribing;
+                        self.redraw_voice_overlay(c, voice, theme);
+                        return;
+                    }
+                    let candidates = vec![xime_ui::CandidateItem {
+                        text: "🎙️ 正在识别…".to_string(),
+                        comment: String::new(),
+                        index: 0,
+                    }];
+                    let _ = c.show_candidate_window(&candidates, 0, theme);
+                    let _ = c.flush();
                     *candidate_window_visible = true;
                 }
                 SpeechState::Idle => {
@@ -1740,8 +1937,9 @@ impl WaylandLoop {
                     if overlay {
                         c.hide_voice_overlay();
                         voice.visible = false;
-                        voice.loading = false;
+                        voice.phase = xime_ui::voice::VoicePhase::Listening;
                         voice.text.clear();
+                        voice.started_at = None;
                     }
                     self.redraw_menu_candidates(c, theme, candidate_window_visible);
                 }
@@ -1752,6 +1950,7 @@ impl WaylandLoop {
                     c.hide_voice_overlay();
                     voice.visible = false;
                     voice.text.clear();
+                    voice.started_at = None;
                 }
                 let handle = self.rt_handle.clone();
                 handle.spawn(async move {
@@ -1770,10 +1969,18 @@ impl WaylandLoop {
         voice: &mut VoiceUiState,
         theme: &PanelTheme,
     ) {
+        let elapsed = voice
+            .started_at
+            .map(|start| start.elapsed())
+            .unwrap_or_default();
+        let progress = crate::speech::progress();
         let view = xime_ui::voice::VoiceView {
-            loading: voice.loading,
+            phase: voice.phase,
             levels: crate::speech::levels_snapshot(),
             text: voice.text.clone(),
+            elapsed,
+            committed_chars: progress.committed_chars,
+            warning: progress.warning.clone(),
         };
         if let Err(e) = c.show_voice_overlay(&view, theme) {
             debug!("Voice overlay show error: {e}");
@@ -1806,7 +2013,7 @@ impl WaylandLoop {
         // 忽略（toggle 在 Idle 是"开始"，不能被幽灵点击触发）。
         if pe.on_voice {
             if crate::speech::state() != crate::speech::SpeechState::Idle {
-                crate::speech::toggle();
+                crate::speech::release();
             }
             return;
         }
@@ -1819,7 +2026,7 @@ impl WaylandLoop {
         if pe.y < bar as i32 {
             if xime_ui::menu_button_hit(pe.x, pe.y, width, bar) {
                 if crate::speech::state() == crate::speech::SpeechState::Listening {
-                    crate::speech::toggle();
+                    crate::speech::release();
                     return;
                 }
                 match panel_state {
@@ -2499,6 +2706,45 @@ mod tests {
         ] {
             assert!(is_system_shortcut(&m));
         }
+    }
+
+    #[test]
+    fn test_is_ptt_key_only_right_ctrl() {
+        // 只有右 Ctrl 能当 PTT：左 Ctrl 的 Ctrl+C / Ctrl+V 太常用，
+        // 让它参与「按住说话」会不断误触发。
+        assert!(is_ptt_key(0xFFE4));
+        assert!(!is_ptt_key(0xFFE3)); // Control_L
+        assert!(!is_ptt_key(0xFFE9)); // Alt_L
+        assert!(!is_ptt_key(0xFFEB)); // Super_L
+        assert!(!is_ptt_key('v' as u32));
+    }
+
+    #[test]
+    fn test_voice_combo_still_matches() {
+        // 备选组合 Ctrl+Alt+V 保留：右 Ctrl 是主路径，但这套判断不能坏。
+        let combo = ModifierState {
+            ctrl: true,
+            alt: true,
+            ..ModifierState::default()
+        };
+        assert!(is_voice_toggle_hotkey('v' as u32, &combo));
+        assert!(is_voice_toggle_hotkey('V' as u32, &combo));
+        assert!(!is_voice_toggle_hotkey(
+            'v' as u32,
+            &ModifierState {
+                ctrl: true,
+                ..ModifierState::default()
+            }
+        ));
+        assert!(!is_voice_toggle_hotkey(
+            'V' as u32,
+            &ModifierState {
+                ctrl: true,
+                alt: true,
+                super_key: true,
+                ..ModifierState::default()
+            }
+        ));
     }
 
     fn qs_entries() -> Vec<(String, String)> {

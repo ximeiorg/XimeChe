@@ -60,10 +60,29 @@ jobs:
           path: xime-*.tar.gz
           if-no-files-found: error
 
-  # Debian / Ubuntu / Mint 等：.deb + 便携 tarball
+  # Debian / Ubuntu / Mint 等：.deb + 便携 tarball。
+  #
+  # 出两个变体（cargo-deb 的 variants）：
+  #   xime_<ver>_amd64.deb      纯 CPU 版语音引擎，任何机器都能跑；
+  #   xime-cuda_<ver>_amd64.deb CUDA 版语音引擎，识别延迟低一个量级。
+  # 两者文件清单相同、只差 xime-speechd 的后端，所以声明冲突（apt 会提示替换）。
+  #
+  # 语音引擎 xime-speechd 不在本仓库，来自 libximecore：这里显式 clone 一份
+  # 并在它里面单独构建（candle + cpal，编得比输入法本身慢得多）。
   deb:
     needs: source
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: cpu
+            deb_args: ""
+            speech_features: ""
+          - variant: cuda
+            deb_args: "--variant cuda"
+            speech_features: "--features cuda"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -81,11 +100,48 @@ jobs:
             libxkbcommon-x11-dev \
             libfontconfig1-dev \
             libfreetype6-dev \
+            libasound2-dev \
             pkg-config
+
+      # CUDA 12.4 是 cudarc 0.19 白名单里的版本；用它编出来的二进制 soname 是
+      # libcudart.so.12，覆盖所有 CUDA 12.x 运行时。
+      # 编 CUDA 不需要 GPU，nvcc 是纯交叉编译。但 runner 上没有 nvidia-smi，
+      # cudaforge 探测不到架构会直接报错（不是回落默认值），所以必须显式钉。
+      # 同一 major 内 cubin 向上兼容，所以 sm_80 能跑 30/40 系（sm_86/89）。
+      - name: Install CUDA toolkit
+        if: matrix.variant == 'cuda'
+        uses: Jimver/cuda-toolkit@v0.2.19
+        with:
+          cuda: '12.4.1'
+          method: 'network'
+
+      - name: Pin a GCC that CUDA 12.4 accepts
+        if: matrix.variant == 'cuda'
+        run: |
+          sudo apt-get install -y gcc-12 g++-12
+          echo "NVCC_CCBIN=/usr/bin/g++-12" >> "$GITHUB_ENV"
+          echo "CUDA_COMPUTE_CAP=80" >> "$GITHUB_ENV"
 
       # 说明：Cargo.lock 里 libximecore 相关 crate 被本地 .cargo/config.toml
       # patch 成路径依赖（无 git 条目），CI 上没有该 patch，cargo 会从 GitHub
       # 解析 libximecore@main 并自行补全锁文件——这就是发版构建的实际依赖来源。
+      # 这里把需要的那几个 crate 也 patch 到刚 clone 的副本上，保证输入法与
+      # 语音引擎编自同一份代码（librime 不在这场 patch 里：它仍走 git 依赖，
+      # 否则要连带构建 librime 子模块）。
+      - name: Checkout libximecore
+        run: git clone --depth 1 https://github.com/ximeiorg/libximecore.git ../libximecore
+
+      - name: Point cargo at the cloned libximecore
+        run: |
+          mkdir -p .cargo
+          cat > .cargo/config.toml <<'EOF'
+          [patch."https://github.com/ximeiorg/libximecore"]
+          xime-config = { path = "../libximecore/crates/xime-config" }
+          xime-setup-lib = { path = "../libximecore/crates/xime-setup" }
+          xime-plugin = { path = "../libximecore/crates/xime-plugin" }
+          xime-speech-service = { path = "../libximecore/crates/xime-speech-service" }
+          EOF
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
@@ -99,17 +155,65 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+            ../libximecore/target
+          key: ${{ runner.os }}-${{ matrix.variant }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
+            ${{ runner.os }}-${{ matrix.variant }}-cargo-release-
             ${{ runner.os }}-cargo-release-
 
       - name: Build release binaries
         run: cargo build --release
 
+      # 语音引擎单独构建：--manifest-path 指到 clone 出来的 libximecore，产物
+      # 落在它自己的 target 下，拷回本仓库的 target/release 后由 cargo-deb 收进包。
+      - name: Build speech daemon (${{ matrix.variant }})
+        run: |
+          cargo build --release \
+            --manifest-path ../libximecore/Cargo.toml \
+            -p xime-speechd ${{ matrix.speech_features }}
+          cp ../libximecore/target/release/xime-speechd target/release/xime-speechd
+
       - name: Build Debian package
-        run: cargo deb -p xime
+        # 先清空：cache 可能把上一次构建的 deb 一起恢复回来，后面 ls 会撞见两个包。
+        run: |
+          rm -rf target/debian
+          cargo deb -p xime --no-build ${{ matrix.deb_args }}
+
+      # 打包结果自查：两个变体只该差语音后端，别把 CPU 版误发成 CUDA 版。
+      - name: Inspect package
+        run: |
+          deb=$(ls target/debian/*.deb)
+          echo "== $deb"
+          dpkg-deb -f "$deb" Package Version Depends Conflicts
+          dpkg-deb -c "$deb" | grep -E 'usr/bin/xime-(daemon|speechd|launcher|setup)$'
+          dpkg-deb -c "$deb" | grep -q 'usr/bin/xime-speechd$' \
+            || { echo "::error::deb 里没有 xime-speechd"; exit 1; }
+          # 真凭实据地确认后端：ldd 认 libcudart 的才允许叫 cuda 变体。
+          # （CUDA 版在 runner 上可能显示 not found——库路径没进 ld.so 缓存，
+          #   但 soname 会照样打印出来，用来判定足够了。）
+          extract=$(mktemp -d)
+          dpkg-deb -x "$deb" "$extract"
+          if ldd "$extract/usr/bin/xime-speechd" | grep -q libcudart; then
+            echo "语音后端：cuda"
+            test "${{ matrix.variant }}" = "cuda" \
+              || { echo "::error::CPU 变体却链接了 CUDA"; exit 1; }
+            # ldd 只证明「声明了 libcudart 依赖」，证明不了 kernel 真被编进去——
+            # 工具链静默跳过 kernel 编译时，链接照样成功。cuobjdump 直接列出
+            # 二进制内嵌的 cubin，架构必须是 CUDA_COMPUTE_CAP 钉的那个。
+            cuobjdump=$(command -v cuobjdump || echo /usr/local/cuda/bin/cuobjdump)
+            "$cuobjdump" -lelf "$extract/usr/bin/xime-speechd" > /tmp/cubins.txt
+            cubins=$(grep -c '\.sm_80\.cubin' /tmp/cubins.txt || true)
+            echo "内嵌 sm_80 cubin：${cubins} 个（共 $(wc -l < /tmp/cubins.txt) 行）"
+            test "$cubins" -gt 0 \
+              || { echo "::error::CUDA 变体里没有 sm_80 cubin，kernel 没编进去"; exit 1; }
+          else
+            echo "语音后端：cpu"
+            test "${{ matrix.variant }}" = "cpu" \
+              || { echo "::error::CUDA 变体没有链接 CUDA"; exit 1; }
+          fi
 
       - name: Build portable tarball
+        if: matrix.variant == 'cpu'
         run: |
           VERSION="${{ needs.source.outputs.version }}"
           ./packaging/stage.sh "$PWD/target/stage" /usr
@@ -119,11 +223,12 @@ jobs:
       - name: Upload deb
         uses: actions/upload-artifact@v4
         with:
-          name: xime-deb
-          path: target/debian/xime_*_amd64.deb
+          name: xime-deb-${{ matrix.variant }}
+          path: target/debian/*.deb
           if-no-files-found: error
 
       - name: Upload portable tarball
+        if: matrix.variant == 'cpu'
         uses: actions/upload-artifact@v4
         with:
           name: xime-tarball

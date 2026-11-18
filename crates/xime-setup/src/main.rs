@@ -11,6 +11,15 @@ use xime_setup_lib::{
     set_notify_reload_plugins, set_notify_reload_style, set_notify_schema_entries,
     set_notify_select_schema, set_notify_sync_user_data,
 };
+// 语音输入页（voice-page）：页面只画 UI，引擎在独立的 xime-speechd 进程里，
+// 这里注入的回调就是「设置端 → speechd socket」这一跳。
+use xime_setup_lib::{
+    set_notify_speech_delete, set_notify_speech_download, set_notify_speech_import,
+    set_notify_speech_select, set_notify_speech_status, set_notify_speech_test_start,
+    set_notify_speech_test_stop, SpeechServerStatus,
+};
+use xime_speech_service::transport::Client;
+use xime_speech_service::{Request, Response};
 
 /// 调 daemon 的无参 DBus 方法并返回 JSON 应答文本。
 fn daemon_call_json0(method: &str) -> Option<String> {
@@ -114,6 +123,146 @@ fn op_json(op: &str, kvs: &[(&str, String)]) -> String {
     }
     s.push('}');
     s
+}
+
+// ---------------------------------------------------------------------------
+// 语音输入（voice-page）宿主回调
+//
+// 引擎跑在 `xime-speechd` 里（模型 1.9GB + 麦克风都归它），设置进程只通过
+// `~/.config/xime/speech.sock` 的 JSON-line 协议读写状态。候选栏 🎙️ 走的是
+// 同一个 socket —— 所以两边看到的是同一个引擎、同一个当前模型。
+// ---------------------------------------------------------------------------
+
+/// 设置端已尝试拉起过 speechd（失败不再重试，否则 250ms 轮询会反复 fork）。
+static SPEECH_SPAWNED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+fn speech_dir() -> PathBuf {
+    // 与 daemon 同一套约定：xime.db 所在目录就是配置根。
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/".to_string());
+    PathBuf::from(home).join(".config/xime")
+}
+
+fn speech_socket() -> PathBuf {
+    speech_dir().join("speech.sock")
+}
+
+/// `xime-speechd` 与设置程序同目录安装（`~/.local/bin` 或 `/usr/bin`）。
+fn speechd_binary() -> Option<PathBuf> {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let candidate = dir.join("xime-speechd");
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    let paths = std::env::var_os("PATH")?;
+    std::env::split_paths(&paths)
+        .map(|dir| dir.join("xime-speechd"))
+        .find(|path| path.is_file())
+}
+
+/// 连上 speechd；连不上就顺手拉起来一次。
+///
+/// 设置页要能独立管理模型——用户打开设置不该先去输入框把 daemon 唤起来。
+/// 拉起是异步的（模型装载要几秒），本次返回 None，下一轮轮询自然接上。
+fn speech_client() -> Option<Client> {
+    let endpoint = speech_socket();
+    if let Ok(client) = Client::connect(&endpoint.to_string_lossy()) {
+        return Some(client);
+    }
+    use std::sync::atomic::Ordering;
+    if SPEECH_SPAWNED.swap(true, Ordering::Relaxed) {
+        return None;
+    }
+    let binary = speechd_binary()?;
+    // 后端不传：speechd 启动时自己探测（编了 cuda 且显卡可用就走 GPU）。
+    std::process::Command::new(binary)
+        .arg("--socket")
+        .arg(&endpoint)
+        .arg("--models")
+        .arg(speech_dir().join("models"))
+        .arg("--idle-secs")
+        .arg("300")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .ok()?;
+    None
+}
+
+fn speech_call(request: Request) -> Option<Response> {
+    let mut client = speech_client()?;
+    client.call(&request).ok()
+}
+
+/// 协议 `Status` → 设置页镜像（字段是子集，多出来的 level/committed 自动忽略）。
+///
+/// `ok=false` 时协议把原因放在顶层 `error`，页面读的是 `status.error`，
+/// 这里把它搬过去——否则「切换失败」在界面上只会显示成刷新了一下。
+fn speech_status_of(response: Response) -> Option<SpeechServerStatus> {
+    let error = response.error;
+    let mut status = match response.status {
+        Some(status) => status,
+        None => speech_call(Request::Status)?.status?,
+    };
+    if status.error.is_none() {
+        status.error = error;
+    }
+    serde_json::to_value(&status)
+        .ok()
+        .and_then(|value| serde_json::from_value(value).ok())
+}
+
+fn speech_status_cb() -> Option<SpeechServerStatus> {
+    speech_status_of(speech_call(Request::Status)?)
+}
+
+fn speech_select_cb(model_id: &str) -> Option<SpeechServerStatus> {
+    speech_status_of(speech_call(Request::Select {
+        model_id: model_id.to_string(),
+    })?)
+}
+
+fn speech_delete_cb(model_id: &str) -> Option<SpeechServerStatus> {
+    speech_status_of(speech_call(Request::Remove {
+        model_id: model_id.to_string(),
+    })?)
+}
+
+fn speech_test_start_cb() -> Option<SpeechServerStatus> {
+    speech_status_of(speech_call(Request::ListenStart)?)
+}
+
+fn speech_test_stop_cb() -> Option<SpeechServerStatus> {
+    speech_status_of(speech_call(Request::ListenStop)?)
+}
+
+/// 导入：选目录 → 让 speechd 复制进模型根目录（目录结构只有它知道）。
+fn speech_import_cb() -> Option<SpeechServerStatus> {
+    let dir = rfd::FileDialog::new()
+        .set_title("选择语音模型目录（应含 config.json 与 model.safetensors）")
+        .pick_folder()?;
+    speech_status_of(speech_call(Request::Import {
+        path: dir.display().to_string(),
+    })?)
+}
+
+/// 在线下载：speechd 目前只扫描本地模型目录，没有下载器。
+///
+/// 如实说明比假装「服务未运行」好——后者会把用户引去修一个不存在的故障。
+fn speech_download_cb(model_id: &str) -> Option<SpeechServerStatus> {
+    let mut status = speech_call(Request::Status)?.status?;
+    if status.error.is_none() {
+        status.error = Some(format!(
+            "当前版本不支持在线下载：把「{model_id}」的权重目录准备好后用「导入模型…」添加"
+        ));
+    }
+    serde_json::to_value(&status)
+        .ok()
+        .and_then(|value| serde_json::from_value(value).ok())
 }
 
 fn get_lock_file_path() -> PathBuf {
@@ -257,6 +406,16 @@ fn main() -> iced::Result {
     });
     // rime 用户资料同步（同步与备份页「立即同步」，wayland 线程关会话执行）。
     set_notify_sync_user_data(|| user_dict_op_json(op_json("sync", &[])).is_some());
+
+    // 语音输入（voice-page）：注册了状态回调，页面才认为「本平台接入了本地引擎」
+    // （否则整页显示"当前平台未接入"）。其余六项对应页面上的按钮。
+    set_notify_speech_status(speech_status_cb);
+    set_notify_speech_download(speech_download_cb);
+    set_notify_speech_delete(speech_delete_cb);
+    set_notify_speech_select(speech_select_cb);
+    set_notify_speech_test_start(speech_test_start_cb);
+    set_notify_speech_test_stop(speech_test_stop_cb);
+    set_notify_speech_import(speech_import_cb);
 
     // 注入应用元数据（目录沿用 xime，librime 分发标识为 XimeChe）。
     let _ = xime_setup_lib::set_app_metadata(xime_setup_lib::AppMetadata {

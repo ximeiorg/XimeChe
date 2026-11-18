@@ -19,6 +19,9 @@ use wayland_client::protocol::wl_surface::WlSurface;
 use wayland_client::protocol::*;
 use wayland_client::{globals::registry_queue_init, Connection, EventQueue};
 use wayland_client::{Dispatch, Proxy, QueueHandle};
+use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_shell_v1::ZwlrLayerShellV1;
+use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1;
+use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::ZwlrLayerSurfaceV1;
 use xime_ui::{
     grid_panel_height, list_panel_height, menu_panel_height, CandidateItem, IcedSurface, PanelGrid,
     PanelList, PanelPage, PanelTheme, PANEL_MIN_WIDTH,
@@ -88,6 +91,8 @@ pub struct InputMethodData {
     pub key_events: Arc<Mutex<Vec<KeyEvent>>>,
     pub pointer_events: Arc<Mutex<Vec<PointerEvent>>>,
     pub pointer_pos: Arc<Mutex<(f64, f64)>>,
+    /// 指针当前是否停在语音面板上（Enter/Leave 维护，Button 时写进事件）。
+    pub pointer_on_voice: Arc<Mutex<bool>>,
     /// 面板展开视图（菜单网格/内容网格），影响候选栏增高与渲染。
     /// 当前面板页面（None = 收起）；数据（列表/网格）由 daemon 注入。
     pub panel_page: Option<PanelPage>,
@@ -100,6 +105,16 @@ pub struct InputMethodData {
     /// 楔死探测：已发出未 ack 的 wl_display.sync 时刻（wl_callback Done 时
     /// 清空）。超时未 ack = 合成器侧连接楔死，dispatch 返回 Err 交给自愈。
     pub sync_outstanding: Arc<Mutex<Option<Instant>>>,
+    /// 语音悬浮面板的 wl_surface（layer shell）。
+    ///
+    /// 指针 `Enter` 拿到的 surface 与它相同 ⇒ 点击落在语音面板上（daemon
+    /// 据此停止听写，不进候选栏命中几何）。与 v1 的 `voice_surface` 同义。
+    pub voice_surface: Arc<Mutex<Option<WlSurface>>>,
+    /// 语音面板已收到 `configure`，可以 attach buffer 了。
+    ///
+    /// layer shell 规定 configure 之前 attach 无效，而 daemon 是 ~30fps
+    /// 节拍重绘，所以这里只记标志，下一帧自然接上。
+    pub voice_configured: Arc<Mutex<bool>>,
 }
 
 impl InputMethodData {
@@ -208,12 +223,35 @@ impl Dispatch<WlPointer, InputMethodData> for InputMethodData {
         match event {
             wl_pointer::Event::Enter {
                 serial: _,
-                surface: _,
+                surface,
                 surface_x,
                 surface_y,
             } => {
                 if let Ok(mut pos) = state.pointer_pos.lock() {
                     *pos = (surface_x, surface_y);
+                }
+                // 落在语音面板上 = on_voice（daemon 据此点一下就停听写）。
+                let on_voice = state
+                    .voice_surface
+                    .lock()
+                    .ok()
+                    .and_then(|s| s.as_ref().map(|v| *v == surface))
+                    .unwrap_or(false);
+                if let Ok(mut flag) = state.pointer_on_voice.lock() {
+                    *flag = on_voice;
+                }
+            }
+            wl_pointer::Event::Leave { serial: _, surface } => {
+                let left_voice = state
+                    .voice_surface
+                    .lock()
+                    .ok()
+                    .and_then(|s| s.as_ref().map(|v| *v == surface))
+                    .unwrap_or(false);
+                if left_voice {
+                    if let Ok(mut flag) = state.pointer_on_voice.lock() {
+                        *flag = false;
+                    }
                 }
             }
             wl_pointer::Event::Motion {
@@ -236,6 +274,11 @@ impl Dispatch<WlPointer, InputMethodData> for InputMethodData {
                     wayland_client::WEnum::Value(wl_pointer::ButtonState::Pressed)
                 );
                 let pos = state.pointer_pos.lock().map(|p| *p).unwrap_or((0.0, 0.0));
+                let on_voice = state
+                    .pointer_on_voice
+                    .lock()
+                    .map(|f| *f)
+                    .unwrap_or(false);
                 debug!(
                     "Pointer button: serial={}, button={}, pressed={}, pos=({:.0},{:.0})",
                     serial, button, pressed, pos.0, pos.1
@@ -249,7 +292,7 @@ impl Dispatch<WlPointer, InputMethodData> for InputMethodData {
                         pressed,
                         button,
                         on_menu: false,
-                        on_voice: false,
+                        on_voice,
                     });
                 }
             }
@@ -426,6 +469,63 @@ impl Dispatch<ZwpInputMethodKeyboardGrabV2, InputMethodData> for InputMethodData
     }
 }
 
+impl Dispatch<ZwlrLayerShellV1, InputMethodData> for InputMethodData {
+    fn event(
+        _state: &mut InputMethodData,
+        _proxy: &ZwlrLayerShellV1,
+        _event: <ZwlrLayerShellV1 as Proxy>::Event,
+        _data: &InputMethodData,
+        _conn: &wayland_client::Connection,
+        _qhandle: &QueueHandle<InputMethodData>,
+    ) {
+        // layer_shell 全局本身没有事件。
+    }
+}
+
+impl Dispatch<ZwlrLayerSurfaceV1, InputMethodData> for InputMethodData {
+    fn event(
+        state: &mut InputMethodData,
+        proxy: &ZwlrLayerSurfaceV1,
+        event: <ZwlrLayerSurfaceV1 as Proxy>::Event,
+        _data: &InputMethodData,
+        _conn: &wayland_client::Connection,
+        _qhandle: &QueueHandle<InputMethodData>,
+    ) {
+        match event {
+            zwlr_layer_surface_v1::Event::Configure {
+                serial,
+                width,
+                height: _,
+            } => {
+                proxy.ack_configure(serial);
+                // 两侧锚定时宽度由左右 margin 决定：按 configure 给的可用
+                // 宽度把面板居中（KWin 不会替我们居中未锚定的水平轴）。
+                // `width` 已是 u32；0 表示合成器没给可用宽度（不该发生），
+                // 此时不动 margin，避免 configure 打转。
+                if width > 0 {
+                    let side = (width.saturating_sub(xime_ui::voice::VOICE_WIDTH) / 2) as i32;
+                    proxy.set_margin(0, side, xime_ui::voice::VOICE_MARGIN_BOTTOM, side);
+                    proxy.set_size(0, xime_ui::voice::VOICE_HEIGHT);
+                }
+                if let Ok(mut configured) = state.voice_configured.lock() {
+                    *configured = true;
+                }
+            }
+            zwlr_layer_surface_v1::Event::Closed => {
+                // 合成器不要这个 surface 了（output 销毁 / 被要求移除）。
+                // 下一帧重建：show_voice_overlay 看到 configured=false 会重来。
+                if let Ok(mut configured) = state.voice_configured.lock() {
+                    *configured = false;
+                }
+                if let Ok(mut surface) = state.voice_surface.lock() {
+                    *surface = None;
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 impl Dispatch<ZwpInputPopupSurfaceV2, InputMethodData> for InputMethodData {
     fn event(
         _state: &mut InputMethodData,
@@ -564,6 +664,12 @@ pub struct WaylandConnectionV2 {
     current_buffer: Option<WlBuffer>,
     current_pool: Option<WlShmPool>,
     renderer: Option<IcedSurface>,
+    /// 语音悬浮面板（layer-shell overlay，屏幕底部居中）。
+    ///
+    /// v2 协议只给了 `zwp_input_popup_surface_v2`（位置由合成器按光标定），
+    /// 做不出商业输入法那种底部居中的听写面板，所以另开一条 layer-shell
+    /// surface，与 IM 对象互不依赖（见 [`crate::voice_layer`]）。
+    voice: crate::voice_layer::VoicePanel,
     /// 上次 sync 探针发送时刻（楔死探测节流）。
     last_sync_probe: Instant,
     /// `unavailable` 之后重建 IM 对象的节流（见 [`SlotConflictGuard`]）。
@@ -671,6 +777,10 @@ impl WaylandConnectionV2 {
         let virtual_keyboard_manager: Option<ZwpVirtualKeyboardManagerV1> =
             globals.bind(qh, 1..=1, state.clone()).ok();
 
+        // layer shell：KWin 6 给 v5、cosmic-comp 给 v4，功能我们只用 v1 子集
+        // （overlay 层 + bottom anchor + 固定尺寸）。
+        let layer_shell: Option<ZwlrLayerShellV1> = globals.bind(qh, 1..=5, state.clone()).ok();
+
         Ok(Self {
             connection,
             event_queue,
@@ -687,6 +797,7 @@ impl WaylandConnectionV2 {
             current_buffer: None,
             current_pool: None,
             renderer: None,
+            voice: crate::voice_layer::VoicePanel::new(layer_shell),
             last_sync_probe: Instant::now(),
             slot_guard: SlotConflictGuard::default(),
         })
@@ -1136,6 +1247,42 @@ impl WaylandConnectionV2 {
             surface.attach(None::<&WlBuffer>, 0, 0);
             surface.commit();
         }
+    }
+
+    /// 是否支持钉在屏幕底部居中的语音悬浮面板。
+    pub fn supports_voice_overlay(&self) -> bool {
+        self.voice.available()
+    }
+
+    pub fn show_voice_overlay(
+        &mut self,
+        view: &xime_ui::voice::VoiceView,
+        theme: &PanelTheme,
+    ) -> Result<()> {
+        let compositor = self.compositor.as_ref().ok_or(Error::NoCompositor)?;
+        let shm = self.shm.clone().ok_or(Error::NoShm)?;
+        let qh = self.event_queue.handle();
+        self.voice
+            .show(
+                compositor,
+                &shm,
+                &qh,
+                self.state.clone(),
+                &self.state.voice_configured,
+                &self.state.voice_surface,
+                view,
+                theme,
+            )
+            .map_err(|e| Error::Io(std::io::Error::other(e)))?;
+        self.connection
+            .flush()
+            .map_err(|e| Error::Io(std::io::Error::other(e)))?;
+        Ok(())
+    }
+
+    pub fn hide_voice_overlay(&mut self) {
+        self.voice.hide();
+        let _ = self.connection.flush();
     }
 
     /// 候选栏自然宽度（内容 + 菜单按钮），用于命中测试。

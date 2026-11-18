@@ -8,6 +8,9 @@ license.workspace = true
 [dependencies]
 wayland-client = "0.31"
 wayland-protocols = { version = "0.32.12", features = ["client", "unstable"] }
+# 语音悬浮面板：v2 没有 input_panel_surface，只能靠 layer shell 钉在屏幕
+# 底部居中。KWin 6 与 cosmic-comp 都实现 zwlr_layer_shell_v1。
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 wayland-backend = "0.3"
 wayland-scanner = "0.31"
 thiserror.workspace = true

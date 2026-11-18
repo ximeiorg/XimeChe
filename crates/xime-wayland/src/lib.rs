@@ -1,6 +1,8 @@
 pub mod im_v1;
 pub mod im_v2;
 
+pub mod voice_layer;
+
 pub use im_v2::{
     Error as ErrorV2, InputMethodData, InputMethodState, Result as ResultV2, WaylandConnectionV2,
     ZwpInputMethodManagerV2, ZwpInputMethodV2,
@@ -271,7 +273,7 @@ impl ImBackend for im_v1::WaylandConnectionV1 {
     }
 
     fn supports_voice_overlay(&self) -> bool {
-        true
+        self.supports_voice_overlay()
     }
 
     fn show_voice_overlay(
@@ -392,6 +394,23 @@ impl ImBackend for im_v2::WaylandConnectionV2 {
 
     fn hide_root_window(&mut self) {
         self.hide_root_window()
+    }
+
+    fn supports_voice_overlay(&self) -> bool {
+        self.supports_voice_overlay()
+    }
+
+    fn show_voice_overlay(
+        &mut self,
+        view: &xime_ui::voice::VoiceView,
+        theme: &PanelTheme,
+    ) -> Result<(), String> {
+        self.show_voice_overlay(view, theme)
+            .map_err(|e| e.to_string())
+    }
+
+    fn hide_voice_overlay(&mut self) {
+        self.hide_voice_overlay()
     }
 
     fn handle_unavailable(&mut self) -> Result<(), String> {
