@@ -94,3 +94,13 @@ echo "   Nothing to configure — xime-daemon autostarts via ${SYSCONFDIR}/xdg/a
 echo "   Log out and back in. On COSMIC 1.9+, disable the on-screen keyboard first:"
 echo "   cosmic-osk holds the only zwp_input_method_v2 slot, which starves any IME."
 echo ""
+echo "Voice input (optional):"
+echo "   Needs the separate daemon 'xime-speechd' (Qwen3-ASR, from libximecore)."
+if command -v xime-speechd >/dev/null 2>&1; then
+    echo "   Found: $(command -v xime-speechd)"
+else
+    echo "   Not installed — voice input will report a readable error until you add it."
+fi
+echo "   Models live in ~/.config/xime/models/<model-id>/ (see Qwen3-ASR docs)."
+echo "   Hold Ctrl+Alt+V to dictate; release to commit."
+echo ""

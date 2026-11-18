@@ -7,19 +7,28 @@
 
 | 文件 | 包管理器 | 主要发行版 | 构建环境 |
 | --- | --- | --- | --- |
-| `xime_<ver>_amd64.deb` | apt / dpkg | Debian、Ubuntu、Mint、Deepin、UOS | ubuntu-latest（`cargo-deb`） |
+| `xime_<ver>_amd64.deb` | apt / dpkg | Debian、Ubuntu、Mint、Deepin、UOS | ubuntu-24.04（`cargo-deb`，CPU 语音） |
+| `xime-cuda_<ver>_amd64.deb` | apt / dpkg | 同上，且有 NVIDIA 显卡 | ubuntu-24.04 + CUDA 12.4（`cargo-deb --variant cuda`） |
 | `xime-<ver>-1.fc<N>.x86_64.rpm` | dnf / zypper | Fedora、RHEL 系、openSUSE | Fedora 容器（`rpmbuild`） |
 | `xime-<ver>-1-x86_64.pkg.tar.zst` | pacman | Arch、Manjaro、EndeavourOS | Arch 容器（`makepkg`） |
-| `xime-<ver>-x86_64-linux.tar.gz` | 手动 | 任意发行版 | ubuntu-latest（`stage.sh`） |
+| `xime-<ver>-x86_64-linux.tar.gz` | 手动 | 任意发行版 | ubuntu-24.04（`stage.sh`，CPU 语音） |
 | `xime-<ver>.tar.gz` | 源码 | 打包者 | 含 rime-wubi 子模块的完整源码树 |
 
+两个 deb 的**文件清单完全一样**，只差 `xime-speechd`（语音识别守护进程）编的是哪个
+后端，所以它们互相冲突——`apt` 会提示用哪个替换哪个，装一个就行：
+
+- **纯 CPU 版**：任何 x86_64 机器都能跑，识别延迟高一些（句级上屏）。
+- **CUDA 版**：需要 NVIDIA 驱动 + CUDA 12 运行时，识别延迟低一个量级（逐字上屏）。
+
 rpm 和 arch 都在各自的发行版容器里**从源码编译**，不是把 Ubuntu 的二进制换个壳，
-所以 glibc / 依赖关系是对的。
+所以 glibc / 依赖关系是对的（语音守护进程目前还没进这两种包）。
 
 ## 安装
 
 ```bash
-# Debian / Ubuntu
+# Debian / Ubuntu：先看有没有 NVIDIA 显卡
+nvidia-smi && sudo apt install ./xime-cuda_*_amd64.deb
+# 没有独显（或不想装 CUDA）就用 CPU 版
 sudo apt install ./xime_*_amd64.deb
 
 # Fedora / RHEL / openSUSE
@@ -31,6 +40,12 @@ sudo pacman -U ./xime-*.pkg.tar.zst
 # 通用（解开就是 /usr 下的布局）
 sudo tar -C / -xzf xime-*-x86_64-linux.tar.gz
 ```
+
+CUDA 版**不硬依赖** CUDA 库（官方仓库里没有 `libcudart12`，硬依赖会装不上），
+所以需要你自己保证这三个库在：`libcudart.so.12`、`libcublas.so.12`、
+`libcurand.so.10`。最省事的办法是装发行版的 `nvidia-cuda-toolkit`，或者从
+NVIDIA 的 CUDA 仓库装 `cuda-cudart-12-4` + `libcublas12`。缺库时语音用不了
+（输入法本体照常工作），状态栏/通知会给出错误提示。
 
 装完在 KDE 里启用（KWin 只在启动时装配虚拟键盘，改完需要重新登录）：
 
@@ -51,11 +66,31 @@ cargo build --release
 ./packaging/stage.sh /tmp/xime-stage /usr   # 铺出完整安装树
 ```
 
+语音守护进程 `xime-speechd` 在 libximecore 里，要单独构建一次（`dev-install.sh`
+会自动做，也可以手动）：
+
+```bash
+git clone --depth 1 https://github.com/ximeiorg/libximecore.git ../libximecore
+
+# CPU 版
+cargo build --release --manifest-path ../libximecore/Cargo.toml -p xime-speechd
+# CUDA 版（需要 CUDA toolkit，cudarc 白名单内 12.x–13.4）。编译**不需要 GPU**，
+# 但无 GPU 时必须显式给 CUDA_COMPUTE_CAP：cudaforge 探测不到 nvidia-smi 会
+# 直接报错中断构建（不是回落到某个默认值）。
+CUDA_COMPUTE_CAP=89 cargo build --release \
+  --manifest-path ../libximecore/Cargo.toml -p xime-speechd --features cuda
+
+# 两种后端产物同名，放哪个进包就出哪个变体
+cp ../libximecore/target/release/xime-speechd target/release/
+```
+
 各格式的配方：
 
 ```bash
-# deb
-cargo install cargo-deb && cargo deb -p xime
+# deb（先按上面把 xime-speechd 放好）
+cargo install cargo-deb
+cargo deb -p xime                 # → xime_<ver>_amd64.deb（CPU）
+cargo deb -p xime --variant cuda  # → xime-cuda_<ver>_amd64.deb（CUDA）
 
 # rpm（Fedora 上）
 dnf install rpm-build cargo rust git gcc gcc-c++ make pkgconf-pkg-config \
@@ -68,7 +103,9 @@ cd packaging/arch && makepkg -si
 ```
 
 `.deb` 的文件清单在 `crates/xime-pack/Cargo.toml` 的 `[package.metadata.deb]`，
-其余格式走 `packaging/stage.sh`。**改安装布局时两处都要改**。
+CUDA 变体只在同一个文件的 `[...deb.variants.cuda]` 里覆盖元数据（包名自动变成
+`xime-cuda`），文件清单继承主机段。其余格式走 `packaging/stage.sh`。
+**改安装布局时两处都要改**。
 
 ## 版本同步
 
@@ -83,14 +120,18 @@ CI 用 tag 作为版本号，并校验它和 `Cargo.toml` 的 `[workspace.packag
 
 ## 依赖说明
 
-运行期：`librime`、`libxkbcommon`、`libwayland-client`、`hicolor-icon-theme`。
-Rime 走 pkg-config（有 `rime.pc` 时）或直接链系统 `librime`；仓库里不带
-librime 源码，也不需要 cmake 构建它。
+运行期：`librime`、`libxkbcommon`、`libwayland-client`、`dbus`、`libbz2`、
+`libasound2`（语音守护进程录音用 ALSA）。Rime 走 pkg-config（有 `rime.pc` 时）
+或直接链系统 `librime`；仓库里不带 librime 源码，也不需要 cmake 构建它。
 
-语音识别用到的 `libsherpa-onnx-c-api.so` / `libonnxruntime.so` 从
-sherpa-onnx 的预编译包随包安装到 `/usr/share/xime/lib`（daemon 的 rpath 是
-`$ORIGIN/../share/xime/lib`）。许可证：sherpa-onnx 为 Apache-2.0，onnxruntime 为 MIT。
-不需要语音的打包可以 `XIME_SKIP_SPEECH=1 ./packaging/stage.sh <destdir>`。
+语音识别由独立进程 `xime-speechd` 提供（candle + Qwen3-ASR）。**模型不随包分发**，
+用户在设置页的「语音」里下载到 `~/.config/xime/models`。守护进程本身约 50 MB：
+
+- CPU 版：任何 x86_64 机器可跑，识别是「句级上屏」（每两秒一段）。
+- CUDA 版：额外链接 `libcudart.so.12`、`libcublas.so.12`、`libcurand.so.10`，
+  缺库时语音起不来（输入法本体照常工作）。识别是「逐字上屏」。
+- 源码构建需要 `libasound2-dev`；CUDA 版另需 CUDA toolkit（cudarc 0.19 的
+  白名单是 12.x–13.4，13.5+ 会在 build script 直接 panic）。
 
 ## Arch Linux 专项说明
 
@@ -145,12 +186,14 @@ git push
 
 ## 已知限制
 
-`.deb` 在 `ubuntu-latest`（glibc 2.39）上编译，因此要求
+`.deb` 在 `ubuntu-24.04`（glibc 2.39）上编译，因此要求
 Ubuntu 24.04+ / Debian 13+ / 同等 glibc 的发行版。更老的发行版需要自己编译。
 
-构建时 `libximecore` 是按 `main` 分支解析的，不是锁定版本：`Cargo.lock` 里的
-libximecore crate 在本地被 `.cargo/config.toml` patch 成了路径依赖（没有 git 条目），
-CI 上没有这个 patch，cargo 会重新解析并拉取 `main` 的最新提交。这意味着
-同一个 tag 在不同时间构建，依赖代码可能不同。需要严格复现的话，得先把
-`Cargo.lock` 换成带 git 条目的版本再构建（或在 PKGBUILD/spec 里 `cargo update -p`
-固定 revision），目前还没做。
+CUDA 变体是在**没有 GPU 的 runner** 上编的，`CUDA_COMPUTE_CAP` 钉在 80：
+cubin 在同一 major 内向上兼容，所以 30/40 系（sm_86/89）能直接跑；Hopper（sm_90）
+及更新的架构需要用 `CUDA_COMPUTE_CAP=90`（或对应值）自行重编。
+
+构建时 `libximecore` 按 `main` 分支的 HEAD 解析（CI 里显式 clone 后 patch 成本地
+路径，和本地开发一致），不使用 `Cargo.lock` 里可能过期的 revision。这意味着同一个
+tag 在不同时间构建，依赖代码可能不同；要严格复现得把 `Cargo.lock` 换成带 git
+revision 的版本再构建。

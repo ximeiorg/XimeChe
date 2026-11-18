@@ -34,6 +34,8 @@ if [ ! -f "${CARGO_CONF}" ]; then
 librime = { path = "../libximecore/crates/librime" }
 xime-config = { path = "../libximecore/crates/xime-config" }
 xime-setup-lib = { path = "../libximecore/crates/xime-setup" }
+xime-plugin = { path = "../libximecore/crates/xime-plugin" }
+xime-speech-service = { path = "../libximecore/crates/xime-speech-service" }
 EOF
     echo "Created ${CARGO_CONF} with local libximecore patch"
 fi
@@ -63,6 +65,51 @@ LIBXIMECORE_TARGET_DIR="$(cargo_target_dir "${LIBXIMECORE}/Cargo.toml")"
 if [ -f "${LIBXIMECORE}/Cargo.toml" ]; then
     cargo build --release --manifest-path "${LIBXIMECORE}/Cargo.toml" -p xime-sync-server
     install -Dm755 "${LIBXIMECORE_TARGET_DIR}/release/xime-sync-server" "${BINDIR}/xime-sync-server"
+fi
+
+# Build & install xime-speechd（语音识别独立进程，from libximecore）
+#
+# 它持有 Qwen3-ASR 权重与麦克风，daemon 只通过 socket 说话。candle 首次编译
+# 要十几分钟，所以装过就跳过；改了语音引擎相关代码时置
+# XIME_SPEECH_REBUILD=1 强制重建。
+#
+# 后端决定流式体验：
+#   GPU（cuda）：8 秒窗口一轮 ~300ms，逐字上屏；
+#   CPU        ：2 秒窗口一轮 ~1.2s，退化成句级（每两秒吐一段）。
+# 有可用的 NVIDIA 显卡 + cudarc 认得的 toolkit 时自动编 cuda 版；
+# XIME_SPEECH_CUDA=0 强制 CPU，=1 强制 GPU（找不到工具链直接失败）。
+speech_features=""
+speech_backend="cpu"
+if [ "${XIME_SPEECH_CUDA:-auto}" != "0" ] && command -v nvidia-smi >/dev/null 2>&1; then
+    if nvidia-smi -L >/dev/null 2>&1; then
+        # cudarc 只认白名单里的 toolkit 版本，13.5 及以上会在 build.rs 直接 panic，
+        # 所以挑目录前先问 nvcc 自己。优先选 /usr/local 下的带版本目录。
+        for cuda_dir in /usr/local/cuda-13.4 /usr/local/cuda-13.3 /usr/local/cuda-13.2 \
+                        /usr/local/cuda-13.1 /usr/local/cuda-13.0 /usr/local/cuda-12.9 \
+                        /usr/local/cuda-12.8 /usr/local/cuda-12.6 /usr/local/cuda; do
+            [ -x "${cuda_dir}/bin/nvcc" ] || continue
+            if "${cuda_dir}/bin/nvcc" --version | grep -qE "release 1[23]\.(0|1|2|3|4|5|6|8|9),"; then
+                export CUDA_HOME="${cuda_dir}"
+                export PATH="${cuda_dir}/bin:${PATH}"
+                speech_features="--features cuda"
+                speech_backend="cuda (${cuda_dir})"
+                break
+            fi
+        done
+        if [ -z "${speech_features}" ] && [ "${XIME_SPEECH_CUDA:-auto}" = "1" ]; then
+            echo "错误：XIME_SPEECH_CUDA=1 但没找到 cudarc 支持的 CUDA toolkit（12.x–13.4）" >&2
+            exit 1
+        fi
+    fi
+fi
+if [ -f "${LIBXIMECORE}/Cargo.toml" ]; then
+    if [ -x "${BINDIR}/xime-speechd" ] && [ "${XIME_SPEECH_REBUILD:-0}" != "1" ]; then
+        echo "xime-speechd 已安装，跳过构建（XIME_SPEECH_REBUILD=1 强制重建）"
+    else
+        echo "构建 xime-speechd（candle，后端 ${speech_backend}，首次较慢）..."
+        cargo build --release --manifest-path "${LIBXIMECORE}/Cargo.toml" -p xime-speechd ${speech_features}
+        install -Dm755 "${LIBXIMECORE_TARGET_DIR}/release/xime-speechd" "${BINDIR}/xime-speechd"
+    fi
 fi
 
 # Install binaries

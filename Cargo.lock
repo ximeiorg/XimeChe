@@ -679,9 +679,9 @@ checksum = "8f1fe948ff07f4bd06c30984e69f5b4899c516a3ef74f34df92a2df2ab535495"
 
 [[package]]
 name = "bytes"
-version = "1.12.1"
+version = "1.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc652a48c352aef3ea3aed32080501cf3ef6ed5da78602a020c991775b0aff04"
+checksum = "776dfebd015e2d8732c684a2c71003674ccb49457b539b9e82151ba38e96dd7c"
 
 [[package]]
 name = "bzip2"
@@ -1442,6 +1442,12 @@ checksum = "ab8ecd87370524b461f8557c119c405552c396ed91fc0a8eec68679eab26f94a"
 dependencies = [
  "libloading",
 ]
+
+[[package]]
+name = "doctest-file"
+version = "1.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c2db04e74f0a9a93103b50e90b96024c9b2bdca8bce6a632ec71b88736d3d359"
 
 [[package]]
 name = "document-features"
@@ -2774,6 +2780,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "interprocess"
+version = "2.4.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f0ed453af5ae3bdbf68e41dde07eae0bffcc986419f63521ba9c89d82988c70"
+dependencies = [
+ "doctest-file",
+ "libc",
+ "recvmsg",
+ "widestring",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "ipnet"
 version = "2.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4075,9 +4094,9 @@ checksum = "2f3a9f18d041e6d0e102a0a46750538147e5e8992d3b4873aaafee2520b00ce3"
 
 [[package]]
 name = "pollster"
-version = "1.0.1"
+version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bc6355899e1c9462875b6757c79f3caa011a1fdae12bbb1a2e72dd1f234f8336"
+checksum = "3c2c80c4e3afbec8224b9d3e641fbf3a5690cc7595b887b0a27a926bb357ed5c"
 
 [[package]]
 name = "poly1305"
@@ -4528,6 +4547,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "recvmsg"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3edd4d5d42c92f0a659926464d4cce56b562761267ecf0f469d85b7de384175"
+
+[[package]]
 name = "redox_syscall"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4566,9 +4591,9 @@ dependencies = [
 
 [[package]]
 name = "regex"
-version = "1.13.1"
+version = "1.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f020237b6c8eed93db2e2cb53c00c60a8e1bc73da7d073199a1180401450218d"
+checksum = "9807af0e638c12e753aa1b4e601791bf2a8f71274023c8bbeec12fc149950857"
 dependencies = [
  "aho-corasick",
  "memchr",
@@ -4578,9 +4603,9 @@ dependencies = [
 
 [[package]]
 name = "regex-automata"
-version = "0.4.18"
+version = "0.4.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad8553b9b26413251cbf30e620595c7a41b3887f03da04579c0e6b0d6a06b4b2"
+checksum = "41d60ef07df457506a0a1a2073112eb4aae5733dbd2813c3da77d1b0fd441158"
 dependencies = [
  "aho-corasick",
  "memchr",
@@ -4589,9 +4614,9 @@ dependencies = [
 
 [[package]]
 name = "regex-syntax"
-version = "0.8.11"
+version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
+checksum = "d902046e6a28a1e4c3cab97258a0ce11e994903f01c2d97a9447a0b3df85f4f6"
 
 [[package]]
 name = "renderdoc-sys"
@@ -4697,7 +4722,7 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "objc2-uniform-type-identifiers 0.3.2",
  "percent-encoding",
- "pollster 1.0.1",
+ "pollster 1.0.2",
  "raw-window-handle",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -5290,9 +5315,9 @@ dependencies = [
 
 [[package]]
 name = "smallvec"
-version = "1.16.5"
+version = "1.16.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "149309498a5f7334b12ddae0cad8aba81ce785fe91755068867e017cf98fee46"
+checksum = "3244542535d5de959d90ec55d1b5ff0fd2bb7b1310223907d5f11932847f7b59"
 
 [[package]]
 name = "smithay-client-toolkit"
@@ -6685,6 +6710,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "widestring"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72069c3113ab32ab29e5584db3c6ec55d416895e60715417b5b883a357c3e471"
+
+[[package]]
 name = "winapi-util"
 version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7124,7 +7155,7 @@ checksum = "163b33ed8786455e2fa5d72f554057ce3f3182425434f756cd39c99839d88e23"
 
 [[package]]
 name = "xime"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "xime-daemon",
  "xime-launcher",
@@ -7133,7 +7164,7 @@ dependencies = [
 
 [[package]]
 name = "xime-clipboard"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "arboard",
  "tempfile",
@@ -7166,7 +7197,7 @@ dependencies = [
 
 [[package]]
 name = "xime-daemon"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "bzip2 0.5.2",
@@ -7193,6 +7224,7 @@ dependencies = [
  "xime-config",
  "xime-p2p",
  "xime-plugin",
+ "xime-speech-service",
  "xime-tray",
  "xime-ui",
  "xime-wayland",
@@ -7203,7 +7235,7 @@ dependencies = [
 
 [[package]]
 name = "xime-launcher"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nix 0.29.0",
  "thiserror 2.0.21",
@@ -7274,14 +7306,16 @@ dependencies = [
 
 [[package]]
 name = "xime-setup"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "iced",
  "nix 0.31.4",
+ "rfd 0.15.4",
  "serde_json",
  "tracing",
  "xime-setup-lib",
+ "xime-speech-service",
  "zbus",
 ]
 
@@ -7318,6 +7352,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "xime-speech-service"
+version = "0.1.0"
+dependencies = [
+ "interprocess",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "xime-sync-domain"
 version = "0.1.0"
 source = "git+https://github.com/ximeiorg/libximep2p.git?rev=1eddeb6eab3d1c31836b1cc4362cbc1f787ecdc8#1eddeb6eab3d1c31836b1cc4362cbc1f787ecdc8"
@@ -7332,7 +7376,7 @@ dependencies = [
 
 [[package]]
 name = "xime-tray"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "cosmic-text 0.12.1",
  "tiny-skia",
@@ -7343,7 +7387,7 @@ dependencies = [
 
 [[package]]
 name = "xime-ui"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "iced_renderer",
  "iced_tiny_skia",
@@ -7355,7 +7399,7 @@ dependencies = [
 
 [[package]]
 name = "xime-wayland"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "nix 0.29.0",
  "thiserror 2.0.21",
@@ -7363,13 +7407,14 @@ dependencies = [
  "wayland-backend",
  "wayland-client",
  "wayland-protocols",
+ "wayland-protocols-wlr",
  "wayland-scanner",
  "xime-ui",
 ]
 
 [[package]]
 name = "xime-xkb"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "thiserror 2.0.21",
  "tracing",
@@ -7584,9 +7629,9 @@ dependencies = [
 
 [[package]]
 name = "zeroize"
-version = "1.9.1"
+version = "1.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e13084392c5e4bc371903e2935a5eaeed24905a7511356b883835e18a78f6879"
+checksum = "85ccff8a4805aba1eaa4cd4afcd49f7557dd2cf5fd79ffc37f8959466effc5aa"
 dependencies = [
  "zeroize_derive",
 ]

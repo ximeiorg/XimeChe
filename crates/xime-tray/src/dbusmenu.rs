@@ -8,6 +8,8 @@ use zbus::{interface, object_server::SignalEmitter};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MenuAction {
     ToggleMode,
+    /// 语音输入：开始/结束一次听写（toggle）。
+    ToggleSpeech,
     Settings,
     Deploy,
     Exit,
@@ -104,6 +106,7 @@ impl DBusMenu {
             };
             let action = match id {
                 1 => MenuAction::ToggleMode,
+                7 => MenuAction::ToggleSpeech,
                 3 => MenuAction::Settings,
                 4 => MenuAction::Deploy,
                 5 => MenuAction::Exit,
@@ -176,13 +179,24 @@ impl DBusMenu {
             }
             children.push(Value::new((
                 // 分隔线不参与点击，但 dbusmenu 规范要求同层 id 唯一
-                //（客户端按 id 缓存属性/路由属性更新）；第一个分隔线占 2，
-                // 6 未被任何动作占用（1/3/4/5 = 动作，≥10 = 方案）。
+                //（客户端按 id 缓存属性/路由属性更新）；分隔线占 2 与 6，
+                // 动作是 1/3/4/5/7（7 = 语音输入），≥10 = 方案。
                 6,
                 HashMap::from([("type".to_string(), Value::new("separator"))]),
                 Vec::<Value<'static>>::new(),
             )));
             children.extend([
+                Value::new((
+                    7,
+                    HashMap::from([
+                        ("label".to_string(), Value::new("语音输入")),
+                        (
+                            "icon-name".to_string(),
+                            Value::new("audio-input-microphone"),
+                        ),
+                    ]),
+                    Vec::<Value<'static>>::new(),
+                )),
                 Value::new((
                     3,
                     HashMap::from([

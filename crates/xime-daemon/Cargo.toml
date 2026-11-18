@@ -16,6 +16,8 @@ xime-tray.workspace = true
 # 剪贴板同步的「设备互传」后端（局域网 P2P，不经服务器）。
 xime-p2p.workspace = true
 librime.workspace = true
+# 语音识别的客户端半：只连 socket，不把 candle/cpal 链进输入法进程。
+xime-speech-service.workspace = true
 thiserror.workspace = true
 anyhow.workspace = true
 serde.workspace = true

@@ -24,8 +24,11 @@ pub enum DaemonCommand {
     ),
     /// 系统亮/暗色模式变化（portal color-scheme，true = 暗色）。
     DarkMode(bool),
-    /// 托盘「语音输入」入口：开始/停止听写会话（键盘快捷键 Ctrl+Alt+V
-    /// 在 wayland 线程直接处理，不经此命令）。
+    /// 托盘「语音输入」与桌面全局快捷键入口：开始/结束一次听写。
+    ///
+    /// 键盘路径（**按住**右 Ctrl 说话、松开上屏）在 wayland 线程直接
+    /// 处理，不经此命令；未激活时按键根本到不了我们，所以必须有这条入口。
+    ToggleSpeech,
     Shutdown,
 }
 

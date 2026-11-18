@@ -1,7 +1,7 @@
 //! 语音悬浮层渲染快照（目检用）：亮/暗两版输出 PNG 到 target/。
 //! 运行：cargo run -p xime-ui --example voice_snapshot
 
-use xime_ui::voice::{self, VoiceView};
+use xime_ui::voice::{self, VoicePhase, VoiceView};
 use xime_ui::{IcedSurface, PanelTheme};
 
 fn main() {
@@ -19,9 +19,12 @@ fn main() {
             })
             .collect();
         let view = VoiceView {
-            loading: false,
+            phase: VoicePhase::Listening,
             levels,
             text: "今天下午三点开会讨论输入法".to_string(),
+            elapsed: std::time::Duration::from_secs(7),
+            committed_chars: 42,
+            warning: None,
         };
         surface.draw_voice_overlay(pixmap.data_mut(), &view, &theme);
         let path = format!("target/{name}.png");
@@ -31,9 +34,10 @@ fn main() {
         // 装载中状态（空电平）
         let mut pixmap = tiny_skia11::Pixmap::new(voice::VOICE_WIDTH, voice::VOICE_HEIGHT).unwrap();
         let loading = VoiceView {
-            loading: true,
+            phase: VoicePhase::Loading,
             levels: vec![0.0; voice::BAR_COUNT],
             text: String::new(),
+            ..Default::default()
         };
         surface.draw_voice_overlay(pixmap.data_mut(), &loading, &theme);
         let path = format!("target/{name}_loading.png");

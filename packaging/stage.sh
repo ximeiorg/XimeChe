@@ -40,6 +40,16 @@ for bin in xime-daemon xime-launcher xime-setup; do
     install -Dm755 "$TARGET_DIR/release/$bin" "$DESTDIR$BINDIR/$bin"
 done
 
+# ── 语音识别守护进程（可选）───────────────────────────────────────────────
+# 它来自 libximecore（candle + cpal，编起来重），不在本仓库的 cargo build 里，
+# 由 dev-install.sh / CI 单独构建后放到 target/release。存在就装，没有就跳过：
+# rpm / Arch 配方目前还没接语音，不该因为缺这个文件就整个失败。
+if [ -x "$TARGET_DIR/release/xime-speechd" ]; then
+    install -Dm755 "$TARGET_DIR/release/xime-speechd" "$DESTDIR$BINDIR/xime-speechd"
+else
+    echo "warning: 没有 $TARGET_DIR/release/xime-speechd，本包不含语音识别" >&2
+fi
+
 # ── 默认配置 + Rime 方案数据 ──────────────────────────────────────────────
 install -Dm644 resources/xime.yaml "$DESTDIR$DATADIR/xime/xime.yaml"
 

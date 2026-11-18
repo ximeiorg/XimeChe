@@ -89,8 +89,15 @@ sudo apt install librime-dev libxkbcommon-dev
 ### 从 Debian 包安装
 
 ```bash
-sudo dpkg -i xime_0.1.3-1_amd64.deb
+# 有 NVIDIA 显卡：CUDA 版语音引擎（逐字上屏，延迟低一个量级）
+sudo apt install ./xime-cuda_*_amd64.deb
+# 没有独显：纯 CPU 版（句级上屏）
+sudo apt install ./xime_*_amd64.deb
 ```
+
+两个包的文件清单完全一样，只差语音识别守护进程 `xime-speechd` 的后端，所以
+互相冲突——装一个即可。CUDA 版需要 NVIDIA 驱动 + CUDA 12 运行时（`libcudart.so.12`
+等），细节见 [packaging/README.md](packaging/README.md)。
 
 安装后重新登录 KDE Plasma。
 
@@ -141,11 +148,11 @@ cargo build --release
 ### 构建 Debian 包
 
 ```bash
+# 先把语音守护进程编好放进 target/release（见 packaging/README.md）
 cargo install cargo-deb
-cargo deb -p xime
+cargo deb -p xime                 # → target/debian/xime_<ver>_amd64.deb
+cargo deb -p xime --variant cuda  # → target/debian/xime-cuda_<ver>_amd64.deb
 ```
-
-生成的 deb 包位于 `target/debian/xime_0.1.3-1_amd64.deb`。
 
 ## 运行
 

@@ -11,11 +11,14 @@ repository.workspace = true
 # 直接编不进去（侧栏条目消失），不是运行期开关。
 # - pair-page：设备关联页（局域网 P2P 配对），剪贴板页的「设备互传」模式
 #   依赖它才能完成配对，未开时该模式只显示"当前版本未包含设备关联页"。
+# - voice-page：语音输入页（模型下载/导入/删除、试听、语种与上屏方式）。
+#   它轮询的是 xime-speechd 的 socket，输入法进程的候选栏 🎙️ 共用同一个服务。
 xime-setup-lib = { workspace = true, features = [
     "clipboard-page",
     "dict-page",
     "backup-page",
     "pair-page",
+    "voice-page",
 ] }
 iced = { version = "0.14", default-features = false, features = [
     "tokio",
@@ -31,3 +34,10 @@ tracing.workspace = true
 nix = { version = "0.31.3", features = ["fs"] }
 zbus = "5"
 serde_json = "1"
+# 语音页的宿主回调：设置进程直接连 xime-speechd 的 socket。
+# default-features = false ⇒ 不带 cpal/candle，设置程序里不含推理代码。
+xime-speech-service.workspace = true
+
+# 「导入模型…」要选目录：与 lib 里的词典页同一套 portal 对话框，不引 GTK。
+[target.'cfg(target_os = "linux")'.dependencies]
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "async-std"] }

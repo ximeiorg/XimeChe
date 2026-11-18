@@ -80,6 +80,27 @@ impl XimeDaemon {
             .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))
     }
 
+    /// 语音输入开关（托盘菜单 / 桌面全局快捷键）。
+    ///
+    /// 键盘路径是「按住右 Ctrl 说话、松开上屏」，但 Wayland 只在该
+    /// 输入法拿到键盘 grab 时才送按键；未激活时要靠这条 DBus 方法让用户在
+    /// 桌面设置里绑全局快捷键（KDE：系统设置 → 快捷键 → 命令
+    /// `qdbus6 org.xime.Xime /org/xime/Xime org.xime.Xime.Controller.ToggleSpeech`）。
+    async fn toggle_speech(&self) -> zbus::fdo::Result<()> {
+        debug!("Received ToggleSpeech request");
+        self.command_tx
+            .send(crate::DaemonCommand::ToggleSpeech)
+            .map_err(|e| zbus::fdo::Error::Failed(e.to_string()))?;
+        Ok(())
+    }
+
+    /// 语音状态快照（JSON，字段对齐设置页的 `SpeechServerStatus`）。
+    ///
+    /// 不做 IPC：状态快照在 daemon 里由 worker 线程维护，读一把 Mutex 即可。
+    async fn get_speech_status(&self) -> zbus::fdo::Result<String> {
+        Ok(crate::speech::status_json())
+    }
+
     /// 优雅退出：进程以状态码 0 结束（kill -15 会被 KWin 记为
     /// QProcess::CrashExit，多次后触发其崩溃保护拒绝重启输入法）。
     async fn shutdown(&self) -> zbus::fdo::Result<()> {

@@ -1,7 +1,90 @@
 # XimeChe（曦码·澈输入法）开发进度
 
 ## 当前状态
-**接入 COSMIC 桌面（P0：自启动 + 输入法槽位冲突）**（2026-11-17 晚）。
+**语音输入改为流式：边说边出字**（2026-11-18 晚）。
+
+上一轮接入时是一次性识别——说完才出字。这次改成流式：录音中逐秒编码、滚动
+重解码，定稿文本每秒推进一段、直接落进输入框，未定稿部分在悬浮层里跟着变。
+
+- **为什么不是「真流式」**：Qwen3-ASR 是编码器-解码器，没有 chunk 级增量解码
+  接口。但它的音频塔是 1 秒一个 chunk、chunk 间独立做卷积与位置编码，所以
+  「逐秒编码再拼接」与「整段一次编码」等价——编码成本按秒增量付，重解码只付
+  解码器的钱。
+- **定稿靠 LocalAgreement-2**：连续两轮结果一致的公共前缀才落盘
+  （`commit_string`），未定稿部分作为 `status.partial` 驱动悬浮层/候选栏。
+  落定的字永不回改，所以屏幕上不会看到已出现的字被改写。
+- **上文偏置**：已定稿文本注入 Qwen3-ASR prompt 的 system 段（官方上下文位），
+  让窗口接缝接得上，减少「把上半句重打一遍」。
+- **窗口 8 秒（GPU）/ 2 秒（CPU）**，到顶后等一个句读再切（最多 +2 秒）：
+  实测硬切出现过「打开轿车自动气」少了「阀」。
+- **松手不再整段重跑**：流式已出字时只补最后不到一秒的尾巴，避免已落定的字
+  被整段重识别改写。
+
+**实测**（RTX 4060 Ti + 12 核 CPU，同一条 12 秒语音）：
+
+| 后端 | 窗口 | 单轮耗时 | 效果 |
+| --- | --- | --- | --- |
+| CUDA | 8 s | 100–330 ms | committed 每秒推进一句，收尾 170 ms |
+| CPU | 2 s | 1.1–1.5 s | 勉强跟上，退化成每两秒吐一段 |
+
+所以 `dev-install.sh` 检测到 NVIDIA 显卡 + cudarc 认得的 toolkit（12.x–13.4）
+时自动编 cuda 版 speechd；`XIME_SPEECH_CUDA=0/1` 可强制。speechd 的 `--device`
+默认值从写死的 `cpu` 改成**启动时探测**（GPU 不可用回退 CPU）。
+
+**设置页语音页已接入**（2026-11-18 晚，承接上一条）。之前 `crates/xime-setup`
+的 cargo feature 里没开 `voice-page`，那一页**根本没编进二进制**——侧栏连条目都
+没有。现在：
+
+- feature 打开 + 宿主注入 7 个回调（`~/.config/xime/speech.sock` 直连 speechd）：
+  状态 / 选模型 / 删模型 / 试听起停 / 导入（rfd 选目录 → `Import`）/ 下载。
+- 「下载」在协议里没有对应 op（speechd 只扫本地模型目录，没有下载器），回调如实
+  返回「当前版本不支持在线下载，请用导入」，而不是让用户看到"服务未运行"。
+- 设置进程连不上 speechd 时**顺手拉起一次**（同目录 → PATH），这样打开设置就能
+  管理模型，不必先去输入框把 daemon 唤起来。
+- 顺带修 `SettingsState::new()`：原来是「启动页正好是语音页」时不轮询（`set_active`
+  只在 `PageSelected` 里调），页面会一直停在"正在读取…"。
+
+**下一步（语音）**：
+- `speech.toml` 的 `language` / `commit` 目前**没人消费**：daemon 只读
+  `speech.toml` 的场景还不存在，speechd 也没有语种 op。页面改了不生效，需要
+  speechd 侧加参数（`xime-infer` 已支持 `transcribe_with_language`）与 daemon
+  侧读配置。
+- 在线插件模式（`speech.toml` 的 Online）未接。
+- CPU 后端只能做到句级；要给无独显的机器做逐字流式，得换流式模型（RNN-T 那类）
+  或换更小的模型。
+- 模型在噪声上会幻觉（实测开头吐出过 `И вот`），目前靠 LocalAgreement 过滤，
+  没有独立的 VAD 门控。
+
+**上一项：语音输入重新接入（PTT，整段识别）**（2026-11-18 早）。
+
+`136418a` 曾把语音整个屏蔽（sherpa-onnx 构建要联网拉预编译包），只留下交互层
+与占位的 `speech.rs`。libximecore 现在用 candle 重做了引擎（`xime-infer` 的
+Qwen3-ASR），并把模型与麦克风挪到**独立进程** `xime-speechd`，输入法只通过
+Unix socket 说 JSON 行——正好解决「1.9GB 权重常驻输入法」「推理崩溃连累打字」
+「麦克风授权落错进程」三个问题。这次只换引擎、恢复入口，不动交互层。
+
+- **`speech.rs` 重写**：worker 线程独占 socket 客户端，主循环只消费
+  `SpeechEvent`。`press()` 开始、`release()` 结束上屏、`cancel()` 停止但不上屏、
+  `toggle()` 给托盘/DBus。首次使用自动拉起 `xime-speechd`（同目录 → PATH），
+  等 socket 就绪；电平按 `status.level` 采样做快起慢落，喂悬浮层频谱。
+- **热键是 PTT 不是 toggle**：按住 Ctrl+Alt+V 说话、松开（V 或任一 Ctrl/Alt）
+  立即识别上屏。按住期间 auto-repeat 连发按下由 worker 幂等忽略。听写中键盘
+  模态吞键，Esc = 取消。
+- **全局入口**：DBus `ToggleSpeech` + `GetSpeechStatus`；托盘菜单新增「语音
+  输入」（id 7）。Wayland 没有全局快捷键协议，未激活时按键到不了 IM，桌面
+  快捷键绑 DBus 方法即可。
+- ~~**服务不是流式的**：单次录音上限 30 秒，没有中间结果，停止后整段识别。~~
+  已由上面「语音输入改为流式」取代；`Loading` 只在模型首次装载时出现。
+
+**下一步（语音）**：
+- 真人试听确认识别质量与标点；本机只验了静音音频（空结果、无崩溃）。
+- ~~设置页语音页（`voice-page`）尚未打开~~：已由上面「设置页语音页已接入」完成。
+- 在线插件模式（`speech.toml` 的 Online）未接：daemon 还没读这份配置，
+  插件侧契约 `speech.configure/feed/stop` 已在 `xime-plugin` 里。
+- 30 秒上限与「没有 VAD 自动断句」是服务侧约束；若要「说完自动上屏」，
+  得在 daemon 侧按 `level` 做静音检测自动 `release()`。
+
+**上一项：接入 COSMIC 桌面（P0：自启动 + 输入法槽位冲突）**（2026-11-17 晚）。
 
 COSMIC 是 Wayland-only，只讲 `zwp_input_method_v2` + `zwp_text_input_v3`。本仓
 的 v2 后端（`im_v2.rs`）与 `ext/wlr data-control` 早就具备，因此这次**不动
