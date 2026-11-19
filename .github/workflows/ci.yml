@@ -99,21 +99,24 @@ jobs:
             libasound2-dev \
             pkg-config
 
+      # clone 只为了装 xime-speechd（它不在本仓库）。
+      #
+      # 这里**故意不写 [patch]**，别再加回来。XimeChe 自己直接依赖 librime，而
+      # xime-config 又用 path 依赖指向同一个 librime（crates/xime-config/Cargo.toml
+      # 里 `librime = { path = "../librime" }`）。只要把 xime-config 单独 patch 到
+      # 本地副本、librime 仍走 git，图里就会出现两份 librime-sys2（一份 path、
+      # 一份 git），两者都声明 links = "rime"，cargo 在解析阶段直接失败：
+      #   package `librime-sys2` links to the native library `rime`, but it
+      #   conflicts with a previous package which links to `rime` as well
+      # 全量 patch（连 librime 一起）能过，但那就得给 clone 加 --recurse-submodules
+      # 让 librime-sys2 编得出 C++ 库，白花几分钟。
+      #
+      # 现状：主程序按 Cargo.toml 的 git 依赖解析（与上面 build job 完全同一条路，
+      # 已被反复验证），speechd 用这份 clone 的独立工作区编，两边都取 libximecore
+      # main 的 HEAD。speechd 只依赖 xime-speech-service、不碰 librime，所以
+      # --depth 1 不带子模块足够。
       - name: Checkout libximecore
         run: git clone --depth 1 https://github.com/ximeiorg/libximecore.git ../libximecore
-
-      # 与 release.yml 同款 patch：让输入法与 speechd 编自同一份代码。
-      # .cargo/config.toml 是本地开发用的覆盖（不入库），CI 上必须自己写。
-      - name: Point cargo at the cloned libximecore
-        run: |
-          mkdir -p .cargo
-          cat > .cargo/config.toml <<'EOF'
-          [patch."https://github.com/ximeiorg/libximecore"]
-          xime-config = { path = "../libximecore/crates/xime-config" }
-          xime-setup-lib = { path = "../libximecore/crates/xime-setup" }
-          xime-plugin = { path = "../libximecore/crates/xime-plugin" }
-          xime-speech-service = { path = "../libximecore/crates/xime-speech-service" }
-          EOF
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
