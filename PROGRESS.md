@@ -1,6 +1,27 @@
 # XimeChe（曦码·澈输入法）开发进度
 
 ## 当前状态
+**语音引擎支持第二个模型族：Fun-ASR-Nano（2026-11-19 晚）。**
+
+libximecore 的 `xime-infer` 现在按模型族分目录（`asr/qwen3_asr`、`asr/fun_asr`），
+`xime-speech-service` 按模型目录里的 `config.json` 自动派发。**本仓库无需改代码**：
+
+- 输入法只链 `xime-speech-service` 的客户端半（`protocol` + `transport`），
+  这两块没有改动；`Request` 仍然只有 `ListenStart` / `ListenStop`。
+- 模型目录约定没变（`~/.config/xime/models/<id>/`），就绪判定仍是
+  `config.json` + `model.safetensors` + 分词器；转换脚本会顺手写 `model.json`，
+  所以设置页显示的是「Fun-ASR-Nano 2512」而不是目录名。
+- `speech.rs` 的增量上屏逻辑对非流式模型天然成立：录音期间 `committed` 一直为空，
+  松手后 `status.text` 走同一个「补尾巴」路径一次性上屏；面板此时按
+  `Transcribing` 显示「正在识别…」。
+- **必须重装 speechd**（`XIME_SPEECH_REBUILD=1 ./dev-install.sh`）：它不在本仓库，
+  旧二进制里没有 Fun-ASR 的装载分支，装上目录也只会报「不是 Qwen3-ASR」。
+
+实测（真权重，`~/.config/xime/models/fun-asr-nano-2512`）：speechd 扫描 → `Select`
+→ 6.0 s 装载完成，`provider = CUDA · …`；识别 5.6 s 音频 0.81 s（0.14× 实时，
+GPU）/ 9.3 s（1.66×，CPU）。与 transformers 参考实现三层对拍一致（编码器余弦
+1.000000、贪心 token 逐位相同）。
+
 **语音输入改为流式：边说边出字**（2026-11-18 晚）。
 
 上一轮接入时是一次性识别——说完才出字。这次改成流式：录音中逐秒编码、滚动

@@ -1,14 +1,20 @@
 //! 语音听写：宿主侧接线，识别引擎在**独立进程** `xime-speechd` 里。
 //!
-//! 为什么不把模型放进输入法进程：Qwen3-ASR-0.6B 权重 1.9 GB，常驻等于永不
-//! 还内存；推理崩了不能连累打字；麦克风授权也该落在真正录音的那个进程上。
+//! 为什么不把模型放进输入法进程：语音模型动辄 1–2 GB（Qwen3-ASR-0.6B 与
+//! Fun-ASR-Nano 都是 1.9 GB），常驻等于永不还内存；推理崩了不能连累打字；
+//! 麦克风授权也该落在真正录音的那个进程上。
 //! 这三条是 libximecore `xime-speech-service` 的设计前提，本模块顺着接管：
 //!
 //! ```text
 //! wayland 线程 ──命令──► worker 线程 ──JSON 行/socket──► xime-speechd
 //!      ▲                    │                          ├ 麦克风（cpal）
-//!      └──── SpeechEvent ───┘                          └ Qwen3-ASR（candle）
+//!      └──── SpeechEvent ───┘                          └ 语音模型（candle）
 //! ```
+//!
+//! 模型族由 speechd 按目录里的 `config.json` 自己判定，本模块不关心是哪一个：
+//! Qwen3-ASR 与 Fun-ASR-Nano 都走同一套 `ListenStart` / `ListenStop`。
+//! 区别只在**流式能力**——Qwen3-ASR 边录边出字，Fun-ASR（非因果编码器 + LFR
+//! 跨帧）只能整段识别，录音期间 `committed` 一直是空的，松手后一次性上屏。
 //!
 //! 交互（对齐商业输入法的语音键）：
 //!
@@ -17,9 +23,11 @@
 //!   右 Ctrl 要「独自按住」约 250ms 才起播，期间按别的键即当组合键撤销；
 //! - 托盘与 DBus `ToggleSpeech` 是 toggle（按一下开始、再按一下结束），
 //!   供未激活时由桌面全局快捷键调用；
-//! - 服务是**流式**的：录音中每轮重解码，`status.committed` 是已经定稿、
-//!   可以立刻上屏的增量，`status.partial` 是还会变的预览（驱动悬浮层）。
-//!   定稿部分永不回改，所以这里按增量 `commit_string`，松手只补最后的尾巴。
+//! - 支持流式的模型（Qwen3-ASR）：录音中每轮重解码，`status.committed` 是已经
+//!   定稿、可以立刻上屏的增量，`status.partial` 是还会变的预览（驱动悬浮层）。
+//!   定稿部分永不回改，所以这里按增量 `commit_string`，松手只补最后的尾巴；
+//! - 非流式模型（Fun-ASR-Nano）：录音期间两者都是空的，面板按 `Transcribing`
+//!   显示「正在识别…」，松手后 `status.text` 一次性走同一个增量路径上屏。
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
