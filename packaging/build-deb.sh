@@ -104,7 +104,7 @@ cuda_env() {
         die "没有 GPU 也没有 CUDA_COMPUTE_CAP：显式给一个（如 CUDA_COMPUTE_CAP=80）"
     say "目标架构 sm_${CUDA_COMPUTE_CAP}（cubin 在同一 major 内向上兼容）"
 
-    # CUDA 12.4 只支持到 gcc 13.2，而 Ubuntu 24.04 自带 13.3：不换会把
+    # CUDA 12.x 只支持到 gcc 13.2，而 Ubuntu 24.04 自带 13.3：不换会把
     # 「unsupported GNU version」当错误抛出来。
     if [ -z "${NVCC_CCBIN:-}" ]; then
         gcc_major=$(gcc -dumpversion 2>/dev/null | cut -d. -f1)
@@ -168,8 +168,12 @@ inspect() {
         echo "  语音后端 cuda，内嵌 sm_${CUDA_COMPUTE_CAP} cubin ${cubins} 个"
         echo "  运行时要求：CUDA ${runtime}.x（release 包是 CUDA 12.x）"
         if [ "${runtime:-}" != 12 ]; then
+            # 提示里别写死某个小版本：本机装的是 12.6 还是 12.8 都可能，
+            # release 只认 12.x 这条线。
+            local suggest
+            suggest=$(ls -d /usr/local/cuda-12.* 2>/dev/null | sort -V | tail -1)
             echo "  提示：本包基于 CUDA ${runtime}.x，与 release 的 CUDA 12.x 包不通用；" \
-                 "要与 release 对齐就 CUDA_HOME=/usr/local/cuda-12.4 $0 cuda"
+                 "要与 release 对齐就 CUDA_HOME=${suggest:-/usr/local/cuda-12.6} $0 cuda"
         fi
     elif [ "$backend" = cuda ]; then
         die "$deb 没链接 libcudart，CUDA 变体没生效（speechd 是不是被 CPU 版覆盖了？）"

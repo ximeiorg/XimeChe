@@ -69,7 +69,7 @@ for Linux Wayland, using Rime engine and self-drawn UI.
 This package ships the CUDA build of the speech recognition daemon
 (xime-speechd). It requires an NVIDIA GPU with a working driver and
 the CUDA 12 runtime (libcudart.so.12, libcublas.so.12, libcurand.so.10),
-e.g. the cuda-cudart-12-4 / libcublas12 packages from NVIDIA's
+e.g. the cuda-cudart-12-6 / libcublas12 packages from NVIDIA's
 CUDA repository. Without them speech recognition will not start.
 
 It conflicts with the plain xime package (same files, different

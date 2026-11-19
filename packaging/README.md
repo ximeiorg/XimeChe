@@ -8,7 +8,7 @@
 | 文件 | 包管理器 | 主要发行版 | 构建环境 |
 | --- | --- | --- | --- |
 | `xime_<ver>_amd64.deb` | apt / dpkg | Debian、Ubuntu、Mint、Deepin、UOS | ubuntu-24.04（`cargo-deb`，CPU 语音） |
-| `xime-cuda_<ver>_amd64.deb` | apt / dpkg | 同上，且有 NVIDIA 显卡 | ubuntu-24.04 + CUDA 12.4（`cargo-deb --variant cuda`） |
+| `xime-cuda_<ver>_amd64.deb` | apt / dpkg | 同上，且有 NVIDIA 显卡 | ubuntu-24.04 + CUDA 12.6（`cargo-deb --variant cuda`） |
 | `xime-<ver>-1.fc<N>.x86_64.rpm` | dnf / zypper | Fedora、RHEL 系、openSUSE | Fedora 容器（`rpmbuild`） |
 | `xime-<ver>-1-x86_64.pkg.tar.zst` | pacman | Arch、Manjaro、EndeavourOS | Arch 容器（`makepkg`） |
 | `xime-<ver>-x86_64-linux.tar.gz` | 手动 | 任意发行版 | ubuntu-24.04（`stage.sh`，CPU 语音） |
@@ -44,7 +44,8 @@ sudo tar -C / -xzf xime-*-x86_64-linux.tar.gz
 CUDA 版**不硬依赖** CUDA 库（官方仓库里没有 `libcudart12`，硬依赖会装不上），
 所以需要你自己保证这三个库在：`libcudart.so.12`、`libcublas.so.12`、
 `libcurand.so.10`。最省事的办法是装发行版的 `nvidia-cuda-toolkit`，或者从
-NVIDIA 的 CUDA 仓库装 `cuda-cudart-12-4` + `libcublas12`。缺库时语音用不了
+NVIDIA 的 CUDA 仓库装 `cuda-cudart-12-6` + `libcublas12`（12.x 任意小版本都行，
+包是按 12.6 编的，靠 minor version compatibility 向下兼容）。缺库时语音用不了
 （输入法本体照常工作），状态栏/通知会给出错误提示。
 
 装完在 KDE 里启用（KWin 只在启动时装配虚拟键盘，改完需要重新登录）：

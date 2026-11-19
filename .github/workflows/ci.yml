@@ -66,8 +66,13 @@ jobs:
   # 语音引擎的 CUDA 后端只在 release 里用到，但它的代码在 libximecore：
   # feature 名改了、candle 升了、kernel 编译方式变了，都要等到打 tag 才发现，
   # 那时已经来不及。这个 job 每次 push/PR 就按 release 的同款工具链
-  # （CUDA 12.4 + gcc-12）编一遍 speechd，并用 cuobjdump 确认 kernel 真进了
+  # （CUDA 12.6.3 + gcc-12）编一遍 speechd，并用 cuobjdump 确认 kernel 真进了
   # 二进制——只靠链接成功是不够的，工具链静默跳过编译时链接照样过。
+  #
+  # 为什么不是 12.4：NVIDIA 的 ubuntu2404 仓库（runner 是 24.04）里最早只有
+  # cuda-12-5，`cuda-12-4` 根本不存在，装它只会得到 "Unable to locate
+  # package"。要留在 12.x 的 soname（libcudart.so.12）里，12.6.3 是最近的一个
+  # 可装版本；minor version compatibility 保证 12.x 驱动都能跑。
   cuda-speech:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -82,7 +87,7 @@ jobs:
       - name: Install CUDA toolkit
         uses: Jimver/cuda-toolkit@v0.2.19
         with:
-          cuda: '12.4.1'
+          cuda: '12.6.3'
           method: 'network'
 
       - name: Checkout libximecore
