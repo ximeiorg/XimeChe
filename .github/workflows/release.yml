@@ -103,20 +103,26 @@ jobs:
             libasound2-dev \
             pkg-config
 
-      # CUDA 12.6.3 是 cudarc 0.19 白名单（12.x–13.4）里、且 runner 的
-      # ubuntu2404 仓库真能装到的最老版本——那个仓库从 cuda-12-5 才开始收录，
-      # 写 12.4.1 会直接 "Unable to locate package cuda-12-4"。
-      # 仍在 12.x，编出来的二进制 soname 是 libcudart.so.12，覆盖所有 CUDA 12.x
-      # 运行时；minor version compatibility 保证旧 12.x 驱动也能加载。
+      # 直接用 NVIDIA 的 apt 源，不用 Jimver/cuda-toolkit：那个 action 的可用
+      # 版本是源码里写死的数组（v0.2.19 最新 12.6.2），而且它装的是 cuda-12-6
+      # 元包——依赖链带 nvidia-open-560 驱动包，CI 上没 GPU 纯属浪费。
+      # 这里只装编译器 + 开发库；补丁版本由源决定（现 12.6.3），soname 仍是
+      # libcudart.so.12，覆盖所有 CUDA 12.x 运行时，minor version
+      # compatibility 保证旧 12.x 驱动也能加载。
       # 编 CUDA 不需要 GPU，nvcc 是纯交叉编译。但 runner 上没有 nvidia-smi，
       # cudaforge 探测不到架构会直接报错（不是回落默认值），所以必须显式钉。
       # 同一 major 内 cubin 向上兼容，所以 sm_80 能跑 30/40 系（sm_86/89）。
       - name: Install CUDA toolkit
         if: matrix.variant == 'cuda'
-        uses: Jimver/cuda-toolkit@v0.2.19
-        with:
-          cuda: '12.6.3'
-          method: 'network'
+        run: |
+          curl -fsSL -o /tmp/cuda-keyring.deb \
+            https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
+          sudo dpkg -i /tmp/cuda-keyring.deb
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cuda-compiler-12-6 cuda-libraries-dev-12-6
+          echo "/usr/local/cuda-12.6/bin" >> "$GITHUB_PATH"
+          echo "CUDA_HOME=/usr/local/cuda-12.6" >> "$GITHUB_ENV"
 
       - name: Pin a GCC that CUDA 12.6 accepts
         if: matrix.variant == 'cuda'
