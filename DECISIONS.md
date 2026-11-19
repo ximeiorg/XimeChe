@@ -558,15 +558,20 @@ UI，数据与动作靠宿主注入 7 个 `fn` 回调。XimeChe 的 `crates/xime
    本地路径（只 patch 语音/配置相关 crate，**librime 不 patch**，否则要连带
    构建 librime 子模块），然后 `--manifest-path ../libximecore/Cargo.toml`
    单独构建 speechd。
-2. CUDA 用 12.4.1：cudarc 0.19 的版本白名单是 12.x–13.4，且 soname 是
+2. CUDA 用 12.6.3：cudarc 0.19 的版本白名单是 12.x–13.4，且 soname 是
    `libcudart.so.12`，覆盖所有 CUDA 12.x 运行时。toolkit 用 Jimver action 装。
+   **不能写 12.4.1**：runner 是 ubuntu-24.04，而 NVIDIA 的 `ubuntu2404` 仓库
+   从 `cuda-12-5` 才开始收录，`cuda-12-4` 在那里不存在，action 会以
+   `Unable to locate package cuda-12-4` 失败（2026-11-19 实际踩到）。12.6.3 是
+   该仓库里最老的可装 12.x，留在 12.x 内 soname 不变；minor version
+   compatibility 保证 12.x 驱动都能加载。
 3. `CUDA_COMPUTE_CAP=80` 必须钉住：编 CUDA 本身不需要 GPU（nvcc 只是交叉
    编译，cudarc 的 build.rs 仅执行 `nvcc --version`），但 runner 上没有
    nvidia-smi，cudaforge 的 `detect_compute_cap()` 会返回 Err 让构建失败——
    它不会回落到某个默认架构，所以这里必须显式给值。
    cubin 在同一 major 内向上兼容，所以 30/40 系（sm_86/89）能跑，Hopper 及以上
-   需要自行重编。Ubuntu 24.04 的 gcc 13.3 超出 CUDA 12.4 的支持范围，装
-   gcc-12 并设 `NVCC_CCBIN`。
+   需要自行重编。Ubuntu 24.04 的 gcc 13.3 超出 CUDA 12.x 官方支持范围（≤13.2），
+   装 gcc-12 并设 `NVCC_CCBIN`。
 4. 打包后**用 ldd 断言变体**（CUDA 版必须链到 libcudart，CPU 版必须没有），
    防止两个包复制同一份二进制。
 
@@ -582,7 +587,7 @@ feature 改名、candle 升级、kernel 编译方式变化，都要等到打 tag
 **做法**：
 
 1. `.github/workflows/ci.yml` 新增 `cuda-speech` job，每次 push/PR 用和 release
-   **相同**的工具链（CUDA 12.4 + gcc-12）编一遍 `xime-speechd --features cuda`。
+   **相同**的工具链（CUDA 12.6.3 + gcc-12）编一遍 `xime-speechd --features cuda`。
    校验两条：`ldd` 里有 `libcudart`；`cuobjdump -lelf` 里能数出 `sm_80` cubin。
    之所以要第二条——链接成功不等于 kernel 编进去了，只有 cubin 是实据。
    （canary 必须和 release 走同一条路，否则它验的是另一个东西。）
