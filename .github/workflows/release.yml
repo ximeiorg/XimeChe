@@ -137,22 +137,20 @@ jobs:
       # 说明：Cargo.lock 里 libximecore 相关 crate 被本地 .cargo/config.toml
       # patch 成路径依赖（无 git 条目），CI 上没有该 patch，cargo 会从 GitHub
       # 解析 libximecore@main 并自行补全锁文件——这就是发版构建的实际依赖来源。
-      # 这里把需要的那几个 crate 也 patch 到刚 clone 的副本上，保证输入法与
-      # 语音引擎编自同一份代码（librime 不在这场 patch 里：它仍走 git 依赖，
-      # 否则要连带构建 librime 子模块）。
+      #
+      # 这里**不要**再加 [patch."…/libximecore"]：XimeChe 直接依赖 librime，而
+      # xime-config 用 path 依赖指向同一个 librime。只 patch 一部分 crate 会让
+      # 依赖图里出现两份 librime-sys2（path 一份、git 一份），都声明
+      # links = "rime"，cargo 直接报：
+      #   package `librime-sys2` links to the native library `rime`, but it
+      #   conflicts with a previous package which links to `rime` as well
+      # 全量 patch（连 librime）可以消掉冲突，但为此要给 clone 加子模块、在
+      # CI 上从源码编 librime（leveldb / opencc / yaml-cpp…），得不偿失。
+      #
+      # clone 只用于编 xime-speechd：它不依赖 librime（只依赖
+      # xime-speech-service），所以 --depth 1 不带子模块即可。
       - name: Checkout libximecore
         run: git clone --depth 1 https://github.com/ximeiorg/libximecore.git ../libximecore
-
-      - name: Point cargo at the cloned libximecore
-        run: |
-          mkdir -p .cargo
-          cat > .cargo/config.toml <<'EOF'
-          [patch."https://github.com/ximeiorg/libximecore"]
-          xime-config = { path = "../libximecore/crates/xime-config" }
-          xime-setup-lib = { path = "../libximecore/crates/xime-setup" }
-          xime-plugin = { path = "../libximecore/crates/xime-plugin" }
-          xime-speech-service = { path = "../libximecore/crates/xime-speech-service" }
-          EOF
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
