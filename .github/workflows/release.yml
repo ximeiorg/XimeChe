@@ -124,6 +124,9 @@ jobs:
           sudo apt-get install -y gcc-12 g++-12
           echo "NVCC_CCBIN=/usr/bin/g++-12" >> "$GITHUB_ENV"
           echo "CUDA_COMPUTE_CAP=80" >> "$GITHUB_ENV"
+          # 安装成功不等于 nvcc 进了 PATH（cudarc 是直接调 `nvcc`，不认
+          # CUDA_HOME）；在这里失败，比等 candle 编到一半再报错好排查。
+          nvcc --version
 
       # 说明：Cargo.lock 里 libximecore 相关 crate 被本地 .cargo/config.toml
       # patch 成路径依赖（无 git 条目），CI 上没有该 patch，cargo 会从 GitHub
@@ -203,7 +206,10 @@ jobs:
             # ldd 只证明「声明了 libcudart 依赖」，证明不了 kernel 真被编进去——
             # 工具链静默跳过 kernel 编译时，链接照样成功。cuobjdump 直接列出
             # 二进制内嵌的 cubin，架构必须是 CUDA_COMPUTE_CAP 钉的那个。
-            cuobjdump=$(command -v cuobjdump || echo /usr/local/cuda/bin/cuobjdump)
+            cuobjdump=$(command -v cuobjdump \
+              || ls -d /usr/local/cuda*/bin/cuobjdump 2>/dev/null | sort -V | tail -1)
+            test -n "$cuobjdump" \
+              || { echo "::error::找不到 cuobjdump，CUDA 工具链没装好"; exit 1; }
             "$cuobjdump" -lelf "$extract/usr/bin/xime-speechd" > /tmp/cubins.txt
             cubins=$(grep -c '\.sm_80\.cubin' /tmp/cubins.txt || true)
             echo "内嵌 sm_80 cubin：${cubins} 个（共 $(wc -l < /tmp/cubins.txt) 行）"

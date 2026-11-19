@@ -90,6 +90,13 @@ jobs:
           cuda: '12.6.3'
           method: 'network'
 
+      # cudarc 的 build.rs 是直接 `nvcc --version`（不认 CUDA_HOME），PATH 里
+      # 没有 nvcc 时报错信息很难懂；这里先钉死一条，失败点一眼可见。
+      - name: Verify nvcc
+        run: |
+          nvcc --version
+          echo "CUDA_HOME=${CUDA_HOME:-/usr/local/cuda}"
+
       - name: Checkout libximecore
         run: git clone --depth 1 https://github.com/ximeiorg/libximecore.git ../libximecore
 
@@ -125,7 +132,11 @@ jobs:
             || { echo "::error::speechd 没有链接 libcudart"; exit 1; }
 
           # 2) kernel 真的编进去了，且架构是 CUDA_COMPUTE_CAP 钉的那个
-          CUOBJDUMP=$(command -v cuobjdump || echo /usr/local/cuda/bin/cuobjdump)
+          #    （action 不一定把 CUDA bin 放进 PATH，/usr/local/cuda 这个软链也
+          #      不是每个版本都建——先查 PATH，再在所有 cuda-*/bin 里挑最新的）
+          CUOBJDUMP=$(command -v cuobjdump \
+            || ls -d /usr/local/cuda*/bin/cuobjdump 2>/dev/null | sort -V | tail -1)
+          test -n "$CUOBJDUMP" || { echo "::error::找不到 cuobjdump，CUDA 工具链没装好"; exit 1; }
           "$CUOBJDUMP" -lelf "$BIN" > /tmp/cubins.txt
           CUBINS=$(grep -c '\.sm_80\.cubin' /tmp/cubins.txt || true)
           echo "内嵌 sm_80 cubin：${CUBINS} 个"
