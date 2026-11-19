@@ -3,6 +3,10 @@
 所有格式都由 GitHub Actions 在打 tag 时自动构建（`.github/workflows/release.yml`），
 产物直接挂到 Release 页面。
 
+日常 push 到 `main` 时 `ci.yml` 的 `package` job 也会打一个 **CPU 版 deb**
+（只这一个格式），产物挂在本次 run 的 **Artifacts** 里（保留 14 天），用来随手
+试装；正式发版、CUDA 变体、rpm / arch / 源码包仍然只走 tag。
+
 ## 产物矩阵
 
 | 文件 | 包管理器 | 主要发行版 | 构建环境 |

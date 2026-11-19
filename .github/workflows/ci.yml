@@ -5,6 +5,9 @@ on:
     branches: [main, master]
   pull_request:
     branches: [main, master]
+  # 手动触发：想立刻要一个安装包，又不想打 tag 时用（产物挂在本次 run 的
+  # artifacts 上，不建 Release）。
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -63,6 +66,95 @@ jobs:
 
       - name: Run tests
         run: cargo test --release --verbose
+
+  # 安装包：把 CPU 版 .deb 打出来挂在本次 run 的 artifacts 上。
+  #
+  # 为什么不复用 build job：打包要多装 cargo-deb、多编一遍 CPU 版 speechd，
+  # 而且 PR 上编出来的包没人会下载——那条链路越短越好，包这条另起一个 job，
+  # 只在 push / 手动触发时跑。
+  #
+  # 正式发版仍然走 release.yml（打 tag → Releases 页面，CPU + CUDA 两个变体
+  # + rpm + arch + 源码包）；这里只出一个 CPU 版，供推送后就手边试用。
+  package:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            librime-dev \
+            libdbus-1-dev \
+            libwayland-dev \
+            wayland-protocols \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libfontconfig1-dev \
+            libfreetype6-dev \
+            libasound2-dev \
+            pkg-config
+
+      - name: Checkout libximecore
+        run: git clone --depth 1 https://github.com/ximeiorg/libximecore.git ../libximecore
+
+      # 与 release.yml 同款 patch：让输入法与 speechd 编自同一份代码。
+      # .cargo/config.toml 是本地开发用的覆盖（不入库），CI 上必须自己写。
+      - name: Point cargo at the cloned libximecore
+        run: |
+          mkdir -p .cargo
+          cat > .cargo/config.toml <<'EOF'
+          [patch."https://github.com/ximeiorg/libximecore"]
+          xime-config = { path = "../libximecore/crates/xime-config" }
+          xime-setup-lib = { path = "../libximecore/crates/xime-setup" }
+          xime-plugin = { path = "../libximecore/crates/xime-plugin" }
+          xime-speech-service = { path = "../libximecore/crates/xime-speech-service" }
+          EOF
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            ../libximecore/target
+          key: ${{ runner.os }}-cargo-deb-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-deb-
+            ${{ runner.os }}-cargo-
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb --locked
+
+      - name: Resolve version
+        id: version
+        run: |
+          VERSION=$(grep -m1 '^version = ' Cargo.toml | sed -E 's/.*"(.*)".*/\1/')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "打包版本：$VERSION"
+
+      # 一个入口把「主程序 + CPU 版 speechd + cargo deb + 包内容自查」全做掉。
+      # 逻辑只维护 packaging/build-deb.sh 一份，CI 与本地不会走偏；自查那步会
+      # 解开包确认 usr/bin 下四个二进制齐全、speechd 不是 CUDA 版。
+      - name: Build CPU deb
+        run: ./packaging/build-deb.sh cpu
+
+      - name: Upload deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: xime-${{ steps.version.outputs.version }}-amd64.deb
+          path: target/deb-out/*.deb
+          if-no-files-found: error
+          retention-days: 14
+
   # 语音引擎的 CUDA 后端只在 release 里用到，但它的代码在 libximecore：
   # feature 名改了、candle 升了、kernel 编译方式变了，都要等到打 tag 才发现，
   # 那时已经来不及。这个 job 每次 push/PR 就按 release 的同款工具链
