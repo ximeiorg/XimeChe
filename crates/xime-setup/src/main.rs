@@ -305,6 +305,13 @@ fn main() -> iced::Result {
         return Ok(());
     }
 
+    // 品牌素材由本仓库提供：窗口图标与侧栏/关于页 logo 都在这里注入，
+    // xime-setup-lib 自身不带任何品牌图（它不知道产品长什么样）。
+    xime_setup_lib::set_brand_assets(xime_setup_lib::BrandAssets {
+        app_icon_png: include_bytes!("../../../resources/icons/512x512/apps/xime.png"),
+        logo_svg: include_bytes!("../../../resources/icons/xime-logo.svg"),
+    });
+
     set_notify_deploy(|| {
         if let Ok(conn) = zbus::blocking::Connection::session() {
             let _ = conn.call_method(

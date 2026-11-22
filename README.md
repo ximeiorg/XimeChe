@@ -23,13 +23,17 @@
 
 ## 效果预览
 
-候选窗：
+候选窗（五笔码表提示 + 主题高亮）：
 
-![候选窗](docs/srf.png)
+<p align="center">
+  <img src="docs/candidate.png" width="760" alt="候选窗">
+</p>
 
 设置界面：
 
-![设置界面](docs/setup.png)
+<p align="center">
+  <img src="docs/setup.png" width="860" alt="设置界面">
+</p>
 
 ## 架构
 
