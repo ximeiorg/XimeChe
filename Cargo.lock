@@ -7189,10 +7189,12 @@ dependencies = [
  "serde_yaml",
  "sha2 0.11.1",
  "thiserror 2.0.21",
+ "toml",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
  "xime-lexicon",
+ "xime-p2p",
 ]
 
 [[package]]
@@ -7256,7 +7258,7 @@ dependencies = [
 [[package]]
 name = "xime-p2p"
 version = "0.1.0"
-source = "git+https://github.com/ximeiorg/libximep2p.git?rev=1eddeb6eab3d1c31836b1cc4362cbc1f787ecdc8#1eddeb6eab3d1c31836b1cc4362cbc1f787ecdc8"
+source = "git+https://github.com/ximeiorg/libximep2p.git?rev=db9dbc8f8d5b77d53d746524bf30cb0a8c05317b#db9dbc8f8d5b77d53d746524bf30cb0a8c05317b"
 dependencies = [
  "base64 0.23.1",
  "chacha20poly1305 0.11.0",
@@ -7364,7 +7366,7 @@ dependencies = [
 [[package]]
 name = "xime-sync-domain"
 version = "0.1.0"
-source = "git+https://github.com/ximeiorg/libximep2p.git?rev=1eddeb6eab3d1c31836b1cc4362cbc1f787ecdc8#1eddeb6eab3d1c31836b1cc4362cbc1f787ecdc8"
+source = "git+https://github.com/ximeiorg/libximep2p.git?rev=db9dbc8f8d5b77d53d746524bf30cb0a8c05317b#db9dbc8f8d5b77d53d746524bf30cb0a8c05317b"
 dependencies = [
  "async-trait",
  "base64 0.23.1",

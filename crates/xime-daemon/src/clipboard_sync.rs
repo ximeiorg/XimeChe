@@ -7,8 +7,9 @@
 //! - `plugin`：经 `clipboard_sync` JS 插件（WebDAV / 自建服务器）。实际加载哪个
 //!   插件由 `plugin_id` 偏好决定——解析语义对齐 Android
 //!   `ActivePluginSelection.resolve`（偏好有效用偏好，否则取首个已启用项）；
-//! - `p2p`：局域网直连（`xime-p2p`），不经任何服务器。身份与已配对表在
-//!   `~/.config/<app>/p2p/`，与设置程序的「设备关联」页共用同一目录。
+//! - `p2p`：局域网直连（`xime-p2p`），不经任何服务器。长期身份在
+//!   `~/.config/<app>/p2p/`，已配对表在统一库 `xime.db` 的 `p2p_peers` 表，
+//!   与设置程序的「设备关联」页共用同一份数据。
 //!
 //! 共同语义：
 //! - **push**：watcher 捕获文本 → hash 去重 → 插件 `clipboardSync.push(profile)`
@@ -45,6 +46,12 @@ const P2P_POLL_INTERVAL: Duration = Duration::from_millis(200);
 /// 插件侧的新内容就只能等用户打开剪贴板面板才看得到。2 秒对齐 Android
 /// `ClipboardSyncBridge` 的轮询节奏。
 const PLUGIN_PULL_INTERVAL: Duration = Duration::from_secs(2);
+
+/// 状态快照写盘间隔。
+///
+/// 设置程序的「设备关联」页按 10 秒 TTL 判断快照新鲜度，这里 2 秒写一次；
+/// 桥线程本身 200ms 一跳，不能每跳都落盘。
+const STATUS_PUBLISH_INTERVAL: Duration = Duration::from_secs(2);
 
 /// 系统剪贴板回声抑制窗口。
 ///
@@ -215,8 +222,10 @@ pub enum SyncBackend {
 pub struct P2pConfig {
     /// 本机长期身份（`p2p/identity.bin`）。
     pub identity: Arc<xime_p2p::Identity>,
-    /// 已配对表（`p2p/peers.json`）。
-    pub store_path: PathBuf,
+    /// 已配对表（统一库 `xime.db` 的 `p2p_peers` 表，与设置程序共用）。
+    pub book: Arc<dyn xime_p2p::PeerBook>,
+    /// 统一库路径（日志与测试断言用）。
+    pub db_path: PathBuf,
 }
 
 /// `Identity` 未实现 `Debug`（内部含私钥，刻意不打印），这里只暴露 did 与路径。
@@ -224,7 +233,7 @@ impl std::fmt::Debug for P2pConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("P2pConfig")
             .field("did", &self.identity.did().to_hex())
-            .field("store_path", &self.store_path)
+            .field("db_path", &self.db_path)
             .finish()
     }
 }
@@ -237,7 +246,9 @@ pub fn sync_config_path() -> PathBuf {
         .join("clipboard_sync.toml")
 }
 
-/// P2P 数据目录（`~/.config/<app>/p2p/`）：长期身份 + 已配对表。
+/// P2P 数据目录（`~/.config/<app>/p2p/`）：长期身份。
+///
+/// 已配对表不在这个目录里——它落在同级的 `xime.db`，与设置程序共用。
 ///
 /// 必须与设置程序 `xime-setup-lib::p2p_dir()` 指向同一目录——两边各算各的，
 /// 就成了「设置里配对成功、输入法仍认为没配对」，界面上看不出任何异常。
@@ -246,6 +257,46 @@ pub fn p2p_dir() -> PathBuf {
         .parent()
         .expect("plugins dir has parent")
         .join("p2p")
+}
+
+/// 把节点状态写进 `p2p/status.json`，供设置程序跨进程读取。
+///
+/// 设置程序不自己起节点（端口、连接、配对表都在 daemon 手上），只读这份快照。
+/// 节点没起时也写 `running:false`，否则界面分不清「输入法没运行」和「文件过期」。
+/// 文件里有设备名和局域网地址，权限收到 0600。写失败只影响界面显示，不能让
+/// 同步受影响，所以错误一律忽略。
+fn write_status_snapshot(dir: &Path, node: Option<&xime_p2p::Node>) {
+    let payload = match node {
+        Some(node) => {
+            let status = node.status();
+            serde_json::json!({
+                "ts": xime_p2p::now_secs(),
+                "running": true,
+                "did": status.did,
+                "port": status.port,
+                "peers": status.peers,
+            })
+        }
+        None => serde_json::json!({
+            "ts": xime_p2p::now_secs(),
+            "running": false,
+        }),
+    };
+    if std::fs::create_dir_all(dir).is_err() {
+        return;
+    }
+    let path = dir.join("status.json");
+    let tmp = dir.join("status.json.tmp");
+    if std::fs::write(&tmp, payload.to_string()).is_err() {
+        return;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+    }
+    // 原子替换：设置程序可能正好在读，读到半个 JSON 会当场显示成「不可用」。
+    let _ = std::fs::rename(&tmp, &path);
 }
 
 /// 配置文件 mtime（不存在/无权限时为 None）。
@@ -333,9 +384,24 @@ fn p2p_config(p2p_root: &Path) -> Option<P2pConfig> {
         );
         return None;
     };
+    // 存储归客户端：协议库只定义 `PeerBook`，桌面端实现是 xime-config 的
+    // `SqlitePeerBook`（xime.db 的 p2p_peers 表）。库与设置程序同路径：
+    // p2p/ 的上一级（Linux 是 `~/.config/xime/xime.db`）。
+    let db_path = p2p_root
+        .parent()
+        .map(|root| root.join(xime_config::app_db::DB_FILE))
+        .unwrap_or_else(|| p2p_root.join(xime_config::app_db::DB_FILE));
+    let book = match xime_config::p2p_peers::SqlitePeerBook::open(&db_path) {
+        Ok(book) => Arc::new(book) as Arc<dyn xime_p2p::PeerBook>,
+        Err(e) => {
+            error!("Sync p2p: open peer book {} failed: {e}", db_path.display());
+            return None;
+        }
+    };
     Some(P2pConfig {
         identity,
-        store_path: p2p_root.join("peers.json"),
+        book,
+        db_path,
     })
 }
 
@@ -417,6 +483,8 @@ struct SyncState {
     clipboard: Option<Box<dyn ClipboardSink>>,
     /// 刚写入系统剪贴板的 hash，用于吃掉 watcher 的自身回声。
     suppressed_captures: VecDeque<String>,
+    /// 上次写状态快照的时刻（2 秒节流）。
+    last_status: Option<Instant>,
 }
 
 impl SyncState {
@@ -441,6 +509,19 @@ impl SyncState {
     /// 当前是否该从插件通道拉取（自动模式下直连已连上时不拉，避免双写）。
     fn use_plugin_for_pull(&self) -> bool {
         !self.runtimes.is_empty() && !self.p2p_online()
+    }
+
+    /// 节流写一次状态快照（设置程序读的是文件，不是这个进程）。
+    fn publish_status(&mut self) {
+        let now = Instant::now();
+        if self
+            .last_status
+            .is_some_and(|t| now.duration_since(t) < STATUS_PUBLISH_INTERVAL)
+        {
+            return;
+        }
+        self.last_status = Some(now);
+        write_status_snapshot(&p2p_dir(), self.node.as_ref());
     }
 
     fn handle_captured(&mut self, text: &str) {
@@ -653,7 +734,7 @@ impl SyncState {
     }
 
     fn start_p2p(&mut self, cfg: P2pConfig) {
-        let node_cfg = xime_p2p::NodeConfig::new(cfg.identity, cfg.store_path);
+        let node_cfg = xime_p2p::NodeConfig::new(cfg.identity, cfg.book);
         match xime_p2p::Node::start(node_cfg) {
             Ok(node) => {
                 info!(
@@ -705,12 +786,10 @@ impl SyncState {
                     connected,
                 } => self.on_peer_event(did, &name, connected),
                 xime_p2p::Event::Warning(msg) => warn!("Sync p2p: {msg}"),
-                // 新版协议的 topic 消息（剪贴板不走它）：当前版本不订阅。
-                // 用通配而不是显式 `Event::Message`：workspace 的 git pin
-                // （b19ecde）还没有这个变体，显式匹配会让 CI 编不过；本地
-                // patch 到 HEAD 时这里也能接住。
-                #[allow(unreachable_patterns)]
-                _ => debug!("Sync p2p: ignore unhandled event"),
+                // 新版协议的 topic 消息（剪贴板不走它）：当前没有订阅者。
+                xime_p2p::Event::Message { topic, .. } => {
+                    debug!("Sync p2p: ignore topic message '{topic}'")
+                }
             }
         }
     }
@@ -778,6 +857,7 @@ pub fn spawn_bridge(store: Arc<ClipboardStore>, rx: Receiver<SyncMessage>) -> Jo
                 last_plugin_pull: None,
                 clipboard: Some(Box::new(SystemClipboard::new())),
                 suppressed_captures: VecDeque::new(),
+                last_status: None,
             };
             loop {
                 // 轮询而不是阻塞 recv：P2P 的入站内容只在 `Node` 的事件队列里，
@@ -793,12 +873,16 @@ pub fn spawn_bridge(store: Arc<ClipboardStore>, rx: Receiver<SyncMessage>) -> Jo
                     }
                 }
                 state.poll_events();
+                state.publish_status();
                 state.maybe_pull_plugins();
                 let _ = state.reload_if_config_changed();
             }
             if let Some(node) = state.node.take() {
                 node.shutdown();
             }
+            // 进程退出后别留一份「在线」的快照：马上写 running:false，
+            // 设置程序下一跳就能显示「未运行」，不用等 TTL 过期。
+            write_status_snapshot(&p2p_dir(), None);
         })
         .expect("spawn clipboard sync bridge thread")
 }
@@ -854,6 +938,7 @@ mod tests {
             last_plugin_pull: None,
             clipboard: None,
             suppressed_captures: VecDeque::new(),
+            last_status: None,
         };
         (dir, store, state)
     }
@@ -1251,6 +1336,51 @@ mod tests {
     }
 
     #[test]
+    fn test_status_snapshot_when_node_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let p2p = dir.path().join("p2p");
+        write_status_snapshot(&p2p, None);
+
+        let raw = std::fs::read_to_string(p2p.join("status.json")).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(value["running"], false, "没有节点时也要写 running:false");
+        assert!(value["ts"].as_i64().is_some(), "快照要带时间戳");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(p2p.join("status.json"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600, "快照含设备名与局域网地址，不应被他人读取");
+        }
+    }
+
+    #[test]
+    fn test_status_snapshot_with_node_matches_setup_shape() {
+        // 设置程序按 did / state / last_seen 解析，字段名或枚举字面量改了会
+        // 静默显示成「未知」——这条锁住跨进程契约。
+        let (_tmp, _a, b) = p2p_pair();
+        let dir = tempfile::tempdir().unwrap();
+        write_status_snapshot(dir.path(), b.node.as_ref());
+
+        let raw = std::fs::read_to_string(dir.path().join("status.json")).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(value["running"], true);
+        assert_eq!(value["did"].as_str().unwrap().len(), 32);
+        assert!(value["port"].as_u64().unwrap() > 0);
+        let peers = value["peers"].as_array().unwrap();
+        assert_eq!(peers.len(), 1, "B 的配对表里有 A");
+        assert!(peers[0]["did"].is_string());
+        let state = peers[0]["state"].as_str().unwrap();
+        assert!(
+            matches!(state, "online" | "nearby" | "offline"),
+            "state 必须是协议约定的 lowercase 字面量，实际 {state}"
+        );
+    }
+
+    #[test]
     fn test_scan_backend_p2p_creates_identity() {
         let plugins = tempfile::tempdir().unwrap();
         let p2p = tempfile::tempdir().unwrap();
@@ -1268,7 +1398,8 @@ mod tests {
                     p2p_root.join("identity.bin").is_file(),
                     "identity.bin 应已生成"
                 );
-                assert_eq!(cfg.store_path, p2p_root.join("peers.json"));
+                assert_eq!(cfg.db_path, p2p.path().join("xime.db"));
+                assert!(cfg.book.all().is_empty(), "新库还没有已配对设备");
                 assert!(!cfg.identity.did().to_hex().is_empty());
             }
             other => panic!("expected p2p backend, got {other:?}"),
@@ -1282,6 +1413,7 @@ mod tests {
         write_plugin_dir(plugins.path(), "com.a.sync", "A", "clipboard_sync");
         write_registry(plugins.path(), &[("com.a.sync", true)]);
         let p2p = tempfile::tempdir().unwrap();
+        let p2p_root = p2p.path().join("p2p");
         let sel = SyncSelection {
             enabled: true,
             plugin_id: "com.a.sync".into(),
@@ -1289,7 +1421,7 @@ mod tests {
             ..SyncSelection::default()
         };
         assert!(matches!(
-            scan_backend_from(plugins.path(), p2p.path(), &sel),
+            scan_backend_from(plugins.path(), &p2p_root, &sel),
             SyncBackend::P2p(_)
         ));
     }
@@ -1301,6 +1433,7 @@ mod tests {
         write_plugin_dir(plugins.path(), "com.a.sync", "A", "clipboard_sync");
         write_registry(plugins.path(), &[("com.a.sync", true)]);
         let p2p = tempfile::tempdir().unwrap();
+        let p2p_root = p2p.path().join("p2p");
         let sel = SyncSelection {
             enabled: true,
             channels: vec!["p2p".into()],
@@ -1311,7 +1444,7 @@ mod tests {
             "只勾直连时不应解析出插件"
         );
         assert!(matches!(
-            scan_backend_from(plugins.path(), p2p.path(), &sel),
+            scan_backend_from(plugins.path(), &p2p_root, &sel),
             SyncBackend::P2p(_)
         ));
     }
@@ -1322,12 +1455,13 @@ mod tests {
         write_plugin_dir(plugins.path(), "com.a.sync", "A", "clipboard_sync");
         write_registry(plugins.path(), &[("com.a.sync", true)]);
         let p2p = tempfile::tempdir().unwrap();
+        let p2p_root = p2p.path().join("p2p");
         let sel = SyncSelection {
             enabled: true,
             channels: vec!["com.a.sync".into(), "p2p".into()],
             ..SyncSelection::default()
         };
-        match scan_backend_from(plugins.path(), p2p.path(), &sel) {
+        match scan_backend_from(plugins.path(), &p2p_root, &sel) {
             SyncBackend::Auto { p2p: _, plugins: d } => {
                 assert_eq!(ids(&d), vec!["com.a.sync".to_string()])
             }
@@ -1357,13 +1491,14 @@ mod tests {
         // 自动模式勾了插件但没装：直连仍在，不能因为缺插件把整个同步关掉。
         let plugins = tempfile::tempdir().unwrap();
         let p2p = tempfile::tempdir().unwrap();
+        let p2p_root = p2p.path().join("p2p");
         let sel = SyncSelection {
             enabled: true,
             channels: vec!["com.gone.sync".into(), "p2p".into()],
             ..SyncSelection::default()
         };
         assert!(matches!(
-            scan_backend_from(plugins.path(), p2p.path(), &sel),
+            scan_backend_from(plugins.path(), &p2p_root, &sel),
             SyncBackend::P2p(_)
         ));
     }
@@ -1438,7 +1573,7 @@ mod tests {
     /// 走真实的 `xime-p2p` 路径（Noise IK 握手 + 加密帧），只有端口是顺延的，
     /// 因此不依赖固定 47821（本机 daemon 很可能正占着它）。
     fn p2p_pair() -> (tempfile::TempDir, SyncState, SyncState) {
-        use xime_p2p::{Node, NodeConfig, PairedPeer, PeerStore};
+        use xime_p2p::{Node, NodeConfig, PairedPeer};
 
         let tmp = tempfile::tempdir().unwrap();
         let a_dir = tmp.path().join("a");
@@ -1449,37 +1584,33 @@ mod tests {
         let idb = xime_p2p::load_or_create_identity(&b_dir).unwrap();
 
         // B 先起：A 的配对表里要写 B 的实际监听端口（可能已顺延）。
-        let mut b_store = PeerStore::load(b_dir.join("peers.json")).unwrap();
-        b_store
+        let b_book: Arc<dyn xime_p2p::PeerBook> =
+            Arc::new(xime_config::p2p_peers::SqlitePeerBook::open(b_dir.join("xime.db")).unwrap());
+        b_book
             .upsert(PairedPeer::from_public(&ida.public("A"), None))
             .unwrap();
-        let node_b = Node::start(NodeConfig {
-            identity: idb.clone(),
-            store_path: b_dir.join("peers.json"),
-            listen: true,
-            discover: false,
-            port: xime_p2p::TCP_PORT,
-            connect_timeout: Duration::from_secs(3),
-        })
-        .unwrap();
+        let mut cfg_b = NodeConfig::new(idb.clone(), b_book);
+        cfg_b.listen = true;
+        cfg_b.discover = false;
+        cfg_b.port = xime_p2p::TCP_PORT;
+        cfg_b.connect_timeout = Duration::from_secs(3);
+        let node_b = Node::start(cfg_b).unwrap();
 
-        let mut a_store = PeerStore::load(a_dir.join("peers.json")).unwrap();
-        a_store
+        let a_book: Arc<dyn xime_p2p::PeerBook> =
+            Arc::new(xime_config::p2p_peers::SqlitePeerBook::open(a_dir.join("xime.db")).unwrap());
+        a_book
             .upsert(PairedPeer::from_public(
                 &idb.public("B"),
                 Some(format!("127.0.0.1:{}", node_b.local_port())),
             ))
             .unwrap();
         // A 不监听、不广播：测试期间不往局域网发任何包。
-        let node_a = Node::start(NodeConfig {
-            identity: ida,
-            store_path: a_dir.join("peers.json"),
-            listen: false,
-            discover: false,
-            port: 0,
-            connect_timeout: Duration::from_secs(3),
-        })
-        .unwrap();
+        let mut cfg_a = NodeConfig::new(ida, a_book);
+        cfg_a.listen = false;
+        cfg_a.discover = false;
+        cfg_a.port = 0;
+        cfg_a.connect_timeout = Duration::from_secs(3);
+        let node_a = Node::start(cfg_a).unwrap();
 
         let store_a = Arc::new(ClipboardStore::open(a_dir.join("xime.db")).unwrap());
         let store_b = Arc::new(ClipboardStore::open(b_dir.join("xime.db")).unwrap());
@@ -1494,6 +1625,7 @@ mod tests {
             last_plugin_pull: None,
             clipboard: None,
             suppressed_captures: VecDeque::new(),
+            last_status: None,
         };
         (tmp, state(store_a, node_a), state(store_b, node_b))
     }

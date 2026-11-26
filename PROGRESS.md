@@ -1,6 +1,29 @@
 # XimeChe（曦码·澈输入法）开发进度
 
 ## 当前状态
+**跨设备剪贴板 P2P：设备库落 xime.db、设置页显示在线状态（2026-11-26）。**
+
+libximecore `4622164..494da09` 把已配对设备从 `xime-p2p` 协议库搬进统一库
+`xime.db` 的 `p2p_peers` 表（schema v8），`xime-p2p` 同步升到 `db9dbc8`
+（存储移出 + 配对发现独立端口）。XimeChe 侧跟着改：
+
+- **daemon**：`P2pConfig` 不再持有 `peers.json` 路径，改用
+  `xime_config::p2p_peers::SqlitePeerBook`（库在同级 `xime.db`），
+  `NodeConfig::new(identity, book)` 直接把设备表交给节点。设置页配对完成后，
+  节点的重连循环每 5 秒重读库，**不用重启输入法**。
+- **状态快照**：桥线程每 2 秒把 `Node::status()` 写成 `p2p/status.json`
+  （`ts/running/did/port/peers[]`，0600 + tmp+rename）；没起节点时写
+  `running:false`，进程退出也补一条。设置程序的「设备关联」页按这份快照显示
+  每台在线 / 附近 / 离线，读不到就是「未知」——不会把「输入法没跑」画成离线。
+- **路径统一**：daemon 的 `p2p_dir()` 与 libximecore `p2p_dir()` 都指向
+  `~/.config/xime/p2p`，设备库都是 `~/.config/xime/xime.db`，两个进程看到同一份。
+- **不做 peers.json 迁移**：协议库曾加过又回滚；P2P 是 0.2.3 之后才进仓库的
+  （尚未随 tag 发布），没有已发布的旧表需要导入，等真发版前再补。
+- **验证**：`cargo test --workspace` 全绿（clipboard_sync 34 项，含真实
+  loopback 的握手/加密/收发、快照字段契约、0600 权限）；`cargo clippy
+  --workspace --all-targets --all-features -- -D warnings` 通过；`cargo fmt
+  --check` 通过。真机双设备待验（设置页在线胶囊、配对后不重启输入法即可同步）。
+
 **语音引擎支持第二个模型族：Fun-ASR-Nano（2026-11-19 晚）。**
 
 libximecore 的 `xime-infer` 现在按模型族分目录（`asr/qwen3_asr`、`asr/fun_asr`），
