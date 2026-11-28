@@ -1,6 +1,73 @@
 # XimeChe（曦码·澈输入法）开发进度
 
 ## 当前状态
+**CUDA 13.5 工具链：按 13.4 的绑定编译（2026-11-28）。**
+
+`XIME_SPEECH_REBUILD=1 ./dev-install.sh` 在 CUDA 13.5 上失败：cudarc 0.19.10 的
+`build.rs` 白名单只到 13.4，直接 panic；而 [dev-install.sh](dev-install.sh) 原来
+的版本正则把 13.5 也算成可用（`12.x | 13.0–13.5`），选中 `/usr/local/cuda` 后就去
+触发 panic。
+
+- **dev-install.sh**：两遍扫描——先用白名单内的最高版本；一个都没有时，取「不高于
+  本机版本的最高白名单版本」，设 `CUDARC_CUDA_VERSION=13040` 按 13.4 生成绑定
+  （链接的仍是 13.5 运行库，ABI 向后兼容）。12.7 这类白名单缺口同理（取 12.6）。
+- **packaging/build-deb.sh**：同一套映射，13.5 机器上本地打 CUDA deb 不再直接 die。
+- **文档**：xime-infer README、packaging/README 补手工构建写法；DECISIONS 记下
+  「不降级系统 CUDA、不 fork cudarc」的取舍。
+
+验证：CUDA 13.5 + RTX 4060 Ti 上 `CUDARC_CUDA_VERSION=13040 cargo build
+-p xime-speechd --features cuda` 通过，`ldd` 见 13.5 的 cudart/cublas；whisper-small
+GPU 推理 145 ms（编码 32 + 解码 113），文本与 CPU/参考逐字相同；检测脚本在本机
+选中 13.5 并给出 `13040`。
+
+**关闭语音总开关后 xime-speechd 会退出，不再常驻占内存（2026-11-28）。**
+
+之前总开关只影响设置页：关掉之后已经拉起的 `xime-speechd` 仍然常驻（进程 +
+装载着的 1–2 GB 权重），按住右 Ctrl 还会把它重新拉起来。
+
+- **speechd 自己盯开关**（libximecore `xime-speechd`）：启动时先读一次
+  `speech.toml`，关闭态直接退出、不建 socket；运行期每 2 秒复读一次，关闭就
+  `service.shutdown()`（停采集 + 卸引擎）→ 删 socket → 退出，与协议里的
+  `Request::Shutdown` 同一套收尾。配置缺失/损坏按「开启」处理，不会误杀。
+  新增 `--speech-config <path>`，daemon 与设置页拉起时都显式传。
+- **daemon 入口全部拦截**：`press()` / `toggle()` / PTT 250ms 判定 /
+  Ctrl+Alt+V 都先问 `speech_config::is_enabled()`；worker 每 120 ms 复查，
+  关闭时**静默**收掉当前会话（不弹错误、不上屏）并丢掉连接，重新打开后下一次
+  按下会重新拉起服务。
+- **设置页**：关闭态不拉起 speechd；拉起改为 3 秒冷却重试（原来只试一次，
+  「关闭 → 服务退出 → 再打开」之后永远连不上）；关闭总开关时先停试听再写
+  配置，避免误报「服务未运行」。
+- **dev-install.sh**：安装前 `pkill xime-speechd`，旧实例不会继续占内存。
+  注意 speechd 默认跳过重建，改了 libximecore 要 `XIME_SPEECH_REBUILD=1`。
+
+验证：`cargo test -p xime-speechd`（3 项：开关判定 / 参数解析 / --help）；
+真进程 e2e：起服务 → `enabled=false` → 2 秒内退出且 socket 已删；启动即关闭 →
+直接退出不建 socket；配置写坏 → 进程继续运行。XimeChe 侧
+`cargo test -p xime-daemon -p xime-setup`（99 项）与 clippy 全绿。
+
+**跨设备剪贴板 P2P：设备库落 xime.db、设置页显示在线状态（2026-11-26）。**
+
+libximecore `4622164..494da09` 把已配对设备从 `xime-p2p` 协议库搬进统一库
+`xime.db` 的 `p2p_peers` 表（schema v8），`xime-p2p` 同步升到 `db9dbc8`
+（存储移出 + 配对发现独立端口）。XimeChe 侧跟着改：
+
+- **daemon**：`P2pConfig` 不再持有 `peers.json` 路径，改用
+  `xime_config::p2p_peers::SqlitePeerBook`（库在同级 `xime.db`），
+  `NodeConfig::new(identity, book)` 直接把设备表交给节点。设置页配对完成后，
+  节点的重连循环每 5 秒重读库，**不用重启输入法**。
+- **状态快照**：桥线程每 2 秒把 `Node::status()` 写成 `p2p/status.json`
+  （`ts/running/did/port/peers[]`，0600 + tmp+rename）；没起节点时写
+  `running:false`，进程退出也补一条。设置程序的「设备关联」页按这份快照显示
+  每台在线 / 附近 / 离线，读不到就是「未知」——不会把「输入法没跑」画成离线。
+- **路径统一**：daemon 的 `p2p_dir()` 与 libximecore `p2p_dir()` 都指向
+  `~/.config/xime/p2p`，设备库都是 `~/.config/xime/xime.db`，两个进程看到同一份。
+- **不做 peers.json 迁移**：协议库曾加过又回滚；P2P 是 0.2.3 之后才进仓库的
+  （尚未随 tag 发布），没有已发布的旧表需要导入，等真发版前再补。
+- **验证**：`cargo test --workspace` 全绿（clipboard_sync 34 项，含真实
+  loopback 的握手/加密/收发、快照字段契约、0600 权限）；`cargo clippy
+  --workspace --all-targets --all-features -- -D warnings` 通过；`cargo fmt
+  --check` 通过。真机双设备待验（设置页在线胶囊、配对后不重启输入法即可同步）。
+
 **语音引擎支持第二个模型族：Fun-ASR-Nano（2026-11-19 晚）。**
 
 libximecore 的 `xime-infer` 现在按模型族分目录（`asr/qwen3_asr`、`asr/fun_asr`），

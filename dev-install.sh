@@ -44,6 +44,9 @@ fi
 echo "Stopping existing xime processes..."
 pkill -9 xime-daemon 2>/dev/null || true
 pkill -9 xime-launcher 2>/dev/null || true
+# 语音服务也一起收掉：旧实例不认识「总开关关闭就退出」的新行为，留着会继续
+# 占内存；新实例由 daemon / 设置页在需要时按需拉起。
+pkill -9 xime-speechd 2>/dev/null || true
 sleep 1
 
 # Initialize git submodules (rime-wubi for data, libximecore for librime)
@@ -78,26 +81,77 @@ fi
 #   CPU        ：2 秒窗口一轮 ~1.2s，退化成句级（每两秒吐一段）。
 # 有可用的 NVIDIA 显卡 + cudarc 认得的 toolkit 时自动编 cuda 版；
 # XIME_SPEECH_CUDA=0 强制 CPU，=1 强制 GPU（找不到工具链直接失败）。
+#
+# cudarc 0.19.10 的 build.rs 只认一份白名单（最高 13.4），更新的 toolkit 直接
+# panic。所以：
+#   1) 机器上有多份 CUDA 时，优先挑白名单内的最高版本；
+#   2) 只有比 13.4 新的（例如 13.5）时，用「不高于它的最高白名单版本」生成
+#      绑定（CUDARC_CUDA_VERSION），链接的仍是系统里更新的运行库——ABI 向后
+#      兼容，已在 CUDA 13.5 + RTX 4060 Ti 上验证输出与 CPU 逐字相同。
+CUDARC_CUDA_SUPPORTED="13.4 13.3 13.2 13.1 13.0 12.9 12.8 12.6 12.5 12.4 12.3 12.2 12.1 12.0 11.8 11.7 11.6 11.5 11.4"
+
+# nvcc 版本号（major.minor）。
+cuda_nvcc_version() {
+    "$1" --version 2>/dev/null | sed -n 's/.*release \([0-9]*\.[0-9]*\).*/\1/p' | head -1
+}
+
+# 这个版本在 cudarc 白名单里？
+cuda_supported() {
+    case " ${CUDARC_CUDA_SUPPORTED} " in *" $1 "*) return 0 ;; *) return 1 ;; esac
+}
+
+# 不高于 $1 的最高白名单版本；空 = 没有（比所有白名单版本都旧）。
+cuda_compat_version() {
+    for cand in ${CUDARC_CUDA_SUPPORTED}; do
+        if [ "$(printf '%s\n%s\n' "$1" "$cand" | sort -V | head -1)" = "$cand" ]; then
+            echo "$cand"
+            return 0
+        fi
+    done
+    return 1
+}
+
 speech_features=""
 speech_backend="cpu"
 if [ "${XIME_SPEECH_CUDA:-auto}" != "0" ] && command -v nvidia-smi >/dev/null 2>&1; then
     if nvidia-smi -L >/dev/null 2>&1; then
-        # cudarc 只认白名单里的 toolkit 版本，13.5 及以上会在 build.rs 直接 panic，
-        # 所以挑目录前先问 nvcc 自己。优先选 /usr/local 下的带版本目录。
-        for cuda_dir in /usr/local/cuda-13.4 /usr/local/cuda-13.3 /usr/local/cuda-13.2 \
-                        /usr/local/cuda-13.1 /usr/local/cuda-13.0 /usr/local/cuda-12.9 \
-                        /usr/local/cuda-12.8 /usr/local/cuda-12.6 /usr/local/cuda; do
+        cuda_dirs="$(ls -d /usr/local/cuda-* 2>/dev/null | sort -Vr) /usr/local/cuda"
+        if command -v nvcc >/dev/null 2>&1; then
+            cuda_dirs="${cuda_dirs} $(dirname "$(dirname "$(command -v nvcc)")")"
+        fi
+        # 第一遍：白名单内的版本优先（多版本共存时取最高）。
+        for cuda_dir in ${cuda_dirs}; do
             [ -x "${cuda_dir}/bin/nvcc" ] || continue
-            if "${cuda_dir}/bin/nvcc" --version | grep -qE "release 1[23]\.(0|1|2|3|4|5|6|8|9),"; then
+            cuda_ver="$(cuda_nvcc_version "${cuda_dir}/bin/nvcc")"
+            [ -n "${cuda_ver}" ] || continue
+            if cuda_supported "${cuda_ver}"; then
                 export CUDA_HOME="${cuda_dir}"
                 export PATH="${cuda_dir}/bin:${PATH}"
                 speech_features="--features cuda"
-                speech_backend="cuda (${cuda_dir})"
+                speech_backend="cuda ${cuda_ver} (${cuda_dir})"
                 break
             fi
         done
+        # 第二遍：只有更新的 toolkit 时，按最高的白名单版本生成绑定。
+        if [ -z "${speech_features}" ]; then
+            for cuda_dir in ${cuda_dirs}; do
+                [ -x "${cuda_dir}/bin/nvcc" ] || continue
+                cuda_ver="$(cuda_nvcc_version "${cuda_dir}/bin/nvcc")"
+                [ -n "${cuda_ver}" ] || continue
+                if cuda_bindings="$(cuda_compat_version "${cuda_ver}")"; then
+                    export CUDA_HOME="${cuda_dir}"
+                    export PATH="${cuda_dir}/bin:${PATH}"
+                    # build.rs 认 "13040" 这种格式（major 0 minor 0）。
+                    export CUDARC_CUDA_VERSION="$(printf '%s0' "${cuda_bindings//./0}")"
+                    speech_features="--features cuda"
+                    speech_backend="cuda ${cuda_ver} (${cuda_dir}，按 ${cuda_bindings} 绑定)"
+                    echo "提示：CUDA ${cuda_ver} 比 cudarc 0.19.10 白名单新，按 ${cuda_bindings} 的绑定编译（CUDARC_CUDA_VERSION=${CUDARC_CUDA_VERSION}）" >&2
+                    break
+                fi
+            done
+        fi
         if [ -z "${speech_features}" ] && [ "${XIME_SPEECH_CUDA:-auto}" = "1" ]; then
-            echo "错误：XIME_SPEECH_CUDA=1 但没找到 cudarc 支持的 CUDA toolkit（12.x–13.4）" >&2
+            echo "错误：XIME_SPEECH_CUDA=1 但没有可用的 CUDA toolkit（cudarc 白名单：${CUDARC_CUDA_SUPPORTED}）" >&2
             exit 1
         fi
     fi

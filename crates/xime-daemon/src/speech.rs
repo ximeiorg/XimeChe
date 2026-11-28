@@ -162,7 +162,14 @@ pub fn init() {
 }
 
 /// 按住说话：开始录音。已在听时忽略（按键 auto-repeat 会连发按下）。
+///
+/// 总开关关着时直接忽略：不能因为一次按键就把已经退出的 `xime-speechd`
+/// 重新拉起来（那正是「关了语音还占内存」的来源）。
 pub fn press() {
+    if !enabled() {
+        debug!("Speech: 总开关已关闭，忽略录音请求");
+        return;
+    }
     send(SpeechCommand::Start);
 }
 
@@ -173,6 +180,10 @@ pub fn release() {
 
 /// 托盘 / 全局快捷键：按一下开始，再按一下结束。
 pub fn toggle() {
+    if !enabled() {
+        debug!("Speech: 总开关已关闭，忽略 toggle");
+        return;
+    }
     match state() {
         SpeechState::Idle => send(SpeechCommand::Start),
         SpeechState::Listening => send(SpeechCommand::Stop),
@@ -191,6 +202,14 @@ pub fn cancel() {
 /// 当前状态。
 pub fn state() -> SpeechState {
     *shared().state.lock().unwrap()
+}
+
+/// 语音输入总开关（`speech.toml` 的 `enabled`）。
+///
+/// 按键路径与 worker 每拍都会问一次：`xime_config` 内部按 `(mtime, len)`
+/// 缓存，文件没变只 stat，不进 TOML 解析。
+pub fn enabled() -> bool {
+    xime_config::speech_config::is_enabled()
 }
 
 /// 清空滞留事件与电平（失活/停用时调用）。
@@ -305,6 +324,7 @@ fn worker(rx: Receiver<SpeechCommand>, shared: &'static Shared) {
                 SpeechCommand::Cancel => session.stop(shared, true),
             }
         }
+        session.sync_enabled(shared);
         session.poll(shared);
         std::thread::sleep(POLL_INTERVAL);
     }
@@ -324,10 +344,38 @@ struct Session {
 }
 
 impl Session {
+    /// 总开关被关掉时静默收掉本次会话，并丢掉指向 speechd 的连接。
+    ///
+    /// - 不推 `Error` 事件：用户主动关的，不是故障，弹提示反而吓人；
+    /// - 丢掉 `Client`：speechd 最多 2 秒后自己退出（见 `xime-speechd` 的
+    ///   总开关监视），继续攥着它只会让重新打开后的第一次按下拿到一个已经
+    ///   关掉的 socket；
+    /// - 录音中关掉就发一次 `listen_stop`（不上屏），服务端随后也会自己停。
+    fn sync_enabled(&mut self, shared: &Shared) {
+        if enabled() {
+            return;
+        }
+        if self.listening || self.pending.is_some() {
+            if let Some(client) = self.client.as_mut() {
+                let _ = client.call(&Request::ListenStop);
+            }
+            self.listening = false;
+            self.pending = None;
+            self.committed_chars = 0;
+            self.partial_rev_seen = 0;
+            set_state(shared, SpeechState::Idle);
+        }
+        self.client = None;
+    }
+
     fn start(&mut self, shared: &Shared) {
         // 已在听或正在识别时不重复开始：按键 auto-repeat 会连发按下，
         // 而重复 `listen_start` 会让服务把刚录到的那段丢掉重录。
         if self.listening || self.pending.is_some() {
+            return;
+        }
+        // 入口都挡了，这里再挡一道：任何路径都不能在关闭态拉起服务。
+        if !enabled() {
             return;
         }
         if self.client.is_none() {
@@ -547,6 +595,10 @@ fn connect_or_spawn() -> Result<Client, String> {
         // 版退化成 2 秒窗口（流式只能做到句级）。
         .arg("--idle-secs")
         .arg("300")
+        // 总开关交给 speechd 自己盯：用户关掉语音后它会卸引擎、删 socket 并
+        // 退出，不依赖我们还在不在（设置程序也可能拉起同一个服务）。
+        .arg("--speech-config")
+        .arg(xime_config::speech_config::config_path())
         .stdin(Stdio::null())
         .stdout(Stdio::null());
     // stderr 落到日志：服务起不来时（缺模型、没有麦克风）这里才有原因。

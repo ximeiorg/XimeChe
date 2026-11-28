@@ -37,6 +37,9 @@ serde_json = "1"
 # 语音页的宿主回调：设置进程直接连 xime-speechd 的 socket。
 # default-features = false ⇒ 不带 cpal/candle，设置程序里不含推理代码。
 xime-speech-service.workspace = true
+# 语音总开关（speech.toml）：关闭后不再拉起 speechd，也把它从配置路径上
+# 传给 speechd 让它自己退出。
+xime-config.workspace = true
 
 # 「导入模型…」要选目录：与 lib 里的词典页同一套 portal 对话框，不引 GTK。
 [target.'cfg(target_os = "linux")'.dependencies]

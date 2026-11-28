@@ -133,8 +133,15 @@ fn op_json(op: &str, kvs: &[(&str, String)]) -> String {
 // 同一个 socket —— 所以两边看到的是同一个引擎、同一个当前模型。
 // ---------------------------------------------------------------------------
 
-/// 设置端已尝试拉起过 speechd（失败不再重试，否则 250ms 轮询会反复 fork）。
-static SPEECH_SPAWNED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// 上次尝试拉起 speechd 的时刻。
+///
+/// 失败/服务退出后隔 [`SPEECH_SPAWN_RETRY`] 再试，而不是「只试一次」：
+/// 关掉语音后 speechd 会按总开关自己退出，重新打开时若还沿用一次性标记，
+/// 状态轮询就永远连不上了。
+static SPEECH_SPAWN_AT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+
+/// 拉起 speechd 的最小重试间隔（250ms 轮询不能每次都 fork）。
+const SPEECH_SPAWN_RETRY: std::time::Duration = std::time::Duration::from_secs(3);
 
 fn speech_dir() -> PathBuf {
     // 与 daemon 同一套约定：xime.db 所在目录就是配置根。
@@ -171,9 +178,19 @@ fn speech_client() -> Option<Client> {
     if let Ok(client) = Client::connect(&endpoint.to_string_lossy()) {
         return Some(client);
     }
-    use std::sync::atomic::Ordering;
-    if SPEECH_SPAWNED.swap(true, Ordering::Relaxed) {
+    // 连不上：只有总开关开着才拉起服务。关闭态（用户刚关掉、服务正在按开关
+    // 退出）绝不能顺手复活一个装着 1–2 GB 模型的进程。
+    if !xime_config::speech_config::is_enabled() {
         return None;
+    }
+    {
+        let mut last = SPEECH_SPAWN_AT
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if last.is_some_and(|at| at.elapsed() < SPEECH_SPAWN_RETRY) {
+            return None;
+        }
+        *last = Some(std::time::Instant::now());
     }
     let binary = speechd_binary()?;
     // 后端不传：speechd 启动时自己探测（编了 cuda 且显卡可用就走 GPU）。
@@ -184,6 +201,9 @@ fn speech_client() -> Option<Client> {
         .arg(speech_dir().join("models"))
         .arg("--idle-secs")
         .arg("300")
+        // 让 speechd 自己盯总开关：关掉后卸引擎并退出，设置程序不必在线。
+        .arg("--speech-config")
+        .arg(xime_config::speech_config::config_path())
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
