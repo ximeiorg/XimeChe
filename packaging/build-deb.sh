@@ -41,13 +41,30 @@ LIBCORE=$(cd ../libximecore 2>/dev/null && pwd) || \
 # 只编译，不需要 GPU；但必须有 nvcc，且要告诉 candle 编给哪个架构。
 nvcc_version() { sed -n 's/.*release \([0-9]*\.[0-9]*\).*/\1/p' "$1" 2>/dev/null | head -1; }
 
-# cudarc 0.19 的版本白名单是 12.0–13.4，13.5 起构建脚本直接 panic。
+# cudarc 0.19.10 的 build.rs 只认这份白名单（最高 13.4）；更新的 toolkit 直接
+# panic。装的是 13.5+ 时用「不高于它的最高白名单版本」生成绑定（运行期 ABI
+# 向后兼容，已在 CUDA 13.5 + RTX 4060 Ti 上验证）。
+CUDARC_CUDA_SUPPORTED="13.4 13.3 13.2 13.1 13.0 12.9 12.8 12.6 12.5 12.4 12.3 12.2 12.1 12.0 11.8 11.7 11.6 11.5 11.4"
+
 cuda_supported() {
-    case "$1" in 12.*|13.[0-4]) return 0 ;; *) return 1 ;; esac
+    case " ${CUDARC_CUDA_SUPPORTED} " in *" $1 "*) return 0 ;; *) return 1 ;; esac
 }
 
-# 机器上常同时装了几个 CUDA（/usr/local/cuda 往往指向最新的 13.5，而它用不了）。
-# 因此把候选都列出来，从中挑一个白名单内的最高版本，而不是见到第一个就用。
+# 不高于 $1 的最高白名单版本（供 CUDARC_CUDA_VERSION 用）；空 = 没有。
+cuda_compat_version() {
+    local cand
+    for cand in ${CUDARC_CUDA_SUPPORTED}; do
+        if [ "$(printf '%s\n%s\n' "$1" "$cand" | sort -V | head -1)" = "$cand" ]; then
+            echo "$cand"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# 机器上常同时装了几个 CUDA（/usr/local/cuda 往往指向最新的 13.5；它不在白名单
+# 里，但可以按 13.4 的绑定编）。因此把候选都列出来：先挑白名单内的最高版本；
+# 一个都没有时，再挑能降级绑定的最高版本，而不是见到第一个就用。
 detect_cuda() {
     local candidates=() dir ver best="" best_ver=""
     if [ -n "${CUDA_HOME:-}" ] && [ -x "$CUDA_HOME/bin/nvcc" ]; then
@@ -69,6 +86,19 @@ detect_cuda() {
         fi
     done
     if [ -z "$best" ]; then
+        # 没有白名单内的版本：退而求其次，挑一个能用更旧绑定的最高版本
+        # （例如 13.5 → 13.4 绑定、链接 13.5 运行库）。
+        for dir in "${candidates[@]}"; do
+            ver=$(nvcc_version "$dir/bin/nvcc")
+            [ -n "$ver" ] || continue
+            cuda_compat_version "$ver" >/dev/null || continue
+            if [ -z "$best_ver" ] || [ "$(printf '%s\n%s\n' "$ver" "$best_ver" | sort -V | tail -1)" = "$ver" ]; then
+                best="$dir"
+                best_ver="$ver"
+            fi
+        done
+    fi
+    if [ -z "$best" ]; then
         for dir in "${candidates[@]}"; do
             ver=$(nvcc_version "$dir/bin/nvcc")
             [ -n "$ver" ] && echo "  检测到 CUDA $ver（$dir）" >&2
@@ -80,16 +110,18 @@ detect_cuda() {
 
 cuda_env() {
     local cuda_home nvcc_ver gcc_major
-    cuda_home=$(detect_cuda) || die "找不到 cudarc 支持的 CUDA（12.0–13.4）。装一个，或用 CUDA_HOME 指定"
+    cuda_home=$(detect_cuda) || die "找不到可用的 CUDA toolkit（cudarc 0.19.10 白名单：${CUDARC_CUDA_SUPPORTED}）。装一个，或用 CUDA_HOME 指定"
     export CUDA_HOME="$cuda_home"
     export PATH="$cuda_home/bin:$PATH"
 
     nvcc_ver=$(nvcc_version "$cuda_home/bin/nvcc")
     say "CUDA $nvcc_ver（$cuda_home）"
     if ! cuda_supported "$nvcc_ver"; then
-        die "CUDA $nvcc_ver 不在 cudarc 0.19 支持的 12.0–13.4 范围内。
-      多版本共存时用 CUDA_HOME 指一个可用版本，例如：
-      CUDA_HOME=/usr/local/cuda-13.4 $0 cuda"
+        compat=$(cuda_compat_version "$nvcc_ver") || \
+            die "CUDA $nvcc_ver 比 cudarc 0.19.10 白名单还旧，用不了。
+      白名单：${CUDARC_CUDA_SUPPORTED}"
+        export CUDARC_CUDA_VERSION="$(printf '%s0' "${compat//./0}")"
+        say "CUDA $nvcc_ver 不在 cudarc 白名单，按 $compat 的绑定编译（CUDARC_CUDA_VERSION=$CUDARC_CUDA_VERSION）"
     fi
 
     # 架构：优先环境变量，其次真实显卡，都没有就只能让用户自己给。

@@ -84,9 +84,10 @@ qdbus6 org.kde.KWin /KWin reconfigure   # 没生效就注销重登
 → 解包自检。产物在 cargo 的 `target/deb-out/`（全局 `~/.cargo/config.toml`
 可能把 target 目录挪到仓库外，脚本会向 `cargo metadata` 问真实路径）。
 
-CUDA 版会自己挑一个 cudarc 白名单内（12.0–13.4）的 toolkit——机器上同时装了
-13.5 也不会误用；架构从 `nvidia-smi` 取，没有显卡时用 `CUDA_COMPUTE_CAP`
-指定（例如 `CUDA_COMPUTE_CAP=80`）。自检两件事，任一不满足就报错：`ldd`
+CUDA 版会先挑一个 cudarc 白名单内（12.0–13.4）的 toolkit；机器上只有 13.5+
+时按「不高于它的最高白名单版本」生成绑定（`CUDARC_CUDA_VERSION`），链接的仍是
+系统里的新运行库（ABI 向后兼容）。架构从 `nvidia-smi` 取，没有显卡时用
+`CUDA_COMPUTE_CAP` 指定（例如 `CUDA_COMPUTE_CAP=80`）。自检两件事，任一不满足就报错：`ldd`
 必须看到 `libcudart`，`cuobjdump -lelf` 必须列出目标架构的 cubin
 （`sm_80` / `sm_89` …）——后者能挡住「链接成功但 kernel 没编进去」。
 
@@ -107,11 +108,15 @@ git clone --depth 1 https://github.com/ximeiorg/libximecore.git ../libximecore
 
 # CPU 版
 cargo build --release --manifest-path ../libximecore/Cargo.toml -p xime-speechd
-# CUDA 版（需要 CUDA toolkit，cudarc 白名单内 12.x–13.4）。编译**不需要 GPU**，
-# 但无 GPU 时必须显式给 CUDA_COMPUTE_CAP：cudaforge 探测不到 nvidia-smi 会
-# 直接报错中断构建（不是回落到某个默认值）。
+# CUDA 版（需要 CUDA toolkit）。编译**不需要 GPU**，但无 GPU 时必须显式给
+# CUDA_COMPUTE_CAP：cudaforge 探测不到 nvidia-smi 会直接报错中断构建（不是回落
+# 到某个默认值）。
 CUDA_COMPUTE_CAP=89 cargo build --release \
   --manifest-path ../libximecore/Cargo.toml -p xime-speechd --features cuda
+# CUDA 13.5+：cudarc 0.19.10 的白名单只到 13.4，按 13.4 的绑定编即可（ABI 向后
+# 兼容）。dev-install.sh / build-deb.sh 会自动做这个映射，手敲时需要显式给：
+#   CUDARC_CUDA_VERSION=13040 CUDA_COMPUTE_CAP=89 cargo build --release \
+#     --manifest-path ../libximecore/Cargo.toml -p xime-speechd --features cuda
 
 # 两种后端产物同名，放哪个进包就出哪个变体
 cp ../libximecore/target/release/xime-speechd target/release/
@@ -163,8 +168,8 @@ CI 用 tag 作为版本号，并校验它和 `Cargo.toml` 的 `[workspace.packag
 - CPU 版：任何 x86_64 机器可跑，识别是「句级上屏」（每两秒一段）。
 - CUDA 版：额外链接 `libcudart.so.12`、`libcublas.so.12`、`libcurand.so.10`，
   缺库时语音起不来（输入法本体照常工作）。识别是「逐字上屏」。
-- 源码构建需要 `libasound2-dev`；CUDA 版另需 CUDA toolkit（cudarc 0.19 的
-  白名单是 12.x–13.4，13.5+ 会在 build script 直接 panic）。
+- 源码构建需要 `libasound2-dev`；CUDA 版另需 CUDA toolkit（cudarc 0.19.10 的
+  白名单到 13.4；13.5+ 由脚本自动按 13.4 的绑定编译，见上面的手工命令示例）。
 
 ## Arch Linux 专项说明
 

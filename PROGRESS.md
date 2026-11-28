@@ -1,6 +1,25 @@
 # XimeChe（曦码·澈输入法）开发进度
 
 ## 当前状态
+**CUDA 13.5 工具链：按 13.4 的绑定编译（2026-11-28）。**
+
+`XIME_SPEECH_REBUILD=1 ./dev-install.sh` 在 CUDA 13.5 上失败：cudarc 0.19.10 的
+`build.rs` 白名单只到 13.4，直接 panic；而 [dev-install.sh](dev-install.sh) 原来
+的版本正则把 13.5 也算成可用（`12.x | 13.0–13.5`），选中 `/usr/local/cuda` 后就去
+触发 panic。
+
+- **dev-install.sh**：两遍扫描——先用白名单内的最高版本；一个都没有时，取「不高于
+  本机版本的最高白名单版本」，设 `CUDARC_CUDA_VERSION=13040` 按 13.4 生成绑定
+  （链接的仍是 13.5 运行库，ABI 向后兼容）。12.7 这类白名单缺口同理（取 12.6）。
+- **packaging/build-deb.sh**：同一套映射，13.5 机器上本地打 CUDA deb 不再直接 die。
+- **文档**：xime-infer README、packaging/README 补手工构建写法；DECISIONS 记下
+  「不降级系统 CUDA、不 fork cudarc」的取舍。
+
+验证：CUDA 13.5 + RTX 4060 Ti 上 `CUDARC_CUDA_VERSION=13040 cargo build
+-p xime-speechd --features cuda` 通过，`ldd` 见 13.5 的 cudart/cublas；whisper-small
+GPU 推理 145 ms（编码 32 + 解码 113），文本与 CPU/参考逐字相同；检测脚本在本机
+选中 13.5 并给出 `13040`。
+
 **关闭语音总开关后 xime-speechd 会退出，不再常驻占内存（2026-11-28）。**
 
 之前总开关只影响设置页：关掉之后已经拉起的 `xime-speechd` 仍然常驻（进程 +
