@@ -7155,7 +7155,7 @@ checksum = "163b33ed8786455e2fa5d72f554057ce3f3182425434f756cd39c99839d88e23"
 
 [[package]]
 name = "xime"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "xime-daemon",
  "xime-launcher",
@@ -7164,7 +7164,7 @@ dependencies = [
 
 [[package]]
 name = "xime-clipboard"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "arboard",
  "tempfile",
@@ -7199,7 +7199,7 @@ dependencies = [
 
 [[package]]
 name = "xime-daemon"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "bzip2 0.5.2",
@@ -7237,7 +7237,7 @@ dependencies = [
 
 [[package]]
 name = "xime-launcher"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "nix 0.29.0",
  "thiserror 2.0.21",
@@ -7308,7 +7308,7 @@ dependencies = [
 
 [[package]]
 name = "xime-setup"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "iced",
@@ -7316,6 +7316,7 @@ dependencies = [
  "rfd 0.15.4",
  "serde_json",
  "tracing",
+ "xime-config",
  "xime-setup-lib",
  "xime-speech-service",
  "zbus",
@@ -7378,7 +7379,7 @@ dependencies = [
 
 [[package]]
 name = "xime-tray"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "cosmic-text 0.12.1",
  "tiny-skia",
@@ -7389,7 +7390,7 @@ dependencies = [
 
 [[package]]
 name = "xime-ui"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "iced_renderer",
  "iced_tiny_skia",
@@ -7401,7 +7402,7 @@ dependencies = [
 
 [[package]]
 name = "xime-wayland"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "nix 0.29.0",
  "thiserror 2.0.21",
@@ -7416,7 +7417,7 @@ dependencies = [
 
 [[package]]
 name = "xime-xkb"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "thiserror 2.0.21",
  "tracing",

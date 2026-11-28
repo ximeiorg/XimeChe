@@ -1093,7 +1093,9 @@ impl WaylandLoop {
         if let Some(armed) = voice.ptt_arm {
             if now.duration_since(armed) >= PTT_HOLD_DELAY {
                 voice.ptt_arm = None;
-                if crate::speech::state() == crate::speech::SpeechState::Idle {
+                if crate::speech::enabled()
+                    && crate::speech::state() == crate::speech::SpeechState::Idle
+                {
                     debug!("Voice PTT start (right Ctrl held)");
                     // 按住 Ctrl 会顺带弹出字根窗（有候选时的既有特性），听写
                     // 期间它只是挡画面，一并收掉。
@@ -1252,7 +1254,7 @@ impl WaylandLoop {
         // 组合，撤销挂起、按键照常走；撑过 PTT_HOLD_DELAY 才真正开录（判定
         // 在 handle_active_state 的节拍里，见那里的注释）。修饰键本身**不
         // 消费**——应用必须收到 Ctrl 的按下/抬起，否则会留下"粘住的 Ctrl"。
-        if event.pressed && is_ptt_key(sym.raw()) {
+        if event.pressed && is_ptt_key(sym.raw()) && crate::speech::enabled() {
             if !modifiers.alt && !modifiers.shift && !modifiers.super_key {
                 voice.ptt_arm = Some(Instant::now());
                 debug!("Voice PTT armed (right Ctrl down)");
@@ -1268,7 +1270,10 @@ impl WaylandLoop {
         // 时由托盘菜单与 DBus `ToggleSpeech`（桌面自定义快捷键）覆盖。
         // 按下只发 Start、不做 toggle：按住期间 auto-repeat 会连发按下，
         // worker 侧对「已在听」是幂等的；否则第二次重复就会把它停掉。
-        if event.pressed && is_voice_toggle_hotkey(sym.raw(), &modifiers) {
+        if event.pressed
+            && crate::speech::enabled()
+            && is_voice_toggle_hotkey(sym.raw(), &modifiers)
+        {
             debug!("Voice PTT start (Ctrl+Alt+V)");
             voice.ptt_arm = None;
             crate::speech::press();

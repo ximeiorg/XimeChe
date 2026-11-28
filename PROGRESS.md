@@ -1,6 +1,31 @@
 # XimeChe（曦码·澈输入法）开发进度
 
 ## 当前状态
+**关闭语音总开关后 xime-speechd 会退出，不再常驻占内存（2026-11-28）。**
+
+之前总开关只影响设置页：关掉之后已经拉起的 `xime-speechd` 仍然常驻（进程 +
+装载着的 1–2 GB 权重），按住右 Ctrl 还会把它重新拉起来。
+
+- **speechd 自己盯开关**（libximecore `xime-speechd`）：启动时先读一次
+  `speech.toml`，关闭态直接退出、不建 socket；运行期每 2 秒复读一次，关闭就
+  `service.shutdown()`（停采集 + 卸引擎）→ 删 socket → 退出，与协议里的
+  `Request::Shutdown` 同一套收尾。配置缺失/损坏按「开启」处理，不会误杀。
+  新增 `--speech-config <path>`，daemon 与设置页拉起时都显式传。
+- **daemon 入口全部拦截**：`press()` / `toggle()` / PTT 250ms 判定 /
+  Ctrl+Alt+V 都先问 `speech_config::is_enabled()`；worker 每 120 ms 复查，
+  关闭时**静默**收掉当前会话（不弹错误、不上屏）并丢掉连接，重新打开后下一次
+  按下会重新拉起服务。
+- **设置页**：关闭态不拉起 speechd；拉起改为 3 秒冷却重试（原来只试一次，
+  「关闭 → 服务退出 → 再打开」之后永远连不上）；关闭总开关时先停试听再写
+  配置，避免误报「服务未运行」。
+- **dev-install.sh**：安装前 `pkill xime-speechd`，旧实例不会继续占内存。
+  注意 speechd 默认跳过重建，改了 libximecore 要 `XIME_SPEECH_REBUILD=1`。
+
+验证：`cargo test -p xime-speechd`（3 项：开关判定 / 参数解析 / --help）；
+真进程 e2e：起服务 → `enabled=false` → 2 秒内退出且 socket 已删；启动即关闭 →
+直接退出不建 socket；配置写坏 → 进程继续运行。XimeChe 侧
+`cargo test -p xime-daemon -p xime-setup`（99 项）与 clippy 全绿。
+
 **跨设备剪贴板 P2P：设备库落 xime.db、设置页显示在线状态（2026-11-26）。**
 
 libximecore `4622164..494da09` 把已配对设备从 `xime-p2p` 协议库搬进统一库

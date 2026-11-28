@@ -44,6 +44,9 @@ fi
 echo "Stopping existing xime processes..."
 pkill -9 xime-daemon 2>/dev/null || true
 pkill -9 xime-launcher 2>/dev/null || true
+# 语音服务也一起收掉：旧实例不认识「总开关关闭就退出」的新行为，留着会继续
+# 占内存；新实例由 daemon / 设置页在需要时按需拉起。
+pkill -9 xime-speechd 2>/dev/null || true
 sleep 1
 
 # Initialize git submodules (rime-wubi for data, libximecore for librime)
